@@ -2,7 +2,7 @@ import type { InvocationContext, Principal } from "./types.js";
 
 export type CapabilityRisk = "R0" | "R1" | "R2" | "R3";
 export type OperationKind = "center_read" | "telemetry_query" | "remote_probe" | "domain_change" | "long_running";
-export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table"; id: string; revision?: string | number }
+export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence"; id: string; revision?: string | number }
 export interface CapabilityLimits {
   timeoutMs: number;
   maxInputBytes: number;
@@ -49,6 +49,8 @@ const arrayOfRecords = { type: "array", items: record, maxItems: 10000 };
 const listOutput = (field: string, extra: Record<string, any> = {}) => data({
   [field]: arrayOfRecords, total: count, truncated: flag, next_offset: nullOr(count), ...extra,
 }, [field]);
+const pageOutput = data({ items: arrayOfRecords, total: count, offset: count, limit: count, has_more: flag },
+  ["items", "total", "offset", "limit", "has_more"]);
 const DEFAULT_LIMITS: CapabilityLimits = {
   timeoutMs: 15_000, maxInputBytes: 16 << 10, maxOutputBytes: 64 << 10, ratePerMinute: 120, concurrency: 4,
 };
@@ -126,7 +128,34 @@ const METADATA: Record<string, Metadata> = {
   },
   lightmoni_alerts_list: {
     id: "alerts.list", outputSchema: data({ rules: arrayOfRecords, limit: count }, ["rules", "limit"]),
-    risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [],
+    risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
+  },
+  lightmoni_alert_rules_list: {
+    id: "alerts.rules.list", outputSchema: pageOutput, risk: "R0", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
+  },
+  lightmoni_alert_rules_get: {
+    id: "alerts.rules.get", outputSchema: data({ rule: record }, ["rule"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", roles: ["admin", "member"],
+    targetResolver: input => input?.id ? [{ kind: "alert_rule", id: input.id }] : [],
+  },
+  lightmoni_alert_silences_list: {
+    id: "alerts.silences.list", outputSchema: pageOutput, risk: "R0", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
+  },
+  lightmoni_alert_silences_get: {
+    id: "alerts.silences.get", outputSchema: data({ silence: record }, ["silence"]), risk: "R0", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", roles: ["admin", "member"],
+    targetResolver: input => input?.id ? [{ kind: "alert_silence", id: input.id }] : [],
+  },
+  lightmoni_alert_groups_list: {
+    id: "alerts.groups.list", outputSchema: pageOutput, risk: "R0", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
+  },
+  lightmoni_alert_proposals_get: {
+    id: "alerts.proposals.get", outputSchema: data({ proposal: record }, ["proposal"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", roles: ["admin", "member"],
+    targetResolver: input => input?.id ? [{ kind: "proposal", id: input.id }] : [],
   },
 };
 

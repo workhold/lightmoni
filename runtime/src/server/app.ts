@@ -54,6 +54,7 @@ import { AlertCapabilities } from "../domains/alert-capabilities.js";
 import { CapabilityDispatcher, registerCapabilities } from "../capabilities/index.js";
 import { CapabilityAccess } from "../capabilities/access.js";
 import { TelemetryService } from "../domains/telemetry.js";
+import { AlertProposalService } from "../assistant/alert-proposals.js";
 import { McpAccess, registerMcpAccess, isMcpExternalURL } from "../mcp/access.js";
 import { registerMcpTransport } from "../mcp/transport.js";
 export interface Config {
@@ -188,6 +189,7 @@ export async function createApp(cfg: Config) {
     const alerts = registerAlerts(deps);
     modules.push(alerts);
     const alertCapabilities = new AlertCapabilities(alerts);
+    const alertProposals = new AlertProposalService(deps.db, alertCapabilities, deps.now, deps.encrypt, deps.decrypt);
     let mcpAccess: McpAccess | undefined;
     if (isMcpExternalURL(cfg.externalURL)) {
       mcpAccess = new McpAccess(deps);
@@ -200,13 +202,14 @@ export async function createApp(cfg: Config) {
     }
     const capabilityAccess = new CapabilityAccess(deps, mcpAccess);
     const telemetry = new TelemetryService(deps);
-    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, telemetry});
+    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, alertProposals, telemetry});
     registerCapabilities(deps, capabilities, capabilityAccess);
     if (mcpAccess) modules.push(registerMcpTransport(deps, mcpAccess, capabilities));
     modules.push(
       registerAssistant(deps, {
         machines: managedMachines,
         alerts: alertCapabilities,
+        alertProposals,
         deployments: serviceDeployments,
         operations,
         taskCenter,

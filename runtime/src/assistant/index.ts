@@ -74,6 +74,7 @@ export interface AssistantOptions {
   codeAllowedCommands?: string[];
   machines?: ManagedMachineStore;
   alerts?: AlertCapabilities;
+  alertProposals?: AlertProposalService;
   deployments?: ServiceDeploymentStore;
   operations?: OperationsStore;
   taskCenter?: TaskRunStore;
@@ -278,7 +279,7 @@ export function registerAssistant(
     return instrumentation;
   };
   const alertProposals = options.alerts
-    ? new AlertProposalService(deps.db, options.alerts, deps.now, deps.encrypt, deps.decrypt)
+    ? options.alertProposals ?? new AlertProposalService(deps.db, options.alerts, deps.now, deps.encrypt, deps.decrypt)
     : undefined;
   const taskProposals = options.taskProposals ?? (options.taskCenter ? new TaskProposalService(deps, options.taskCenter) : undefined);
   const tools =
@@ -301,7 +302,7 @@ export function registerAssistant(
         ...(instrumentation ? { instrumentation } : {}),
       }).filter(tool => !options.capabilities || !["list_tables", "describe_table", "run_query"].includes(tool.name)),
       ...(options.alerts && alertProposals
-        ? alertTools(options.alerts, alertProposals)
+        ? alertTools(options.alerts, alertProposals).filter(tool => !options.capabilities || !["list_alert_rules", "get_alert_rule", "list_alert_silences", "get_alert_silence", "list_alert_groups", "get_alert_proposal"].includes(tool.name))
         : []),
     ];
   if (
