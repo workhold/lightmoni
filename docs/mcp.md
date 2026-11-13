@@ -50,7 +50,7 @@ callback_port = 1455
 
 ## 首批工具
 
-告警模块启用时提供 45 个工具。默认任务通过任务目录读取，不另设模板目录。
+告警模块启用时提供 46 个工具。默认任务通过任务目录读取，不另设模板目录。
 
 | 工具 | scope | 行为 |
 | --- | --- | --- |
@@ -89,6 +89,7 @@ callback_port = 1455
 | `lightmoni_alert_incidents_list/get` | `alerts.incidents.read` | 告警事件安全摘要，或真实事件与值班时间线 |
 | `lightmoni_alert_deliveries_list` | `alerts.notifications.read` | 通知投递安全状态和关联，省略联系人、payload、供应商响应与原始错误 |
 | `lightmoni_alert_response_statistics_get` | `alerts.statistics.read` | 原值班响应统计、接手率/时长和筛选；不修改记录 |
+| `lightmoni_alerts_plan` | `alerts.propose` + `alerts.detail.read` | 告警规则/静默的审阅提案；包含详情但不提供 Apply/审批工具 |
 
 主机的 `name` 是用户配置的资产名称，`observed_hostname` 仅来自当前关联且未移除的 Agent；新 Agent 尚未上报时为空，不回退旧缓存。
 
@@ -112,4 +113,4 @@ callback_port = 1455
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-任务创建/修改也只创建提案，不能直接执行或自动批准。目前没有外部告警修改、服务部署/运维写工具、Agent 预检/安装/升级/卸载写工具、插桩生成/应用、code_task、自动批准、服务主体或持续授权。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。
+任务和告警创建/修改只创建提案，不能直接执行或自动批准。目前没有外部服务部署/运维写工具、Agent 预检/安装/升级/卸载写工具、插桩生成/应用、code_task、自动批准、服务主体或持续授权。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。

@@ -303,7 +303,7 @@ export function registerAssistant(
         ...(instrumentation ? { instrumentation } : {}),
       }).filter(tool => !options.capabilities || !["list_tables", "describe_table", "run_query", "list_services", "get_service_deployment", "get_service_deployment_events", "list_managed_machines", "get_managed_machine", "get_agent_installation", "list_agent_releases", "get_agent_update", "scan_sdk_instrumentation"].includes(tool.name)),
       ...(options.alerts && alertProposals
-        ? alertTools(options.alerts, alertProposals).filter(tool => !options.capabilities || !["list_alert_rules", "get_alert_rule", "list_alert_silences", "get_alert_silence", "list_alert_groups", "get_alert_proposal"].includes(tool.name))
+        ? alertTools(options.alerts, alertProposals).filter(tool => !options.capabilities || !["list_alert_rules", "get_alert_rule", "list_alert_silences", "get_alert_silence", "list_alert_groups", "get_alert_proposal", "propose_alert_change"].includes(tool.name))
         : []),
     ];
   if (
