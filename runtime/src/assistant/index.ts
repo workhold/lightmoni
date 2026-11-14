@@ -301,7 +301,7 @@ export function registerAssistant(
         ...(options.machines ? { machines: options.machines } : {}),
         ...(options.deployments ? { deployments: options.deployments } : {}),
         ...(instrumentation ? { instrumentation } : {}),
-      }).filter(tool => !options.capabilities || !["list_tables", "describe_table", "run_query", "list_services", "get_service_deployment", "get_service_deployment_events", "propose_service_deployment", "list_managed_machines", "get_managed_machine", "get_agent_installation", "list_agent_releases", "get_agent_update", "propose_agent_install", "scan_sdk_instrumentation"].includes(tool.name)),
+      }).filter(tool => !options.capabilities || !["list_tables", "describe_table", "run_query", "list_services", "get_service_deployment", "get_service_deployment_events", "propose_service_deployment", "list_managed_machines", "get_managed_machine", "get_agent_installation", "list_agent_releases", "get_agent_update", "propose_agent_install", "scan_sdk_instrumentation", "propose_sdk_instrumentation"].includes(tool.name)),
       ...(options.alerts && alertProposals
         ? alertTools(options.alerts, alertProposals).filter(tool => !options.capabilities || !["list_alert_rules", "get_alert_rule", "list_alert_silences", "get_alert_silence", "list_alert_groups", "get_alert_proposal", "propose_alert_change"].includes(tool.name))
         : []),
@@ -807,6 +807,14 @@ export function registerAssistant(
       ctx.json(result, 201);
     }, "cannot run code task"),
   );
+  deps.router.get(
+    "/api/v1/instrumentation-plans/:id",
+    safe((ctx) => {
+      const value = requireInstrumentation(ctx).read(ctx.params.id);
+      if (!value) throw new AssistantError(404, "instrumentation plan not found", "not_found");
+      ctx.json(value);
+    }, "cannot read instrumentation plan"),
+  );
   deps.router.post(
     "/api/v1/instrumentation-plans/:id/apply",
     safe(async (ctx) => {
@@ -834,6 +842,10 @@ export function registerAssistant(
           throw new AssistantError(409, "instrumentation plan revision is stale; scan again", "revision_conflict");
         if (message === "approval_required")
           throw new AssistantError(403, "administrator approval is required", "approval_required");
+        if (message === "authorization_revoked")
+          throw new AssistantError(403, "authorization_revoked", "authorization_revoked");
+        if (message === "authorization_unavailable")
+          throw new AssistantError(503, "authorization_unavailable", "authorization_unavailable");
         if (message === "invalid idempotency key" || message === "invalid instrumentation plan" || message === "invalid instrumentation operation" || message === "instrumentation plan has no changes" ||
           /workspace path is outside root|symbolic link|regular file|size limit|exceeds size limit/.test(message))
           throw new AssistantError(400, message, "invalid_input");

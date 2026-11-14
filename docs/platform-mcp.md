@@ -212,6 +212,10 @@ SDD 150 新增 operations.propose 与 lightmoni_operations_plan，复用 Operati
 
 SDD 151 新增 agents.maintain.propose 与 lightmoni_agent_installations_plan，复用 ManagedMachineStore 的 fresh check_id、固定版本/架构、主机 revision 和原生首装审阅页。外部计划与稳定 grant 同事务接受；原管理员 Apply 前复验 propose/read 和 machine_id 主机授权，撤销后不签发 enrollment、不执行 SSH。内部 propose_agent_install 统一 Dispatcher。SSH 预检、直接安装、审批、恢复、升级和卸载未开放。告警模块启用时共 49 个工具。
 
+SDD 153 新增 code.workspace.propose 与 lightmoni_code_instrumentation_plan，复用 InstrumentationService 的扫描、base_revision、Diff 和原生 Apply。加密计划、幂等与稳定 grant 在同一 SQLite 接受事务保存，request hash 不包含 base_revision；Apply 前复验外部授权，无绑定或撤销时文件不变。MCP 只返回 Diff 摘要和受保护 review_url，完整 Diff 由管理员读取；内部 propose_sdk_instrumentation 统一 Dispatcher。Apply/code_task 未开放为模型工具。告警模块启用时共 50 个工具。
+
+`runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影、提案幂等与稳定执行授权。任务、告警、部署、运维、Agent 首装和 SDK 插桩均可创建原生提案，管理员审批后由原领域执行；模型/MCP 无直接写、审批或通用执行权限。MCP、HTTP 能力接口及内置助手任务/遥测/告警事件与通知/日志/Trace/服务部署/运维/主机 Agent/大盘/插桩读取工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。表、遥测数据、日志、Trace、告警、服务部署、运维、大盘和中心工作区均没有主机级数据隔离，只允许全主机范围授权；告警接手/重试、部署回滚/取消、运维资源与 Schedule 写入、Agent 直接安装/升级/恢复/卸载、大盘和插桩 Apply/code_task 尚未开放。
+
 SDD 154 在既有 lightmoni_alerts_plan 增加 incident.ack，复用 AlertProposalService 和原 Alerts 接手事务。原生 acknowledge 拆分为只读预检与同步提交，提案绑定响应 generation、规则/责任组 revision 和 owner；审批后由原领域更新真实事件。incident.ack 额外要求 alerts.incidents.read，预览/结果省略证据与联系人，并返回受保护 review_url。转交、升级、续期、通知重试/测试未开放；工具总数保持 49。
 
 `runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影、提案幂等与稳定执行授权。任务、告警规则/静默/事件接手、部署、运维和 Agent 首装均可创建原生提案，管理员审批后由原领域执行；模型/MCP 无直接写、审批或通用执行权限。MCP、HTTP 能力接口及内置助手任务/遥测/告警事件与通知/日志/Trace/服务部署/运维/主机 Agent/大盘/插桩读取工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。表、遥测数据、日志、Trace、告警、服务部署、运维、大盘和中心工作区均没有主机级数据隔离，只允许全主机范围授权；告警转交/升级/续期/通知重试、部署回滚/取消、运维资源与 Schedule 写入、Agent 直接安装/升级/恢复/卸载、大盘和插桩写工具尚未开放。

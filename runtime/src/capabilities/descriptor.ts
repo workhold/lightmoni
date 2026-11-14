@@ -287,6 +287,11 @@ const METADATA: Record<string, Metadata> = {
     approvalPolicy: "none", idempotencyPolicy: "none",
     targetResolver: input => input?.plan_id ? [{kind:"instrumentation_plan",id:input.plan_id}] : [],
   },
+  lightmoni_code_instrumentation_plan: {
+    id: "code.instrumentation.plan", outputSchema: data({proposal:record,plan:record,applied:nullOr(record),idempotency_replayed:flag},["proposal","plan","applied"]),
+    risk: "R2", operationKind: "domain_change", approvalPolicy: "domain_native", idempotencyPolicy: "required_external",
+    targetResolver: () => [], additionalScopes: ["code.workspace.detail.read"],
+  },
   lightmoni_alert_incidents_list: {
     id: "alerts.incidents.list", outputSchema: pageOutput, risk: "R1", operationKind: "center_read",
     approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
