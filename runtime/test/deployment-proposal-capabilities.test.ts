@@ -40,6 +40,7 @@ test("external deployment plans preserve native review, idempotency and stable g
  const f=fixture();try{
   const created=await f.invoke("lightmoni_deployments_plan",input),proposal=created.data.proposal;assert.equal(proposal.status,"awaiting_approval");assert.equal(proposal.native_status,"awaiting_approval");assert.ok(proposal.review_url.startsWith("https://moni.example.test/"));
   assert.equal((await f.invoke("lightmoni_deployments_plan",input)).data.proposal.id,proposal.id);assert.equal((await f.invoke("lightmoni_deployments_plan",input)).data.plan.id,proposal.id);
+  const indexed=await f.invoke("lightmoni_domain_proposals_get",{id:`deployment:${proposal.id}`});assert.equal(indexed.data.proposal.status,"awaiting_approval");assert.equal(indexed.data.proposal.native_id,proposal.id);
   await assert.rejects(f.invoke("lightmoni_deployments_plan",{...input,reason:"changed"}),/idempotency_conflict/);
   assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_jobs")!.n,0);f.grants.assert("deployment",proposal.id);f.revoke();assert.throws(()=>f.grants.assert("deployment",proposal.id),/authorization_revoked/);
  }finally{await f.close();}

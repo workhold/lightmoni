@@ -49,6 +49,7 @@ test("external Agent installation plans preserve native review, idempotency and 
   assert.ok(proposal.review_url.startsWith("https://moni.example.test/machines?"));assert.equal(created.data.plan.review_url.startsWith("/machines?"),true);
   assert.deepEqual(f.counts(),before);assert.equal(f.db.get<any>("SELECT status FROM machine_deployments WHERE id=?",proposal.id).status,"awaiting_approval");
   const replay=await f.invoke("lightmoni_agent_installations_plan",f.input);assert.equal(replay.data.proposal.id,proposal.id);assert.equal(replay.data.idempotency_replayed,true);
+  const indexed=await f.invoke("lightmoni_domain_proposals_get",{id:`agent_installation:${proposal.id}`});assert.equal(indexed.data.proposal.status,"awaiting_approval");assert.equal(indexed.data.proposal.native_id,proposal.id);
   const defaults=await f.invoke("lightmoni_agent_installations_plan",{...f.input,runtime_mode:"root",initial_label_id:""});assert.equal(defaults.data.proposal.id,proposal.id);assert.equal(defaults.data.idempotency_replayed,true);
   await assert.rejects(f.invoke("lightmoni_agent_installations_plan",{...f.input,reason:"changed"}),/idempotency_conflict/);
   f.grants.assert("agent_installation",proposal.id);f.revoke();assert.throws(()=>f.grants.assert("agent_installation",proposal.id),/authorization_revoked/);

@@ -81,6 +81,7 @@ export const taskMetadata = ({ script, config: _config, ...task }: Task) => ({ .
 export class TaskProposalService {
   readonly nodes: NodeStore;
   constructor(readonly deps: Dependencies, readonly runs: TaskRunStore, readonly hooks: {
+    afterCreate?: (actor: Actor, source: ProposalSource, intent: Intent, proposal: Proposal) => void;
     beforeApply?: (actor: Actor, source: ProposalSource, intent: Intent, proposal: Proposal) => void;
     afterApply?: (actor: Actor, source: ProposalSource, intent: Intent, proposal: Proposal) => void;
   } = {}) {
@@ -125,7 +126,7 @@ export class TaskProposalService {
     return this.createFrom(actor, { source: "assistant", session_id: sessionID }, value);
   }
   createFrom(actor: Actor, source: ProposalSource, value: any): Proposal {
-    return convert(() => {
+    return convert(() => this.deps.db.transaction(() => {
       requireAdmin(actor);
       if (source.source === "assistant") id(source.session_id);
       if (source.source === "mcp" && !source.grant_id) throw new AssistantError(403, "缺少外部授权");
@@ -167,8 +168,9 @@ export class TaskProposalService {
       bounded(proposal, 512 << 10);
       const stored: Stored = { owner_id: actor.id, intent, fingerprint: digest(state), proposal, source: structuredClone(source) };
       this.deps.db.run("INSERT INTO assistant_task_proposals(id,owner_id,session_id,body) VALUES(?,?,?,?)", proposalID, actor.id, source.session_id ?? "", this.deps.encrypt(JSON.stringify(stored)));
+      this.hooks.afterCreate?.(actor, source, intent, proposal);
       return structuredClone(proposal);
-    });
+    }));
   }
   apply(actor: Actor, proposalID: string): Proposal {
     return convert(() => this.deps.db.transaction(() => {

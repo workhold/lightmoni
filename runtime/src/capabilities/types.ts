@@ -4,6 +4,7 @@ import type { CapabilityDefinition } from "./descriptor.js";
 
 export const CAPABILITY_SCOPES = [
   "hosts.read", "tasks.read", "tasks.source.read", "tasks.propose",
+  "proposals.read",
   "executions.read", "telemetry.catalog.read", "telemetry.query", "alerts.read", "alerts.detail.read",
   "logs.read", "traces.read",
   "deployments.read",

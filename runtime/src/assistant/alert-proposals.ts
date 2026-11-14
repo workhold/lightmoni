@@ -50,6 +50,9 @@ export interface AlertProposalSource {
 export interface AlertProposalAuthorization {
   beforeApply(actor: Actor, source: AlertProposalSource, change: AlertChange): void;
 }
+export interface AlertProposalIndexer {
+  afterCreate(actor: Actor, source: AlertProposalSource, change: AlertChange, proposal: AlertProposal): void;
+}
 const maxBytes = 48 << 10;
 const ttl = 15 * 60 * 1000;
 const operations: AlertOperation[] = ["delivery.retry", "incident.renew", "incident.escalate", "incident.transfer", "incident.ack", "rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"];
@@ -85,6 +88,7 @@ export function validateAlertIntent(value: any): asserts value is AlertIntent {
 /** Host-owned durable proposals. The model can create a proposal, never apply one. */
 export class AlertProposalService {
   private authorization?: AlertProposalAuthorization;
+  private indexer?: AlertProposalIndexer;
   constructor(
     private db: DB,
     private capabilities: AlertCapabilities,
@@ -96,6 +100,7 @@ export class AlertProposalService {
       CREATE TABLE IF NOT EXISTS assistant_alert_audit(proposal_id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,session_id TEXT NOT NULL,operation TEXT NOT NULL,target_id TEXT NOT NULL,applied_at TEXT NOT NULL,receipt TEXT NOT NULL);`);
   }
   useAuthorization(authorization: AlertProposalAuthorization): void { this.authorization = authorization; }
+  useProposalIndex(indexer: AlertProposalIndexer): void { this.indexer = indexer; }
   private load(actor: Actor, id: string): StoredProposal {
     const row = this.db.get<{ body: string }>("SELECT body FROM assistant_alert_proposals WHERE id=? AND owner_id=?", id, actor.id);
     if (!row) throw new AssistantError(404, "告警变更提案不存在", "alert_proposal_not_found");
@@ -160,6 +165,7 @@ export class AlertProposalService {
     return this.db.transaction(() => {
       const existing = replay(); if (existing) return existing;
       this.db.run("INSERT INTO assistant_alert_proposals(id,owner_id,session_id,body) VALUES(?,?,?,?)", proposal.id, actor.id, proposal.session_id, this.encrypt(encode(stored)));
+      this.indexer?.afterCreate(actor, source, change, proposal);
       if (idempotency) this.db.run("INSERT INTO capability_idempotency(installation_id,user_id,capability,key_hash,input_hash,proposal_id,created_at) VALUES(?,?,?,?,?,?,?)", idempotency.installationID, actor.id, idempotency.capability, keyHash, inputHash, proposal.id, this.now().toISOString());
       return clone(proposal);
     });

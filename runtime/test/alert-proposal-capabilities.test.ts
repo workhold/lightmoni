@@ -74,6 +74,7 @@ test("incident acknowledgement proposals preserve native state, safe previews an
   assert.equal((await f.invoke("lightmoni_alerts_plan",input)).data.proposal.id,proposal.id);await assert.rejects(f.invoke("lightmoni_alerts_plan",{...input,reason:"changed"}),/idempotency_conflict/);
   const applied=await f.proposals.apply(admin,proposal.id,new AbortController().signal);assert.equal(applied.status,"completed");assert.equal(alertsState(f),"acknowledged");assert.equal(f.alerts.response("incident-one").owner_id,"admin");assert.equal(JSON.stringify(applied).includes("private-evidence"),false);
   const read=await f.invoke("lightmoni_alert_incidents_get",{id:"incident-one"});assert.equal(read.data.incident.state,"acknowledged");
+  const indexed=await f.invoke("lightmoni_domain_proposals_get",{id:`alert:${proposal.id}`});assert.equal(indexed.data.proposal.status,"completed");assert.equal(indexed.data.proposal.native_id,proposal.id);
  }finally{await f.close();}
 });
 function alertsState(f:any){return f.alerts.response("incident-one").state;}
