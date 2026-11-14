@@ -55,6 +55,8 @@ import { CapabilityDispatcher, registerCapabilities } from "../capabilities/inde
 import { CapabilityAccess } from "../capabilities/access.js";
 import { TelemetryService } from "../domains/telemetry.js";
 import { AlertProposalService } from "../assistant/alert-proposals.js";
+import { LogReadService } from "../domains/log-read.js";
+import { TraceReadService } from "../domains/trace-read.js";
 import { McpAccess, registerMcpAccess, isMcpExternalURL } from "../mcp/access.js";
 import { registerMcpTransport } from "../mcp/transport.js";
 export interface Config {
@@ -185,7 +187,9 @@ export async function createApp(cfg: Config) {
     modules.push(connectExecutorObservations(deps,privilegedExecutors,ingest.internal.bind(ingest)));
     modules.push(agentCredentials);
     modules.push(registerDashboards(deps));
-    modules.push(registerLogs(deps));
+    const logs = registerLogs(deps);
+    modules.push(logs);
+    const logReads = new LogReadService(logs), traceReads = new TraceReadService(deps);
     const alerts = registerAlerts(deps);
     modules.push(alerts);
     const alertCapabilities = new AlertCapabilities(alerts);
@@ -202,7 +206,7 @@ export async function createApp(cfg: Config) {
     }
     const capabilityAccess = new CapabilityAccess(deps, mcpAccess);
     const telemetry = new TelemetryService(deps);
-    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, alertProposals, telemetry});
+    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, alertProposals, telemetry, logs:logReads, traces:traceReads});
     registerCapabilities(deps, capabilities, capabilityAccess);
     if (mcpAccess) modules.push(registerMcpTransport(deps, mcpAccess, capabilities));
     modules.push(

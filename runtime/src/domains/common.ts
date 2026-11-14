@@ -1,6 +1,6 @@
 import { parseJSON, stringifyJSON } from "../shared/json.js";
 import { randomBytes, randomUUID, createHash } from "node:crypto";
-import type { Context, Dependencies, Frame } from "../shared/types.js";
+import type { Context, Dependencies, Frame, QueryResponse } from "../shared/types.js";
 export const id = () => randomBytes(16).toString("hex");
 export const uuid = () => randomUUID();
 export const encode = (v: any) => stringifyJSON(v);
@@ -59,6 +59,15 @@ export const shiftTime = (s: string, milliseconds: number) =>
 export const unique = <T>(a: T[]) => [...new Set(a)];
 export const rowObject = (f: Frame, r: any[]) =>
   Object.fromEntries(f.columns.map((c, i) => [c.name, r[i]]));
+export function frameMaps(response: QueryResponse): {values: any[]; truncated: boolean} {
+  const values: any[] = []; let truncated = false;
+  for (const r of response.results) {
+    if (["error", "cancelled"].includes(r.status)) throw Error("现场查询失败");
+    truncated ||= r.truncated;
+    for (const f of r.frames) for (const row of f.rows) values.push(rowObject(f, row));
+  }
+  return { values, truncated };
+}
 export const bodies = (d: Dependencies, sql: string, ...params: any[]): any[] =>
   d.db
     .all<{

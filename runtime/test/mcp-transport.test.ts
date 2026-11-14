@@ -18,6 +18,9 @@ import { taskHelperFixture } from "./helpers/task-helper.js";
 import { Alerts } from "../src/domains/alerts.js";
 import { AlertCapabilities } from "../src/domains/alert-capabilities.js";
 import { AlertProposalService } from "../src/assistant/alert-proposals.js";
+import { Logs } from "../src/domains/logs.js";
+import { LogReadService } from "../src/domains/log-read.js";
+import { TraceReadService } from "../src/domains/trace-read.js";
 async function fixture(wrap?:(d:CapabilityDispatcher)=>CapabilityDispatcherContract){
  const db=new DB(":memory:"),router=new Router(),user={id:"admin",name:"Admin",role:"admin"};accountSchema(db);
  db.run("INSERT INTO users(id,name,role,active,created_at) VALUES(?,?,?,1,?)",user.id,user.name,user.role,new Date().toISOString());
@@ -118,6 +121,26 @@ test("alert read capabilities separate SQL details and proposals through the off
   assert.equal((await ordinaryClient.listTools()).tools.some(t=>t.name==="lightmoni_alert_rules_get"),false);
   const denied=await ordinaryClient.callTool({name:"lightmoni_alert_rules_get",arguments:{id:rule.id}});assert.equal(denied.isError,true);assert.equal((denied.structuredContent as any).error.detail_code,"capability_forbidden");
  }finally{await client?.close();await ordinaryClient?.close();await alerts.close();await f.close();}
+});
+test("log and trace capabilities share frozen reads through the official MCP client",async()=>{
+ let logs!:Logs;
+ const f=await fixture(d=>{
+  d.deps.cat.list=async()=>[
+   {id:"log_app",name:"log_app",logical_name:"app",kind:"log",columns:["event_id","event_time","service","body","severity"].map(name=>({name,type:"String"})),services:["api"],system:false,retention_days:null,effective_retention_days:7},
+   {id:"trace_app",name:"trace_app",logical_name:"trace",kind:"trace",columns:["event_id","event_time","service","trace_id","span_id","parent_span_id","name","start_time","end_time","duration_ns","status"].map(name=>({name,type:"String"})),services:["api"],system:false,retention_days:null,effective_retention_days:7}];
+  d.deps.query=async request=>request.source==="logs"?{request_id:"logs",results:request.queries.map(q=>({refId:q.refId,status:"success",complete:true,truncated:false,elapsed_ms:1,frames:[q.refId==="rows"?{columns:["event_id","event_time","service","body"].map(name=>({name,type:"String"})),rows:[["e0","2026-11-13T00:00:00Z","api","zero"],["e1","2026-11-13T00:00:01Z","api","one"]]}:{columns:[{name:"time",type:"String"}],rows:[]}]}))}:{request_id:"trace",results:[{refId:"trace",status:"success",complete:true,truncated:false,elapsed_ms:1,frames:[{columns:["span_id","parent_span_id","service","trace_id","name","start_time","end_time"].map(name=>({name,type:"String"})),rows:[["root","","api","trace-one","root","2026-11-13T00:00:00Z","2026-11-13T00:00:01Z"]]}]}]};
+  logs=new Logs(d.deps);return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,logs:new LogReadService(logs),traces:new TraceReadService(d.deps)});
+ });
+ const client=new Client({name:"log-trace-read",version:"1"});
+ try{
+  const key=f.access.createToken(f.user,{name:"Log Trace",scopes:["logs.read","traces.read"],host_ids:null});
+  await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
+  const tools=await client.listTools();assert.ok(tools.tools.some(t=>t.name==="lightmoni_logs_search"));assert.ok(tools.tools.some(t=>t.name==="lightmoni_traces_get"));
+  const range={from:"2026-11-13T00:00:00Z",to:"2026-11-14T00:00:00Z"},spec={table_id:"log_app",range,services:["api"]};
+  const first=await client.callTool({name:"lightmoni_logs_search",arguments:{spec,limit:1}}),data=(first.structuredContent as any).data;assert.equal(data.frame.rows[0][0],"e0");assert.equal(data.next_cursor,"1");
+  const second=await client.callTool({name:"lightmoni_logs_search",arguments:{session_id:data.session_id,cursor:"1",limit:1}});assert.equal((second.structuredContent as any).data.frame.rows[0][0],"e1");
+  const trace=await client.callTool({name:"lightmoni_traces_get",arguments:{trace_id:"trace-one",tables:["trace_app"],...range}});assert.equal((trace.structuredContent as any).data.spans.length,1);assert.equal((trace.structuredContent as any).data.incomplete,false);
+ }finally{await client.close();logs.close();await f.close();}
 });
 test("transport rejects wrong credentials, Origin, methods, versions, oversized and malformed messages",async()=>{
  const f=await fixture();try{

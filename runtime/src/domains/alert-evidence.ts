@@ -1,6 +1,7 @@
 import { parseJSON } from "../shared/json.js";
-import type { Context, Table, QueryResponse } from "../shared/types.js";
+import type { Context, Table } from "../shared/types.js";
 import type { Alerts } from "./alerts.js";
+import { TraceReadService } from "./trace-read.js";
 import {
   allowedResponse,
   validZone,
@@ -19,22 +20,9 @@ import {
   shiftTime,
   unique,
   validRange,
+  frameMaps,
 } from "./common.js";
 const ident = (s: string) => "`" + s.replaceAll("`", "``") + "`";
-export function frameMaps(response: QueryResponse): {
-  values: any[];
-  truncated: boolean;
-} {
-  const values: any[] = [];
-  let truncated = false;
-  for (const r of response.results) {
-    if (["error", "cancelled"].includes(r.status)) throw Error("现场查询失败");
-    truncated ||= r.truncated;
-    for (const f of r.frames)
-      for (const row of f.rows) values.push(rowObject(f, row));
-  }
-  return { values, truncated };
-}
 export function redactSnippet(s: string): string {
   const v = s.replace(
     /(authorization|password|access[_-]?token|secret|api[_-]?key)\s*[:=]\s*[^\s,;]+/gi,
@@ -225,79 +213,13 @@ export async function collectPendingEvidence(m: Alerts): Promise<void> {
   );
 }
 export async function traceDetail(m: Alerts, c: Context): Promise<void> {
-  const trace = c.params.trace_id;
-  if (!trace || bytes(trace) > 256) c.error(400, "无效的Trace ID");
-  const range = {
+  const result = await new TraceReadService(m.deps).get({
+    trace_id: c.params.trace_id,
+    tables: (c.url.searchParams.get("tables") ?? "").split(","),
     from: c.url.searchParams.get("from") ?? "",
     to: c.url.searchParams.get("to") ?? "",
-  };
-  guarded(c, () => validRange(range, 1));
-  const ids = (c.url.searchParams.get("tables") ?? "").split(",");
-  if (ids.length > 8 || !ids.length) c.error(400, "Trace数据表超限");
-  const tables = await m.deps.cat.list(c.signal),
-    spans: any[] = [];
-  let truncated = false;
-  for (const tid of ids) {
-    const table = tables.find((t) => t.id === tid && t.kind === "trace");
-    if (!table) c.error(400, "需要指定有效的Trace表");
-    const cols = [
-      "event_id",
-      "service",
-      "trace_id",
-      "span_id",
-      "parent_span_id",
-      "name",
-      "kind",
-      "start_time",
-      "end_time",
-      "duration_ns",
-      "status",
-      "attributes_json",
-      "events_json",
-    ].filter((n) => table!.columns.some((c) => c.name === n));
-    if (!cols.length) continue;
-    const data = await guardedAsync(
-      c,
-      async () =>
-        frameMaps(
-          await m.deps.query(
-            {
-              request_id: id(),
-              source: "interactive",
-              range,
-              interval_ms: 60000,
-              queries: [
-                {
-                  refId: "trace",
-                  sql: `SELECT ${cols.map(ident).join(",")} FROM ${ident(table!.name)} WHERE trace_id={trace_id:String} AND $__timeFilter(event_time) ORDER BY start_time,span_id LIMIT 2001`,
-                  params: { trace_id: { type: "String", value: trace } },
-                },
-              ],
-            },
-            c.signal,
-          ),
-        ),
-      502,
-    );
-    truncated ||= data.truncated || data.values.length > 2000;
-    for (const span of data.values.slice(0, 2000))
-      spans.push({ ...span, table_id: tid });
-  }
-  const known = new Set(spans.map((v) => v.span_id)),
-    missing = spans.filter(
-      (v) =>
-        v.parent_span_id &&
-        v.parent_span_id !== "0000000000000000" &&
-        !known.has(v.parent_span_id),
-    ).length;
-  c.json({
-    trace_id: trace,
-    spans,
-    truncated,
-    incomplete: missing > 0 || truncated || !spans.length,
-    missing_parents: missing,
-    ...range,
-  });
+  }, c.signal);
+  c.json(result);
 }
 export async function notifyResolved(m: Alerts): Promise<void> {
   const list = m.list(

@@ -2,7 +2,7 @@ import type { InvocationContext, Principal } from "./types.js";
 
 export type CapabilityRisk = "R0" | "R1" | "R2" | "R3";
 export type OperationKind = "center_read" | "telemetry_query" | "remote_probe" | "domain_change" | "long_running";
-export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence"; id: string; revision?: string | number }
+export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence" | "log" | "trace"; id: string; revision?: string | number }
 export interface CapabilityLimits {
   timeoutMs: number;
   maxInputBytes: number;
@@ -156,6 +156,24 @@ const METADATA: Record<string, Metadata> = {
     id: "alerts.proposals.get", outputSchema: data({ proposal: record }, ["proposal"]), risk: "R1", operationKind: "center_read",
     approvalPolicy: "none", idempotencyPolicy: "none", roles: ["admin", "member"],
     targetResolver: input => input?.id ? [{ kind: "proposal", id: input.id }] : [],
+  },
+  lightmoni_logs_search: {
+    id: "logs.search", outputSchema: data({ frame: record, histogram: record, histogram_truncated: flag,
+      session_id: {type:"string"}, next_cursor: {type:"string"}, total_loaded: count, truncated: flag,
+      expires_at: {type:"string"}, generated_at: {type:"string"}, range: record, sql: {type:"string"}, count_sql: {type:"string"},
+      histogram_sql: {type:"string"}, params: record, interval_ms: count, offset: count, scope: {type:"string"},
+      anchor_found: flag, capability_truncated: flag }, ["frame", "histogram", "session_id", "next_cursor", "total_loaded", "truncated", "offset", "capability_truncated"]),
+    risk: "R1", operationKind: "telemetry_query", approvalPolicy: "none", idempotencyPolicy: "none", roles: ["admin", "member"],
+    limits: {ratePerMinute: 30, concurrency: 2},
+    targetResolver: input => input?.spec?.table_id ? [{kind:"table", id:input.spec.table_id}] : [],
+  },
+  lightmoni_traces_get: {
+    id: "traces.get", outputSchema: data({ trace_id: {type:"string"}, spans: {type:"array",items:record,maxItems:16000}, truncated: flag,
+      incomplete: flag, missing_parents: count, from: {type:"string"}, to: {type:"string"} },
+      ["trace_id", "spans", "truncated", "incomplete", "missing_parents", "from", "to"]),
+    risk: "R1", operationKind: "telemetry_query", approvalPolicy: "none", idempotencyPolicy: "none", roles: ["admin", "member"],
+    limits: {ratePerMinute: 30, concurrency: 2},
+    targetResolver: input => Array.isArray(input?.tables) ? input.tables.map((id:string) => ({kind:"trace" as const,id})) : [],
   },
 };
 

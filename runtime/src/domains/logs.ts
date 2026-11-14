@@ -1,4 +1,5 @@
 import { parseJSON } from "../shared/json.js";
+import { fail } from "../shared/http.js";
 import type {
   Context,
   Dependencies,
@@ -305,107 +306,58 @@ export class Logs implements Module {
     this.sessions.set(s.id, s);
   }
   async search(c: Context) {
-    const req = await c.body<any>(),
-      limit = req.limit || 200;
-    if (!Number.isInteger(limit) || limit < 1 || limit > 1000)
-      c.error(400, "每页需要 1–1000 条");
-    let s: Session | undefined,
-      offset = 0;
+    const req = await c.body<any>();
+    c.json(await this.searchRead(req, c.user.id, c.signal));
+  }
+  async searchRead(req: any, ownerID: string, signal: AbortSignal) {
+    const limit = req.limit || 200;
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) fail(400, "每页需要 1–1000 条");
+    let s: Session | undefined, offset = 0;
+    const guardedRead = async (fn: () => Promise<any>, status = 400) => {
+      try { return await fn(); }
+      catch (error) { if ((error as any)?.status) throw error; fail(status, (error as Error).message); }
+    };
     if (req.session_id) {
       s = this.sessions.get(req.session_id);
-      if (!s || s.owner !== c.user.id || s.expires <= this.deps.now().getTime())
-        c.error(410, "查询会话已过期，请保留条件重新查询");
-      if (
-        !/^\d+$/.test(req.cursor ?? "") ||
-        Number(req.cursor) > s!.frame.rows.length
-      )
-        c.error(400, "无效页游标");
+      if (!s || s.owner !== ownerID || s.expires <= this.deps.now().getTime()) fail(410, "查询会话已过期，请保留条件重新查询");
+      if (!/^\d+$/.test(req.cursor ?? "") || Number(req.cursor) > s.frame.rows.length) fail(400, "无效页游标");
       offset = Number(req.cursor);
     } else {
-      const spec: LogSpec = req.spec,
-        b = await guardedAsync(c, () => this.compile(spec, c.signal)),
+      const spec: LogSpec = req.spec, b = await guardedRead(() => this.compile(spec, signal)),
         direction = spec.sort === "asc" ? "ASC" : "DESC",
         sql = `${b.sql} ORDER BY event_time ${direction},event_id ${direction} LIMIT 2001`,
         hist = `SELECT $__timeInterval(event_time) AS time,severity,count() AS count FROM (${b.sql}) GROUP BY time,severity ORDER BY time,severity`,
-        results = await guardedAsync(
-          c,
-          () =>
-            this.execute(
-              spec,
-              [
-                { refId: "rows", sql, params: b.params },
-                { refId: "histogram", sql: hist, params: b.params },
-              ],
-              c.signal,
-            ),
-          422,
-        );
-      if (results[0].frames.length !== 1 || results[1].frames.length !== 1)
-        c.error(502, "查询没有返回标准数据框架");
-      const h = freezeLogFrame(results[1].frames[0]),
-        f = freezeLogFrame(results[0].frames[0], (8 << 20) - h.bytes);
-      if (
-        !["event_id", "event_time", "service", "body"].every((n) =>
-          f.frame.columns.some((x) => x.name === n),
-        )
-      )
-        c.error(
-          400,
-          "日志 SQL 必须保留 event_id,event_time,service,body 等原始日志字段；聚合查询请使用 SQL 工作台",
-        );
+        results = await guardedRead(() => this.execute(spec, [
+          { refId: "rows", sql, params: b.params },
+          { refId: "histogram", sql: hist, params: b.params },
+        ], signal), 422);
+      if (results[0].frames.length !== 1 || results[1].frames.length !== 1) fail(502, "查询没有返回标准数据框架");
+      const h = freezeLogFrame(results[1].frames[0]), f = freezeLogFrame(results[0].frames[0], (8 << 20) - h.bytes);
+      if (!["event_id", "event_time", "service", "body"].every(n => f.frame.columns.some(x => x.name === n)))
+        fail(400, "日志 SQL 必须保留 event_id,event_time,service,body 等原始日志字段；聚合查询请使用 SQL 工作台");
       const now = this.deps.now().getTime();
       s = {
-        id: id(),
-        owner: c.user.id,
-        sql,
-        base: b.sql,
-        histogramSQL: hist,
-        params: b.params,
-        range: clone(spec.range),
-        frame: f.frame,
-        histogram: h.frame,
-        interval: logInterval(spec),
-        truncated: f.truncated || results[0].truncated,
-        histogramTruncated: h.truncated || results[1].truncated,
-        bytes: f.bytes + h.bytes,
-        created: now,
-        expires: now + 120000,
+        id: id(), owner: ownerID, sql, base: b.sql, histogramSQL: hist, params: b.params, range: clone(spec.range),
+        frame: f.frame, histogram: h.frame, interval: logInterval(spec), truncated: f.truncated || results[0].truncated,
+        histogramTruncated: h.truncated || results[1].truncated, bytes: f.bytes + h.bytes, created: now, expires: now + 120000,
       };
       this.keep(s);
     }
     let found = !req.anchor_id;
     if (req.anchor_id && !req.session_id) {
-      const n = s!.frame.rows.findIndex(
-        (row) => rowObject(s!.frame, row).event_id === req.anchor_id,
-      );
-      if (n >= 0) {
-        offset = Math.floor(n / limit) * limit;
-        found = true;
-      }
+      const n = s.frame.rows.findIndex(row => rowObject(s!.frame, row).event_id === req.anchor_id);
+      if (n >= 0) { offset = Math.floor(n / limit) * limit; found = true; }
     }
-    const end = Math.min(s!.frame.rows.length, offset + limit);
-    c.json({
-      frame: {
-        columns: s!.frame.columns,
-        rows: s!.frame.rows.slice(offset, end),
-      },
-      histogram: s!.histogram,
-      histogram_truncated: s!.histogramTruncated,
-      session_id: s!.id,
-      next_cursor: end < s!.frame.rows.length ? String(end) : "",
-      total_loaded: s!.frame.rows.length,
-      truncated: s!.truncated,
-      expires_at: stamp(new Date(s!.expires)),
-      generated_at: stamp(new Date(s!.created)),
-      range: s!.range,
-      sql: s!.sql,
-      count_sql: `SELECT count() AS value FROM (${s!.base})`,
-      histogram_sql: s!.histogramSQL,
-      params: s!.params,
-      interval_ms: s!.interval,
-      scope: "bounded_session; histogram_independent_range_aggregation",
-      anchor_found: found,
-    });
+    const end = Math.min(s.frame.rows.length, offset + limit);
+    return {
+      frame: { columns: s.frame.columns, rows: s.frame.rows.slice(offset, end) },
+      histogram: s.histogram, histogram_truncated: s.histogramTruncated, session_id: s.id,
+      next_cursor: end < s.frame.rows.length ? String(end) : "", total_loaded: s.frame.rows.length,
+      truncated: s.truncated, expires_at: stamp(new Date(s.expires)), generated_at: stamp(new Date(s.created)),
+      range: s.range, sql: s.sql, count_sql: `SELECT count() AS value FROM (${s.base})`,
+      histogram_sql: s.histogramSQL, params: s.params, interval_ms: s.interval, offset,
+      scope: "bounded_session; histogram_independent_range_aggregation", anchor_found: found,
+    };
   }
   async aggregate(c: Context) {
     const req = await c.body<any>(),
