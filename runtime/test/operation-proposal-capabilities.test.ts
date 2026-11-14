@@ -43,6 +43,7 @@ test("external operation plans preserve native review, safe metadata, idempotenc
   assert.ok(proposal.review_url.startsWith("https://moni.example.test/"));assert.equal(JSON.stringify(created).includes("private-body"),false);
   const replay=await f.invoke("lightmoni_operations_plan",input);assert.equal(replay.data.proposal.id,proposal.id);assert.equal(replay.data.idempotency_replayed,true);
   const indexed=await f.invoke("lightmoni_domain_proposals_get",{id:`operation:${proposal.id}`});assert.equal(indexed.data.proposal.status,"awaiting_approval");assert.equal(indexed.data.proposal.native_id,proposal.id);
+  const execution=await f.invoke("lightmoni_domain_executions_get",{id:`operation:${proposal.id}`});assert.equal(execution.data.execution.native_state,"awaiting_approval");
   await assert.rejects(f.invoke("lightmoni_operations_plan",{...input,reason:"changed"}),/idempotency_conflict/);
   assert.equal(f.db.get<any>("SELECT count(*) n FROM agent_jobs")!.n,0);f.grants.assert("operation",proposal.id);f.revoke();assert.throws(()=>f.grants.assert("operation",proposal.id),/authorization_revoked/);
  }finally{await f.close();}

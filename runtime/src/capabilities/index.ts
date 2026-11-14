@@ -19,6 +19,7 @@ import type { DashboardReadService } from "../domains/dashboard-read.js";
 import type { InstrumentationService } from "../assistant/instrumentation.js";
 import { ExecutionGrantRegistry } from "./execution-grants.js";
 import { ProposalIndex, type ProposalDomain, type ProposalIndexEntry } from "./proposal-index.js";
+import { ExecutionIndex, type ExecutionDomain, type ExecutionIndexEntry } from "./execution-index.js";
 import { capabilityDigest } from "./idempotency.js";
 import type { CapabilityAuthority, CapabilityDispatcherContract, CapabilitySummary, InvocationContext, Principal, SessionAuthority } from "./types.js";
 import { defineCapability, validateCapabilityRegistry, type CapabilityDefinition, type CapabilityDefinitionSeed } from "./descriptor.js";
@@ -62,6 +63,7 @@ function validate(value: any, s: any, depth = 0): void {
 export class CapabilityDispatcher implements CapabilityDispatcherContract {
   readonly proposals: TaskProposalService;
   readonly proposalIndex: ProposalIndex;
+  readonly executionIndex: ExecutionIndex;
   readonly definitions: CapabilityDefinition[];
   readonly installationID: string;
   private readonly limits = new Map<string,{start:number;count:number;active:number}>();
@@ -76,6 +78,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     this.installationID = existing?.id ?? randomUUID();
     if (!existing) deps.db.run("INSERT INTO capability_installation(id) VALUES(?)", this.installationID);
     this.proposalIndex = new ProposalIndex(deps);
+    this.executionIndex = new ExecutionIndex(deps);
     this.proposals = new TaskProposalService(deps, options.taskCenter, {
       afterCreate: (_actor, source, intent, proposal) => {
         const ids = intent.host_ids ?? (intent.task as any)?.host_ids;
@@ -163,6 +166,8 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       {name:"lightmoni_proposals_get",description:"Read proposal status and queued run references without script bodies or raw host output.",scope:"tasks.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:(p,i)=>this.proposalView(p,i.id)},
       {name:"lightmoni_domain_proposals_list",description:"List the caller's native proposals as safe cross-domain projections with refreshed status. Requires proposals.read plus each domain's scope and host grant.",scope:"proposals.read",effect:"read",inputSchema:schema({domain:{...string,enum:["task","alert","deployment","operation","agent_installation","instrumentation"]},state:{...string,enum:["awaiting_approval","completed"]},offset:page.offset,limit:page.limit}),execute:async(p,i)=>this.domainProposals(p,i)},
       {name:"lightmoni_domain_proposals_get",description:"Read one caller-owned native proposal projection by domain:native_id. Never approves or executes.",scope:"proposals.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:async(p,i)=>this.domainProposalGet(p,i.id)},
+      {name:"lightmoni_domain_executions_list",description:"List native cross-domain execution projections with real state. Requires executions.read plus each domain's scope and host grant.",scope:"executions.read",effect:"read",inputSchema:schema({domain:{...string,enum:["task","deployment","operation","agent_installation","agent_update"]},state:string,offset:page.offset,limit:page.limit}),execute:async(p,i)=>this.domainExecutions(p,i)},
+      {name:"lightmoni_domain_executions_get",description:"Read one native execution projection by domain:native_id. Queued/running/unknown are not success.",scope:"executions.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:async(p,i)=>this.domainExecutionGet(p,i.id)},
       {name:"lightmoni_executions_list",description:"List actual finite task execution receipts; state unknown is not success. Source, leases and output are omitted.",scope:"executions.read",effect:"read",inputSchema:schema({host_id:string,task_id:string,state:{...string,enum:["queued","running","succeeded","failed","cancelled","unknown"]},limit:{type:"integer",minimum:1,maximum:100}}),execute:(p,i)=>{
         if(p.host_ids!==null&&!i.host_id)fail(403,"host_id_required");if(i.host_id)this.host(p,i.host_id);
         return {executions:options.taskCenter.list({...i,limit:i.limit??30}).map(r=>this.execution(p,r)),output_omitted:true};
@@ -312,7 +317,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     return this.options.taskCenter.nodes.getTask(id);
   }
   private index(run:any) {
-    this.deps.db.run("INSERT INTO execution_index(id,domain,native_id,host_id,state,updated_at) VALUES(?,'task',?,?,?,?) ON CONFLICT(id) DO UPDATE SET state=excluded.state,updated_at=excluded.updated_at", "task:"+run.id,run.id,run.host_id,run.state,this.deps.now().toISOString());
+    this.executionIndex.refresh("task",run.id,run.host_id,run.state);
   }
   private execution(p:Principal,run:any) {
     this.authorize(p,"executions.read");
@@ -335,6 +340,42 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       ?this.execution(p,this.options.taskCenter.get(r.id)):{id:r.id,execution_id:"task:"+r.id};
     const safeResult=result?.runs?{runs:result.runs.map(runView)}:result?.host_id?runView(result):undefined;
     return {proposal:{id:v.id,operation:v.operation,task_id:v.task_id,run_id:v.run_id,status:v.status,expires_at:v.expires_at,applied_at:v.applied_at,review_url:this.review(v.review_url),...(safeResult?{result:safeResult}:{})}};
+  }
+  private domainExecution(p:Principal,entry:ExecutionIndexEntry):any {
+    this.authorize(p,"executions.read");
+    const domain=entry.domain,nativeID=entry.native_id;let hostID=entry.host_id,state=entry.state,review="";
+    if(domain==="task"){
+      const value=this.options.taskCenter.get(nativeID);hostID=value.host_id;this.host(p,hostID);state=value.state;
+      review=`/machines?tab=tasks&task_view=runs&host=${encodeURIComponent(hostID)}`;
+    }else if(domain==="deployment"){
+      this.authorize(p,"deployments.read",true);const value=this.options.deployments!.assistantDeployment(nativeID);state=value.status;hostID="";
+      review=`/services?service=${encodeURIComponent(value.service_id)}&deployment=${encodeURIComponent(nativeID)}`;
+    }else if(domain==="operation"){
+      this.authorize(p,"operations.read",true);const value=this.options.operations!.getRun(nativeID);state=value.state;review=value.review_url;hostID="";
+    }else if(domain==="agent_installation"){
+      this.authorize(p,"agents.read");const value=this.options.machines!.assistantDeployment(nativeID);hostID=value.machine_id;this.host(p,hostID);state=value.status;
+      review=`/machines?machine=${encodeURIComponent(hostID)}&deployment=${encodeURIComponent(nativeID)}`;
+    }else if(domain==="agent_update"){
+      this.authorize(p,"agents.read");this.host(p,hostID);const value=this.options.machines!.agentUpdates!.assistantGet(hostID,nativeID);state=value.status;review=value.review_url;
+    }else fail(404,"resource_not_found");
+    this.executionIndex.refresh(domain,nativeID,hostID,state);
+    return{execution_id:entry.id,domain,native_id:nativeID,native_state:state,host_id:hostID,review_url:this.review(review)};
+  }
+  private domainExecutions(p:Principal,input:any):any {
+    const raw=this.executionIndex.list(input.domain),views:any[]=[];
+    for(const entry of raw){try{views.push(this.domainExecution(p,entry));}catch(error){if(error instanceof HTTPError&&[403,404].includes(error.status))continue;throw error;}}
+    const filtered=input.state?views.filter(value=>value.native_state===input.state):views,offset=input.offset??0,limit=input.limit??30;
+    if(!Number.isInteger(offset)||offset<0||offset>100000||!Number.isInteger(limit)||limit<1||limit>50)fail(400,"invalid_input");
+    return{items:filtered.slice(offset,offset+limit),total:filtered.length,offset,limit,has_more:offset+limit<filtered.length||raw.length===5000,truncated:raw.length===5000};
+  }
+  private domainExecutionGet(p:Principal,id:string):any {
+    let entry=this.executionIndex.get(id);
+    if(!entry&&id.startsWith("agent_update:")){
+      const [machineID,updateID,...rest]=id.slice("agent_update:".length).split("/");
+      if(machineID&&updateID&&!rest.length){this.authorize(p,"agents.read");this.host(p,machineID);const value=this.options.machines!.agentUpdates!.assistantGet(machineID,updateID);
+        this.executionIndex.refresh("agent_update",`${machineID}/${updateID}`,machineID,value.status);entry=this.executionIndex.get(id);}
+    }
+    if(!entry)fail(404,"resource_not_found");return{execution:this.domainExecution(p,entry)};
   }
   private domainProposal(p:Principal,entry:ProposalIndexEntry):any {
     this.authorize(p,"proposals.read");
@@ -429,6 +470,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       const old=this.deps.db.get<{input_hash:string;proposal_id:string}>("SELECT input_hash,proposal_id FROM capability_idempotency WHERE installation_id=? AND user_id=? AND capability='lightmoni_deployments_plan' AND key_hash=?",this.installationID,p.user.id,keyHash);
       if(old){if(old.input_hash!==inputHash)fail(409,"idempotency_conflict");const previous=this.deploymentProposal({id:old.proposal_id});return {...previous,idempotency_replayed:true};}
       const plan=this.options.deployments!.assistantPlan({service_id:input.service_id,target_id:input.target_id,release_id:input.release_id},p.user.id);
+      this.executionIndex.refresh("deployment",plan.id,"",plan.status??"awaiting_approval");
       this.proposalIndex.link({domain:"deployment",nativeID:plan.id,capability:"lightmoni_deployments_plan",ownerID:p.user.id,source:p.source,
         operation:"deployment.create",status:"awaiting_approval",nativeState:plan.status??"awaiting_approval",reviewURL:`/services?service=${encodeURIComponent(plan.service_id)}&deployment=${encodeURIComponent(plan.id)}`,createdAt:plan.created_at});
       if(p.source==="mcp")this.options.executionGrants!.bind("deployment",plan.id,{grant_id:p.grant_id,user_id:p.user.id,source:p.source,reason:input.reason});
@@ -448,6 +490,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       const old=this.deps.db.get<{input_hash:string;proposal_id:string}>("SELECT input_hash,proposal_id FROM capability_idempotency WHERE installation_id=? AND user_id=? AND capability='lightmoni_operations_plan' AND key_hash=?",this.installationID,p.user.id,keyHash);
       if(old){if(old.input_hash!==inputHash)fail(409,"idempotency_conflict");return {...this.operationProposal({id:old.proposal_id}),idempotency_replayed:true};}
       const run=this.options.operations!.plan(input.resource_id,input.operation,input.input??{},p.user.id);
+      this.executionIndex.refresh("operation",run.id,"",run.state);
       this.proposalIndex.link({domain:"operation",nativeID:run.id,capability:"lightmoni_operations_plan",ownerID:p.user.id,source:p.source,
         operation:run.operation,status:"awaiting_approval",nativeState:run.state,reviewURL:run.review_url,createdAt:run.created_at});
       if(p.source==="mcp")this.options.executionGrants!.bind("operation",run.id,{grant_id:p.grant_id,user_id:p.user.id,source:p.source,reason:input.reason});
@@ -469,6 +512,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       if(old){if(old.input_hash!==inputHash)fail(409,"idempotency_conflict");return {...this.agentInstallationProposal({id:old.proposal_id}),idempotency_replayed:true};}
       const plan=this.options.machines!.assistantPlan(input.machine_id,{check_id:input.check_id,version:input.version,arch:input.arch,
         initial_label_id:input.initial_label_id,runtime_mode:input.runtime_mode},p.user.id);
+      this.executionIndex.refresh("agent_installation",plan.id,plan.machine_id,plan.status);
       this.proposalIndex.link({domain:"agent_installation",nativeID:plan.id,capability:"lightmoni_agent_installations_plan",ownerID:p.user.id,source:p.source,
         operation:"agent.install",status:"awaiting_approval",nativeState:plan.status,reviewURL:plan.review_url,hostID:plan.machine_id,createdAt:plan.created_at});
       if(p.source==="mcp")this.options.executionGrants!.bind("agent_installation",plan.id,{grant_id:p.grant_id,user_id:p.user.id,source:p.source,reason:input.reason});
@@ -560,7 +604,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   }
   /** Existing internal task tools retain their names but share the capability policy and receipts. */
   assistantTools() {
-    const map:Record<string,string>={list_tasks:"lightmoni_tasks_list",get_task:"lightmoni_tasks_get",list_task_runs:"lightmoni_executions_list",get_task_run:"lightmoni_executions_get",get_task_proposal:"lightmoni_proposals_get",list_domain_proposals:"lightmoni_domain_proposals_list",get_domain_proposal:"lightmoni_domain_proposals_get"};
+    const map:Record<string,string>={list_tasks:"lightmoni_tasks_list",get_task:"lightmoni_tasks_get",list_task_runs:"lightmoni_executions_list",get_task_run:"lightmoni_executions_get",get_task_proposal:"lightmoni_proposals_get",list_domain_proposals:"lightmoni_domain_proposals_list",get_domain_proposal:"lightmoni_domain_proposals_get",list_domain_executions:"lightmoni_domain_executions_list",get_domain_execution:"lightmoni_domain_executions_get"};
     const shared = Object.entries(map).map(([name,target])=>{
       const d=this.definitions.find(x=>x.name===target)!;
       return {name,description:d.description,schema:d.inputSchema,effect:"read" as const,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
