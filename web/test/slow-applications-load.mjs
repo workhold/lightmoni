@@ -8,6 +8,7 @@ import {createServer as createViteServer} from 'vite';
 const root=resolve(import.meta.dirname,'../..');
 let overviewReads=0;
 const overviewStarted=[];
+let mode='slow',manualReads=0;
 const now=new Date().toISOString();
 const fixture=createServer(async(req,res)=>{
  const path=new URL(req.url,'http://fixture').pathname.replace('/api/v1','');
@@ -15,8 +16,11 @@ const fixture=createServer(async(req,res)=>{
  if(path==='/ops/overview'){
   overviewReads++;
   overviewStarted.push(Date.now());
-  await delay(11_500);
-  res.end(JSON.stringify({resources:[{id:'app',kind:'application',name:'Slow app',revision:1,created_at:now,updated_at:now,spec:{service_name:'slow-app',role:'generic',deployment_mode:'manual',mode:'container',image:'example/app:1',deployments:[{cluster_id:'cluster',machine_ids:[]}]},status:{state:'configured',instances:[]}}],agents:[],machines:[],runs:[]}));
+  if(mode==='failure'){res.statusCode=503;res.end(JSON.stringify({error:'fixture_overview_failed'}));return}
+  const request=mode==='manual'?++manualReads:0;
+  await delay(mode==='slow'?11_500:request===1?700:0);
+  const name=mode==='slow'?'Slow app':request===1?'Stale app':'Fresh app';
+  res.end(JSON.stringify({resources:[{id:'app',kind:'application',name,revision:1,created_at:now,updated_at:now,spec:{service_name:'slow-app',role:'generic',deployment_mode:'manual',mode:'container',image:'example/app:1',deployments:[{cluster_id:'cluster',machine_ids:[]}]},status:{state:'configured',instances:[]}}],agents:[],machines:[],runs:[]}));
   return;
  }
  res.end(JSON.stringify(path==='/auth/me'||path==='/auth/profile'?{id:'qa',name:'QA',role:'admin',active:true}:{}));
@@ -32,12 +36,29 @@ try{
  const errors=[];page.on('pageerror',error=>errors.push(error.message));
  const started=Date.now();
  await page.goto('http://127.0.0.1:5212/applications',{waitUntil:'domcontentloaded'});
+ await delay(10_300);
+ await page.evaluate(()=>window.dispatchEvent(new Event('focus')));
  await expect(page.getByRole('article',{name:'Slow app'})).toBeVisible({timeout:17_000});
  const visibleAt=Date.now();
  console.log(JSON.stringify({overviewReads,requestsAt:overviewStarted.map(value=>value-started),visibleAt:visibleAt-started}));
  assert(overviewReads<=2&&overviewStarted.every(value=>value-overviewStarted[0]<10_000),'automatic refresh must not start while the initial request is unfinished');
+ mode='manual';
+ await page.getByRole('button',{name:'刷新'}).click();
+ await delay(80);
+ await page.getByRole('button',{name:'刷新'}).click();
+ await expect(page.getByRole('article',{name:'Fresh app'})).toBeVisible();
+ await delay(800);
+ await expect(page.getByRole('article',{name:'Stale app'})).toHaveCount(0);
+ mode='failure';
+ await page.getByRole('button',{name:'刷新'}).click();
+ await expect(page.getByText('fixture_overview_failed')).toBeVisible();
+ await expect(page.locator('.ant-spin-spinning')).toHaveCount(0);
+ mode='manual';
+ await page.getByRole('button',{name:'重试'}).click();
+ await expect(page.getByRole('article',{name:'Fresh app'})).toBeVisible();
+ await expect(page.getByText('fixture_overview_failed')).toHaveCount(0);
  assert.deepEqual(errors,[]);
- console.log('Slow 11.5-second overview completed without a polling overlap and showed the application card.');
+ console.log('Slow overview, polling/focus, explicit replacement, failure and retry completed.');
 }finally{
  await browser?.close();
  await vite.close();
