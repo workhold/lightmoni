@@ -859,7 +859,9 @@ SDD 150 将既有运维动作计划接入统一能力层：operations.propose �
 
 SDD 151 将 Agent 首装计划接入统一能力层：agents.maintain.propose 与 agents.read 同时必需，目标 machine_id 复用主机授权。外部 machine_deployments 计划、幂等与 agent_installation 稳定 grant 在同一 SQLite 事务保存；原管理员 Apply 在任何 enrollment/SSH 安装动作前复验 grant、Scope、当前账户和主机范围。内部 propose_agent_install 统一 Dispatcher，保持原计划结构且无外部绑定。fresh 预检、目标/凭据 revision、固定版本/架构、runtime/helper、恢复和 unknown 仍由原领域实现；未开放 SSH 预检、直接安装或后续生命周期工具。
 
-完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md) 和 [MCP 接入指南](mcp.md)。
+SDD 154 将告警事件接手纳入既有 AlertProposalService：incident.ack 额外要求 alerts.incidents.read，预览/结果只包含安全事件字段。原 Alerts.acknowledge 拆分为异步只读预检与同步 commitAcknowledge，保留规则 revision、责任组成员、响应 generation 和通知取消语义；提案审批后通过原 SQLite 事务更新真实事件，不复制状态机。外部提案返回受保护 review_url，转交、升级、续期和通知重试/测试仍不开放。
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 
