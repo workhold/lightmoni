@@ -21,7 +21,7 @@
 - `lightmoni_domain_executions_list/get` 支持 domain/state 过滤和有界分页，executions.read、领域 Scope 和 Host 授权生效；错误 Host 和缺 Scope 均不可见。
 - 官方 MCP 客户端读取真实 Task Run，native_state=queued、host_id=one；服务部署/运维/Agent 首装保持 awaiting_approval，Agent 维护 rolled_back 不映射为成功。
 - 内部助手、MCP 和会话 HTTP 复用同一索引，原任务专用执行查询保持兼容。
-- 工具总数由 51 增至 53；OpenAPI/Bearer、服务主体和持续授权未开放。
+- 工具总数由 52 增至 54；OpenAPI/Bearer、服务主体和持续授权未开放。
 
 ## 未验证与剩余范围
 

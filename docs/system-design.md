@@ -859,6 +859,8 @@ SDD 150 将既有运维动作计划接入统一能力层：operations.propose �
 
 SDD 151 将 Agent 首装计划接入统一能力层：agents.maintain.propose 与 agents.read 同时必需，目标 machine_id 复用主机授权。外部 machine_deployments 计划、幂等与 agent_installation 稳定 grant 在同一 SQLite 事务保存；原管理员 Apply 在任何 enrollment/SSH 安装动作前复验 grant、Scope、当前账户和主机范围。内部 propose_agent_install 统一 Dispatcher，保持原计划结构且无外部绑定。fresh 预检、目标/凭据 revision、固定版本/架构、runtime/helper、恢复和 unknown 仍由原领域实现；未开放 SSH 预检、直接安装或后续生命周期工具。
 
+SDD 153 将中心受限工作区的 SDK 插桩计划接入统一能力层：code.workspace.propose 与 code.workspace.detail.read 同时必需，外部加密计划、幂等和 instrumentation 稳定 grant 在同一 SQLite 接受事务保存，base_revision 仅作为目标快照而不进入 request hash。原生管理员 Apply 在 revision/文件写入前复验外部授权，无绑定或撤销时 fail closed；持久化实例不以内存缓存保留回滚后的幻影子计划。MCP 返回 Diff 摘要和受保护 review_url，完整 Diff 由管理员读取；内部 propose_sdk_instrumentation 统一 Dispatcher。原 InstrumentationService、Diff、原子 Apply 和恢复语义保持事实来源，未开放 Apply/code_task 模型工具。
+
 SDD 154 将告警事件接手纳入既有 AlertProposalService：incident.ack 额外要求 alerts.incidents.read，预览/结果只包含安全事件字段。原 Alerts.acknowledge 拆分为异步只读预检与同步 commitAcknowledge，保留规则 revision、责任组成员、响应 generation 和通知取消语义；提案审批后通过原 SQLite 事务更新真实事件，不复制状态机。外部提案返回受保护 review_url，转交、升级、续期和通知重试/测试仍不开放。
 
 SDD 155 将告警事件转交纳入同一提案路径：Alert API 的转交和分页重置提取为 Alerts.prepareTransfer/commitTransfer/resetPaging，保持原错误状态、有效组成员和通知取消语义。incident.transfer 额外要求 incidents.read，目标为当前有效组成员；审批后事件 unclaimed、owner 清空、stage=fallback 并等待目标成员接手，不把转交预览或完成当成对方已接手。升级、续期和通知重试/测试仍不开放。
@@ -874,6 +876,9 @@ SDD 159 开始 Slice 4，新增 capability_proposals 安全投影及 domain prop
 SDD 160 扩展 execution_index 为跨领域执行投影，新增 domain executions list/get，覆盖 Task Run、Deployment、Operation Run、Agent 首装和维护。读取时按 executions.read、领域 Scope 和 Host 过滤并刷新 native_state/review_url，不把 queued/running/unknown/rolled_back 映射为成功。历史未索引记录不保证全部回填；OpenAPI/Bearer、服务主体和持续授权未完成。
 
 完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md)、[SDD 156](../specs/156-alert-escalation-proposal-capability-write/spec.md)、[SDD 157](../specs/157-alert-renewal-proposal-capability-write/spec.md)、[SDD 158](../specs/158-alert-delivery-retry-proposal-capability-write/spec.md)、[SDD 159](../specs/159-cross-domain-proposal-index/spec.md)、[SDD 160](../specs/160-cross-domain-execution-index/spec.md) 和 [MCP 接入指南](mcp.md)。
+
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 153](../specs/153-instrumentation-proposal-capability-write/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md)、[SDD 156](../specs/156-alert-escalation-proposal-capability-write/spec.md)、[SDD 157](../specs/157-alert-renewal-proposal-capability-write/spec.md)、[SDD 158](../specs/158-alert-delivery-retry-proposal-capability-write/spec.md)、[SDD 159](../specs/159-cross-domain-proposal-index/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 
