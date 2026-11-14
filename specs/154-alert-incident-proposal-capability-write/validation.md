@@ -29,4 +29,4 @@
 
 官方 MCP SDK 隔离 E2E 不等于真实 Codex/Claude OAuth、自然语言或生产环境验收；本轮未执行这些验证。其他值班动作、Agent 后续生命周期、服务回滚/核验、SDD 153 插桩 PR 和 Slice 4 仍需独立处理。
 
-交付状态：实现与验证完成，等待 PR 评审；未获本轮合并授权，不自动合并。
+交付 PR：[workhold/lightmoni#209](https://github.com/workhold/lightmoni/pull/209)，目标为 main；实现与验证完成，等待评审，未获本轮合并授权。
