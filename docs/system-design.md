@@ -851,6 +851,8 @@ SDD 148 将告警规则/静默提案扩展到 MCP/HTTP：AlertProposalService �
 
 SDD 149 新增部署计划提案和 ExecutionGrantRegistry：deployment 与稳定 grant 关联，审批事务及中心 SSH 派发前复验 deployments.propose/read，撤销后未开始 Job fail closed。内部 propose_service_deployment 统一 Dispatcher；proposal completed 只表示审批接受，真实执行仍以部署/Job/SSH 回执为准。回滚、取消、上传和直接执行未开放。
 
+SDD 150 将既有运维动作计划接入统一能力层：operations.propose 与 operations.read 同时必需，外部 Run 在同一 SQLite 事务中绑定 operation/native_id 与稳定 grant。OperationsStore.approve 在创建 Job 前复验，中心 privileged SSH 派发在获取主机租约前按 agent_jobs.operation_id 再复验；授权撤销只失败关闭尚未开始项，不重放 unknown。内部 propose_operations_action 统一 Dispatcher 且保留 `{run}` 安全元数据，无外部绑定。原生 OperationsStore、审批、Agent Job 和恢复状态机保持事实来源，未开放资源/Schedule 写入、MCP 审批、取消、触发或直接执行。
+
 完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134](../specs/134-capability-core-decoupling/spec.md)、[SDD 135](../specs/135-capability-descriptor-contracts/spec.md)、[SDD 136](../specs/136-telemetry-capability-read/spec.md)、[SDD 137](../specs/137-alert-capability-read/spec.md)、[SDD 138](../specs/138-log-trace-capability-read/spec.md)、[SDD 139](../specs/139-deployment-capability-read/spec.md)、[SDD 140](../specs/140-operation-capability-read/spec.md)、[SDD 141](../specs/141-host-agent-capability-read/spec.md)、[SDD 142](../specs/142-dashboard-capability-read/spec.md)、[SDD 144](../specs/144-instrumentation-capability-read/spec.md)、[SDD 145](../specs/145-alert-operations-capability-read/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知

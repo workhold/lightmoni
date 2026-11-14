@@ -3,6 +3,7 @@ import { fail, HTTPError } from "../shared/http.js";
 import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import type { AgentJobStore } from "./agent-jobs.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
+import type { ExecutionGrantRegistry } from "../capabilities/execution-grants.js";
 import type { OperationDefinition, OperationPayload, OperationResource, OperationsStore } from "../operations/types.js";
 import { assertAgentActive, createAgentLifecycleSchema } from "./agent-lifecycle.js";
 
@@ -17,7 +18,7 @@ const redact = (value: any): any => Array.isArray(value) ? value.map(redact) : v
   ? Object.fromEntries(Object.entries(value).map(([k, v]) => [k, /private_key|password|secret|token|credential/i.test(k) ? "[redacted]" : redact(v)]))
   : typeof value === "string" && /-----BEGIN.*PRIVATE KEY/.test(value) ? "[redacted]" : value;
 
-export function registerOperations(deps: Dependencies, options: { jobs: AgentJobStore; credentials: AgentCredentialStore; definitions: OperationDefinition[] }): Module & OperationsStore {
+export function registerOperations(deps: Dependencies, options: { jobs: AgentJobStore; credentials: AgentCredentialStore; definitions: OperationDefinition[]; executionGrants?: ExecutionGrantRegistry }): Module & OperationsStore {
   const { db, router } = deps, definitions = new Map(options.definitions.map(d => [d.kind, d]));
   createAgentLifecycleSchema(db);
   db.exec(`CREATE TABLE IF NOT EXISTS ops_resources(
@@ -94,6 +95,7 @@ export function registerOperations(deps: Dependencies, options: { jobs: AgentJob
       return db.transaction(() => {
         const r = runRow(key), resource = raw(r.resource_id);
         if (r.job_id) return runView(r);
+        options.executionGrants?.assert("operation", key);
         if (r.state !== "awaiting_approval" || Date.parse(r.expires_at) <= deps.now().getTime()) fail(409, "operations_plan_expired_or_closed");
         if (revision !== Number(r.resource_revision) || revision !== Number(resource.revision)) fail(409, "operations_revision_conflict");
         const pending = db.get<any>("SELECT id FROM ops_runs WHERE resource_id=? AND id<>? AND state IN ('queued','leased','accepted','staging','activating','verifying')", resource.id, key);

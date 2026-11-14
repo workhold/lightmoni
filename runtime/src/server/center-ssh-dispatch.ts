@@ -33,6 +33,10 @@ export function registerCenterSSHDispatch(deps:Dependencies,access:MachineTermin
         const linked=db.get<{deployment_id:string}>('SELECT deployment_id FROM agent_jobs WHERE id=?',job.id);
         if(linked?.deployment_id)executionGrants?.assert('deployment',linked.deployment_id);
       }
+      if(job.kind==='privileged'&&executionGrants){
+        const linked=db.get<{operation_id:string}>('SELECT operation_id FROM agent_jobs WHERE id=?',job.id);
+        if(linked?.operation_id)executionGrants.assert('operation',linked.operation_id);
+      }
       const supported=job.kind==='ordinary'?jobs.supportsSSHOnce(db.get<{agent_id:string}>('SELECT agent_id FROM managed_machines WHERE id=?',job.machine_id)?.agent_id??'')
         :executors.supportsSSHOnce(job.machine_id,job.kind==='task'?'task-once':'managed-once');
       if(!supported){failQueued(job,'agent_upgrade_required');return;}
