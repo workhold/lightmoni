@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:20261113-6e9cead-agent-upgrade-v1
+    image: docker.heyphp.com/lightmoni/lightmoni:20261114-eb1690b
     pull_policy: missing
     build:
       context: .
