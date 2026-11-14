@@ -1496,6 +1496,28 @@ export class Alerts implements Module {
     return this.commitRenew(key, actor);
   }
 
+  prepareDeliveryRetry(key: string, confirmPossibleDuplicate: boolean): any {
+    const row = this.deps.db.get<{body:string;status:string}>("SELECT body,status FROM alert_outbox WHERE id=?", key);
+    if (!row) throw new HTTPError(404, "notification not found");
+    if (!["failed", "unknown", "expired"].includes(row.status)) throw new HTTPError(409, "only failed/unknown/expired tasks can retry");
+    if (row.status === "unknown" && !confirmPossibleDuplicate) throw new HTTPError(409, "重试可能重复发送，请明确确认");
+    return parseJSON(row.body);
+  }
+
+  commitDeliveryRetry(key: string, confirmPossibleDuplicate: boolean): any {
+    let value: any;
+    this.deps.db.transaction(() => {
+      value = this.prepareDeliveryRetry(key, confirmPossibleDuplicate);
+      Object.assign(value, { status: "queued", attempts: 0, error: "", next_attempt: stamp(this.now()), created_at: stamp(this.now()) });
+      this.updateDelivery(value);
+    });
+    return value;
+  }
+
+  retryDelivery(key: string, confirmPossibleDuplicate: boolean): any {
+    return this.commitDeliveryRetry(key, confirmPossibleDuplicate);
+  }
+
   prepareEscalate(key: string, actor: {id:string;role:string}): void {
     const r = this.response(key);
     if (!r) throw new HTTPError(404, "事件不存在");

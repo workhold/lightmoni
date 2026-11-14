@@ -15,6 +15,7 @@ export interface AlertIntent {
   silence?: Record<string, any>;
   until?: string;
   user_id?: string;
+  confirm_possible_duplicate?: boolean;
   reason: string;
 }
 export interface AlertProposal {
@@ -51,27 +52,29 @@ export interface AlertProposalAuthorization {
 }
 const maxBytes = 48 << 10;
 const ttl = 15 * 60 * 1000;
-const operations: AlertOperation[] = ["incident.renew", "incident.escalate", "incident.transfer", "incident.ack", "rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"];
+const operations: AlertOperation[] = ["delivery.retry", "incident.renew", "incident.escalate", "incident.transfer", "incident.ack", "rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"];
 export { publicAlertValue } from "../domains/alert-read.js";
 function bounded(value: unknown): void {
   if (bytes(encode(value)) > maxBytes)
     throw new AssistantError(400, "告警配置过大，请缩小变更范围", "alert_change_too_large");
 }
 export function validateAlertIntent(value: any): asserts value is AlertIntent {
-  object(value, ["operation", "target_id", "patch", "silence", "until", "user_id", "reason"], ["operation", "reason"]);
+  object(value, ["operation", "target_id", "patch", "silence", "until", "user_id", "confirm_possible_duplicate", "reason"], ["operation", "reason"]);
   bounded(value);
   if (!operations.includes(value.operation) || !text(value.reason).trim() || text(value.reason).length > 1000)
     throw new AssistantError(400, "请提供有效的告警操作和变更原因", "invalid_alert_change");
   if (value.operation !== "silence.create" && (typeof value.target_id !== "string" || !value.target_id.trim() || value.target_id.length > 128))
     throw new AssistantError(400, "请先查询并指定准确的目标 ID", "invalid_alert_change");
-  const permitted = value.operation === "incident.transfer" ? "user_id" : value.operation === "rule.update" || value.operation === "silence.update" ? "patch" : value.operation === "silence.create" ? "silence" : value.operation === "rule.silence" ? "until" : undefined;
-  for (const field of ["patch", "silence", "until", "user_id"])
+  const permitted = value.operation === "delivery.retry" ? "confirm_possible_duplicate" : value.operation === "incident.transfer" ? "user_id" : value.operation === "rule.update" || value.operation === "silence.update" ? "patch" : value.operation === "silence.create" ? "silence" : value.operation === "rule.silence" ? "until" : undefined;
+  for (const field of ["patch", "silence", "until", "user_id", "confirm_possible_duplicate"])
     if (field !== permitted && value[field] !== undefined)
       throw new AssistantError(400, "变更字段与操作类型不符", "invalid_alert_change");
   if (permitted === "until" && typeof value.until !== "string")
     throw new AssistantError(400, "静默结束时间必须为 RFC3339，解除时填写空字符串", "invalid_alert_change");
   if (permitted === "user_id" && (typeof value.user_id !== "string" || !value.user_id.trim() || value.user_id.length > 128))
     throw new AssistantError(400, "请指定有效的转交成员 ID", "invalid_alert_change");
+  if (permitted === "confirm_possible_duplicate" && value.confirm_possible_duplicate !== undefined && typeof value.confirm_possible_duplicate !== "boolean")
+    throw new AssistantError(400, "重复发送确认必须为布尔值", "invalid_alert_change");
   if (permitted === "patch" || permitted === "silence") {
     const v = value[permitted];
     if (!v || typeof v !== "object" || Array.isArray(v) || !Object.keys(v).length)
@@ -130,7 +133,8 @@ export class AlertProposalService {
     };
     const existing = replay(); if (existing) return existing;
     let input: any;
-    if (["incident.ack", "incident.transfer", "incident.escalate", "incident.renew"].includes(intent.operation)) input = { id: intent.target_id, ...(intent.operation === "incident.transfer" ? { user_id: intent.user_id } : {}) };
+    if (intent.operation === "delivery.retry") input = { id: intent.target_id, confirm_possible_duplicate: intent.confirm_possible_duplicate === true };
+    else if (["incident.ack", "incident.transfer", "incident.escalate", "incident.renew"].includes(intent.operation)) input = { id: intent.target_id, ...(intent.operation === "incident.transfer" ? { user_id: intent.user_id } : {}) };
     else if (intent.operation.startsWith("rule.")) {
       const current = this.capabilities.getRule(actor, intent.target_id!);
       input = { id: current.id, revision: current.revision, ...(intent.operation === "rule.update" ? { patch: intent.patch } : { until: intent.until }) };
