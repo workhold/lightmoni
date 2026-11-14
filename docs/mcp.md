@@ -48,6 +48,32 @@ callback_port = 1455
 
 选择 OAuth 时不要再同时设置 PAT。OAuth 授权可以在 MCP 接入页撤销；刷新凭据轮换，旧授权码或刷新凭据被重放会撤销对应 grant。短期 access token 到期只影响新 HTTP 请求，不取消已批准长任务。真实客户端验收范围见 SDD 047，不以自动化 HTTP 测试声称所有版本开箱即用。
 
+## 服务主体与固定只读自动化
+
+管理员可在 Web 会话内通过 `POST /api/v1/mcp-access/service-accounts` 创建独立服务主体，通过 `GET /api/v1/mcp-access` 查看自己创建的安全元数据，通过 `DELETE /api/v1/mcp-access/service-accounts/<服务 ID>` 撤销。当前提供管理 API，未新增服务主体前端管理页面；这些端点不是 MCP 工具，服务凭据不能调用它们自我提权。
+
+创建时必须明确 `capabilities`、`host_ids`、`expires_in_hours` 和 `max_invocations`。每项能力绑定工具名和 `version: 1`，可用 `input` 指定递归固定子集，例如：
+
+```json
+{
+  "name": "inventory-reader",
+  "capabilities": [
+    { "name": "lightmoni_hosts_list", "version": 1, "input": { "limit": 20 } }
+  ],
+  "host_ids": ["<已登记主机 ID>"],
+  "expires_in_hours": 24,
+  "max_invocations": 1000
+}
+```
+
+`host_ids: null` 表示管理员明确授权全部已登记主机，数组是封闭范围，省略该字段不会获得隐式全主机权限。规则中的对象字段和值必须匹配，数组和标量整体相等；未固定字段仍须通过工具 Schema、Scope、Host、目标和输出安全投影，不能传入 SQL、脚本或模板。
+
+首版仅允许描述符标记为 `read + center_read`、风险 `R0/R1` 且同时向 MCP/HTTP 曝光的能力。`propose`、直接执行、远程探测、审批、凭据管理、任意 SQL/Shell 和持续写授权均不允许。服务策略不可编辑，需要变化时撤销并新建。
+
+创建响应仅一次返回独立服务 Bearer，保存到受保护凭据存储后可用于相同 MCP 地址或普通 Capability HTTP。服务 ID 不是个人用户 ID，审计和限流均按服务主体隔离；Owner 必须持续保持有效管理员。撤销、到期、Owner 降权/停用、版本漂移、越界输入或 Host 都会失败关闭。
+
+总调用预算在 Schema、Host 和限流检查后、领域执行前原子扣减。工具发现和拒绝请求不扣减；扣减后的失败、取消或中断不退款，预算耗尽返回 `detail_code=automation_budget_exhausted`。预算计数只是已接纳调用次数，不代表业务成功。
+
 ## 首批工具
 
 告警模块启用时提供 54 个工具。默认任务通过任务目录读取，不另设模板目录。
@@ -111,7 +137,7 @@ callback_port = 1455
 
 返回 `data.proposal.review_url` 后到平台审阅。审批绑定当时任务、目标和状态；有变化需要重新生成。批准派发表示进入队列，使用返回的 run ID 或 `task:<run ID>` 查询实际结果。`queued`/`running`/`unknown` 不能报告成功，取消须以远端停止回执为准。断线后使用同一业务键和内容重试；修改内容需新键。同键不同内容冲突，不自动重新派发。
 
-普通程序可在平台登录会话内使用 `GET /api/v1/capabilities` 和 `POST /api/v1/capabilities/<工具名>/invoke`，也可使用现有 PAT/OAuth Bearer，复用同一 Principal、Scope、Host 和审计策略。`GET /api/v1/openapi.json` 返回当前主体可见的 OpenAPI 3.1 文档，不需要模拟 MCP。
+普通程序可在平台登录会话内使用 `GET /api/v1/capabilities` 和 `POST /api/v1/capabilities/<工具名>/invoke`，也可只使用现有 PAT/OAuth或服务主体 Bearer、无需 Web Cookie，复用同一 Principal、Scope、Host 和审计策略。`GET /api/v1/openapi.json` 返回当前主体可见的 OpenAPI 3.1 文档，不需要模拟 MCP。无凭据请求失败关闭；Web 会话写调用继续校验 Origin。
 
 运维提案使用 `lightmoni_operations_plan`，输入 `resource_id`、领域允许的 `operation`、结构化 `input`、原因和稳定幂等键。它只创建 `awaiting_approval` 的原生 Run，不直接执行；管理员仍在原页面审批。审批后的 `queued`、实际执行和 `unknown` 均通过 Run 查询，不能报告为成功。
 
@@ -135,8 +161,8 @@ SDK 插桩提案使用 `lightmoni_code_instrumentation_plan`，返回 Diff 摘�
 
 ## 部署条件与当前边界
 
-设置 `LIGHTMONI_EXTERNAL_URL` 为可信 HTTPS origin（不带路径、查询、凭据），本机调试可用 loopback HTTP。未满足时仅 MCP、PAT/OAuth 和外部授权管理禁用；统一能力层、会话鉴权的能力 HTTP 与内部助手共享工具继续运行。尚未完成的 MCP 来源提案在授权适配器缺失时拒绝批准；已有外部排队项和自动重试继续绑定原稳定授权，领取前无法复验则拒绝开始。内部助手提案仍可按原人工审批流程处理。代理需保留 Authorization 与 JSON 响应，不缓存授权与工具结果。服务无协议会话，不要求粘性路由或持久 SSE。
+设置 `LIGHTMONI_EXTERNAL_URL` 为可信 HTTPS origin（不带路径、查询、凭据），本机调试可用 loopback HTTP。未满足时仅 MCP、PAT/OAuth/服务主体和外部授权管理禁用；统一能力层、会话鉴权的能力 HTTP 与内部助手共享工具继续运行。尚未完成的 MCP 来源提案在授权适配器缺失时拒绝批准；已有外部排队项和自动重试继续绑定原稳定授权，领取前无法复验则拒绝开始。内部助手提案仍可按原人工审批流程处理。代理需保留 Authorization 与 JSON 响应，不缓存授权与工具结果。服务无协议会话，不要求粘性路由或持久 SSE。
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-任务、告警规则/静默/事件值班与通知重试、部署、运维、Agent 首装和 SDK 插桩计划由 AI/MCP 创建提案，管理员在原页面审批后由原领域服务执行真实写入或动作；AI/MCP 不能直接执行或自动批准。通知测试、部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent SSH 预检/直接安装/升级/恢复/卸载工具、插桩 Apply/code_task、服务主体或持续授权仍未开放。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。
+任务、告警规则/静默/事件值班与通知重试、部署、运维、Agent 首装和 SDK 插桩计划由 AI/MCP 创建提案，管理员在原页面审批后由原领域服务执行真实写入或动作；AI/MCP 不能直接执行或自动批准。通知测试、部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent SSH 预检/直接安装/升级/恢复/卸载工具、插桩 Apply/code_task，以及服务主体的提案、直接执行或其他持续写授权仍未开放。固定只读服务主体不增加工具数量，也不改变上述审批边界。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。

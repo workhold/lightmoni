@@ -1,15 +1,17 @@
-import type { Context, Dependencies } from "../shared/types.js";
+import type { Context, Dependencies, User } from "../shared/types.js";
 import { fail } from "../shared/http.js";
 import type { AccessAuthority, Principal, SessionAuthority } from "./types.js";
 import type { CapabilityDefinition } from "./descriptor.js";
 import type { CapabilityDispatcher } from "./index.js";
 
-export function capabilityPrincipal(ctx: Context, authority: SessionAuthority, external?: AccessAuthority): Principal {
+export function capabilityPrincipal(ctx: Context, authority: SessionAuthority, external?: AccessAuthority, sessionUser?: () => User | undefined): Principal {
   if (ctx.req.headers.authorization !== undefined) {
     if (!external) fail(503, "外部授权校验不可用");
     return external.authenticate(ctx.req);
   }
-  return authority.sessionPrincipal(ctx.user, "web");
+  const user = ctx.user.id ? ctx.user : sessionUser?.();
+  if (!user) fail(401, "请先登录");
+  return authority.sessionPrincipal(user, "web");
 }
 
 const errorSchema = {
@@ -56,7 +58,7 @@ export function capabilityOpenAPI(deps: Dependencies, dispatcher: CapabilityDisp
     openapi: "3.1.0", info: { title: "LightMoni Capability API", version: "1" },
     servers: [{ url: deps.externalURL }],
     components: { securitySchemes: {
-      bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "PAT or OAuth access token" },
+      bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "PAT, OAuth access token, or service access token" },
       cookieAuth: { type: "apiKey", in: "cookie", name: "lm_session" },
     }, schemas: { CapabilityError: errorSchema } },
     paths, "x-lightmoni-capability-count": definitions.length,
