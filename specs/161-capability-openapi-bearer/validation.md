@@ -21,7 +21,7 @@
 - `GET /api/v1/openapi.json` 返回 OpenAPI 3.1，包含当前主体可见的实际 invoke 路径、输入/输出 Schema、required_scopes 和 bearer/cookie 安全定义；不包含 PAT、秘密或目标数据。
 - OpenAPI 与 Scope 过滤一致：hosts.read 可见主机能力，tasks 能力不暴露；服务器 URL 来自 externalURL。
 - app 注入可选 McpAccess，Bearer 复用原角色、Scope、Host、grant、限流和审计，不模拟 MCP，不开放服务主体或持续授权。
-- 工具总数保持 53；新增文档端点不改变现有 MCP 工具清单。
+- 工具总数保持 54；新增文档端点不改变现有 MCP 工具清单。
 
 ## 未验证与剩余范围
 
