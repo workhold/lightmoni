@@ -13,7 +13,9 @@
 
 - 根 `compose.yaml` 的中心镜像从 `20261113-6e9cead-agent-upgrade-v1` 更新为固定标签 `20261114-eb1690b`；ClickHouse、端口、环境、卷、健康检查及构建参数未改。
 - 发布分支基于已合入三个功能 PR 的 `origin/main` 提交 `eb1690bb42a47c8f5bc28df404c0d957aa9b391b`，发布配置提交与镜像源码提交分开。
-- `LIGHTMONI_CH_PASSWORD=placeholder docker compose config --quiet` 通过；占位值仅作为本地校验进程的环境变量，未写入文件。仓库差异检查与 GitHub PR 回读见本节后续记录。
+- `LIGHTMONI_CH_PASSWORD=placeholder docker compose config --quiet` 通过；`docker compose config --images` 回读中心为 `docker.heyphp.com/lightmoni/lightmoni:20261114-eb1690b`、ClickHouse 为 `clickhouse/clickhouse-server:26.8`。占位值仅作为本地校验进程的环境变量，未写入文件。
+- 暂存差异执行 `git diff --cached --check` 通过；变更仅含根 Compose 的中心镜像引用与 SDD163 五个文件。
+- [发行 PR #221](https://github.com/workhold/lightmoni/pull/221) 已创建，目标为 GitHub `main`；合入尚待执行。PR 描述记录最终行为、兼容影响、相关检查、架构与 Doca 不适用理由及后续发布/生产验收门槛。
 
 ## 镜像发布、生产部署与线上回归
 
