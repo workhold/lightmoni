@@ -39,3 +39,5 @@
 - 当前只有服务主体管理 API，未新增前端管理页面；未实现策略编辑、轮换、OAuth client credentials 或身份联邦。
 - 服务主体写提案持续授权、审批/领取/启动复验、直接 execute、远程探测和其他高风险自动化不属于本切片。
 - 网站、容器、备份、DNS、证书、Agent 后续生命周期及真实业务闭环仍需后续独立 SDD。
+
+交付 PR：[workhold/lightmoni#218](https://github.com/workhold/lightmoni/pull/218)，目标为 main；实现与验证完成，等待评审，未获本轮合并授权。
