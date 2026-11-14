@@ -35,3 +35,7 @@ OAuth access token 绑定 MCP canonical resource URI，授权码 PKCE S256 单�
 执行索引状态保留 awaiting_approval/queued/running/succeeded/failed/cancelled/rolled_back/unknown，以及原生 status/phase。仅关联既有领域记录；不能将 rolled_back 映射为 succeeded，也不能将 queued 当作已执行。取消 queued 可立即确认，running 需远端停止证明；取消 RPC/关闭 MCP 会话不等于业务取消。
 
 审计至少包含 invocation_id、trace_id、principal/owner、credential_id、可信入口、声明的 client 信息、capability/version、目标和参数摘要、决策、proposal/execution/native_ref、幂等摘要、时间及安全错误。拒绝、schema 失败、取消、幂等命中也记录摘要，认证失败记网关安全事件。持久接受与领域提交/审计事件关联，无法持久记录时不派发。秘密不入日志或模型，原始主机输出默认不进入 MCP；秘密引用还需主体/用途/目标及固定能力的 use 权限。
+
+## 2026-11-14 审批后执行澄清
+
+首期对外仅 read/propose 指模型可直接调用的 effect。管理员通过原领域 HTTP 审批后，原生任务、告警、部署、运维或 Agent 首装路径允许发生真实写入/执行；该 Apply 不暴露为 MCP/AI 工具。提案、审批、排队、执行中和最终成功保持不同状态，稳定 grant、revision/目标快照、业务幂等及 unknown 围栏继续生效。

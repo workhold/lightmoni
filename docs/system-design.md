@@ -775,6 +775,8 @@ flowchart TD
 
 Mastra 是 LightMoni AI 助手的主对话和工具编排运行时。中心每轮通过私有 stdin/stdout 管道启动 Node worker；模型连接由 provider 适配 OpenAI Chat Completions、OpenAI Responses、Anthropic Messages 和 Google Gemini。Pi Agent 不是另一个平台入口，而是 Mastra 在 `code_task` 中调用的受限代码执行器，负责“读取 → 修改 → 检查 → 修复”的多轮循环。
 
+模型接入只维护助手需要的基本契约：配置与连接测试、流式文本、工具调用、多轮历史、取消/超时、安全错误和真实用量。现有四种协议作为兼容能力保留，不以继续补全所有供应商特性为目标；未来供应商路由、协议适配、故障切换、配额和成本治理由独立模型网关承担，中心通过一种明确支持的具体协议接入，不复制第二套网关。
+
 ```mermaid
 sequenceDiagram
   participant U as 管理员
@@ -799,9 +801,11 @@ sequenceDiagram
 | effect | 示例 | 应用方式 |
 | --- | --- | --- |
 | `read` | list/describe tables、run_query、日志、告警读取、主机状态、业务部署事件 | 有界执行，可直接返回 |
-| `draft` | dashboard draft、alert change、silence、SDK `propose_sdk_instrumentation`、Agent deployment plan | 保存或返回提案，用户审阅 |
+| `draft` / `propose` | dashboard draft、alert change、task/deployment/operation plan、SDK 插桩和 Agent 首装计划 | 保存或返回原生提案，管理员审阅 |
 | `code` | Pi `code_task` | 隔离副本、检查、diff，用户确认应用 |
-| `execute` | 当前不提供模型任意 SSH/命令 | 未来单独 SDD，默认关闭 |
+| `execute` | 通用 apply/approve、任意 SSH/命令 | 不向模型或 MCP 开放 |
+
+写操作是允许的产品能力：AI/MCP 可创建结构化提案，管理员确认后由原领域服务执行真实写入或动作。审批绑定目标、参数/diff/digest、revision、owner、来源、稳定授权和期限；审批与尚未开始项领取前按原领域协议复验。模型不能直接修改目标、批准自己的提案或获得通用执行工具；提案接受、进入队列和最终业务成功必须分别表达。
 
 AI 的查询必须走目录和统一 Query，SQL 只读、有时间范围和结果上限。告警规则和静默的修改使用 revision/版本检查和 15 分钟提案有效期；应用时重新检查权限、版本和对象状态。代码任务只在管理员配置的 workspace 中运行，限制路径、符号链接、文件大小、白名单检查命令、步数和时长；Pi 不 commit、push、PR、merge 或 deploy。
 
@@ -809,13 +813,13 @@ AI 的查询必须走目录和统一 Query，SQL 只读、有时间范围和结�
 
 管理员在“模型管理”保存 Base URL、协议、模型和输入/输出单价。自动识别只给地址和目录依据推荐；第三方 OpenAI 兼容目录无法区分 Chat/Responses 时必须人工选择。各协议独立规范化 `/v1`、`/v1beta`、目录鉴权和生成接口；修正后的地址回填输入框并说明原因。目录刷新不产生生成费用；连接测试发送一次最小真实请求。
 
-每个真实模型请求使用稳定 request ID 幂等写入账本，记录 started、usage 和终态，区分 complete、partial、unpriced、failed、cancelled。缺失 token 不能猜成零，模型输入、Key 和回复正文不写入用量统计。
+每个真实模型请求使用稳定 request ID 幂等写入账本，记录 started、usage 和终态，区分 complete、partial、unpriced、failed、cancelled。缺失 token 不能猜成零，模型输入、Key 和回复正文不写入用量统计。未来网关只返回真实可获得的用量与价格事实；网关没有提供时仍保持未知，中心不重复计费。
 
 ### 14.4 平台开放能力与 MCP：目标架构（SDD 046）
 
-平台开放能力的总体目标覆盖完整业务，任务只是其中一个领域。采用“统一应用能力层 + MCP/Web HTTP/内置 AI 三种适配器”：外部 Codex、Claude 通过 Streamable HTTP MCP 调用，平台助手在进程内调用相同 Dispatcher，页面和普通程序通过 HTTP 复用同一领域服务。MCP 负责协议与工具发现，能力层统一真实主体、role/scope/资源交集、参数校验、审批、幂等、审计和安全结果；不直接包装助手 execute 并伪造 session/admin。首期同进程模块部署，不新增微服务或队列。SDD 047 已实现首批主机/任务工具、专用 PAT、OAuth 与接入管理，其他领域逐步迁移，不等于全部目标已完成。
+平台开放能力的总体目标覆盖完整业务，任务只是其中一个领域。采用“统一应用能力层 + MCP/Web HTTP/内置 AI 三种适配器”：外部 Codex、Claude 通过 Streamable HTTP MCP 调用，平台助手在进程内调用相同 Dispatcher，页面和普通程序通过 HTTP 复用同一领域服务。MCP 负责协议与工具发现，能力层统一真实主体、role/scope/资源交集、参数校验、审批、幂等、审计和安全结果；不直接包装助手 execute 并伪造 session/admin。首期同进程模块部署，不新增微服务或队列。SDD 047 已实现首批主机/任务工具、专用 PAT、OAuth 与接入管理；SDD 134～151 已扩展多领域读取以及任务、告警、部署、运维和 Agent 首装提案，但不等于全部目标已完成。
 
-用户客户端授权采用 OAuth 2.1 授权码 + PKCE，独立 PAT 只作为支持 Bearer 配置客户端的补充；二者均不复用 SDK/Agent/SSH/模型凭据。首期安全读取与提案，操作在平台审阅；客户端弹窗或模型确认不代替审批。通用提案把 owner 与来源会话分开，已有助手历史权限保持。后续自动执行仅限管理员固定能力/版本、主机、参数界限与期限的持续授权。
+用户客户端授权采用 OAuth 2.1 授权码 + PKCE，独立 PAT 只作为支持 Bearer 配置客户端的补充；二者均不复用 SDK/Agent/SSH/模型凭据。AI/MCP 入口进行安全读取并创建提案，管理员在平台审阅后允许原领域执行真实写操作；客户端弹窗或模型确认不代替审批。通用提案把 owner 与来源会话分开，已有助手历史权限保持。后续自动执行仅限管理员固定能力/版本、主机、参数界限与期限的持续授权。
 
 所有主机主动操作关联统一 execution ID，复用真实 task run、Agent job、部署、运维和生命周期回执；不同领域保留真实状态与恢复策略，unknown 不自动重放。遥测查询记调用审计，持续采样不逐条建任务；交互按独立会话协议留痕。长任务返回 ID，连接中断不等于取消。远端 MCP 不读取用户本地源码，本地 AI 负责本地文件，平台部署使用明确提交的版本/制品。任意 SQL 和脚本源码须额外数据授权，不能由主机范围 token 绕过资源隔离。
 
@@ -855,7 +859,7 @@ SDD 150 将既有运维动作计划接入统一能力层：operations.propose �
 
 SDD 151 将 Agent 首装计划接入统一能力层：agents.maintain.propose 与 agents.read 同时必需，目标 machine_id 复用主机授权。外部 machine_deployments 计划、幂等与 agent_installation 稳定 grant 在同一 SQLite 事务保存；原管理员 Apply 在任何 enrollment/SSH 安装动作前复验 grant、Scope、当前账户和主机范围。内部 propose_agent_install 统一 Dispatcher，保持原计划结构且无外部绑定。fresh 预检、目标/凭据 revision、固定版本/架构、runtime/helper、恢复和 unknown 仍由原领域实现；未开放 SSH 预检、直接安装或后续生命周期工具。
 
-完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134](../specs/134-capability-core-decoupling/spec.md)、[SDD 135](../specs/135-capability-descriptor-contracts/spec.md)、[SDD 136](../specs/136-telemetry-capability-read/spec.md)、[SDD 137](../specs/137-alert-capability-read/spec.md)、[SDD 138](../specs/138-log-trace-capability-read/spec.md)、[SDD 139](../specs/139-deployment-capability-read/spec.md)、[SDD 140](../specs/140-operation-capability-read/spec.md)、[SDD 141](../specs/141-host-agent-capability-read/spec.md)、[SDD 142](../specs/142-dashboard-capability-read/spec.md)、[SDD 144](../specs/144-instrumentation-capability-read/spec.md)、[SDD 145](../specs/145-alert-operations-capability-read/spec.md) 和 [MCP 接入指南](mcp.md)。
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 

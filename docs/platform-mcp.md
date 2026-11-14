@@ -1,6 +1,6 @@
 # LightMoni 平台开放能力与 MCP 架构
 
-状态：SDD 046 总体目标架构；[SDD 047](../specs/047-platform-mcp-service/spec.md) 已实现首批统一能力、MCP、PAT 与 OAuth，[SDD 134](../specs/134-capability-core-decoupling/spec.md) 解耦核心与外部接入生命周期，[SDD 135](../specs/135-capability-descriptor-contracts/spec.md) 完善描述符、输出与分页契约，[SDD 136](../specs/136-telemetry-capability-read/spec.md) 迁移遥测只读能力，[SDD 137](../specs/137-alert-capability-read/spec.md) 迁移告警只读能力，[SDD 138](../specs/138-log-trace-capability-read/spec.md) 增加日志与 Trace 只读，[SDD 139](../specs/139-deployment-capability-read/spec.md) 增加服务与部署只读，[SDD 140](../specs/140-operation-capability-read/spec.md) 增加运维与计划只读，[SDD 141](../specs/141-host-agent-capability-read/spec.md) 增加主机与 Agent 只读，[SDD 142](../specs/142-dashboard-capability-read/spec.md) 增加大盘只读，[SDD 144](../specs/144-instrumentation-capability-read/spec.md) 增加 SDK 插桩只读，[SDD 145](../specs/145-alert-operations-capability-read/spec.md) 增加告警事件与通知只读。范围见第 16 节和 [接入指南](mcp.md)。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，未列入首期的能力仍为目标设计。
+状态：SDD 046 总体目标架构；[SDD 047](../specs/047-platform-mcp-service/spec.md) 已实现首批统一能力、MCP、PAT 与 OAuth，[SDD 134](../specs/134-capability-core-decoupling/spec.md) 解耦核心与外部接入生命周期，[SDD 135](../specs/135-capability-descriptor-contracts/spec.md) 完善描述符、输出与分页契约，[SDD 136](../specs/136-telemetry-capability-read/spec.md) 迁移遥测只读能力，[SDD 137](../specs/137-alert-capability-read/spec.md) 迁移告警只读能力，[SDD 138](../specs/138-log-trace-capability-read/spec.md) 增加日志与 Trace 只读，[SDD 139](../specs/139-deployment-capability-read/spec.md) 增加服务与部署只读，[SDD 140](../specs/140-operation-capability-read/spec.md) 增加运维与计划只读，[SDD 141](../specs/141-host-agent-capability-read/spec.md) 增加主机与 Agent 只读，[SDD 142](../specs/142-dashboard-capability-read/spec.md) 增加大盘只读，[SDD 144](../specs/144-instrumentation-capability-read/spec.md) 增加 SDK 插桩只读，[SDD 145](../specs/145-alert-operations-capability-read/spec.md) 增加告警事件与通知只读，[SDD 146](../specs/146-alert-statistics-capability-read/spec.md) 增加告警响应统计，[SDD 147～151](../specs/147-task-proposal-capability-write/spec.md) 增加任务、告警、部署、运维和 Agent 首装提案，[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md) 明确模型接入与审批后写操作边界。范围见第 16 节和 [接入指南](mcp.md)。本文补充 [系统设计 14.4](system-design.md#144-平台开放能力与-mcp目标架构sdd-046)，未列入首期的能力仍为目标设计。
 
 ## 1. 驱动目标与设计结论
 
@@ -22,8 +22,11 @@ flowchart TB
   Internal --> Gate
   Gate --> Dispatch[能力目录 / Dispatcher / 审计]
   Dispatch --> Read[有界读取 / 安全结果投影]
-  Dispatch --> Proposal[通用提案 / 审批 / 持续授权]
-  Proposal --> Domain[任务 / 部署 / 运维 / 生命周期服务]
+  Dispatch --> Proposal[原领域提案 / 稳定授权]
+  Proposal --> Review[管理员 Web / 原领域审批]
+  Review --> Recheck{审批与执行前复验}
+  Recheck --> Domain[任务 / 部署 / 运维 / 生命周期真实执行]
+  Recheck --> Reject[撤销 / 过期 / 冲突时拒绝]
   Domain --> Index[统一执行索引 / 领域持久回执]
   Domain --> Agent[Agent control 领取与执行]
   Domain --> SSH[首装 / 自身维护 SSH 通道]
@@ -33,19 +36,19 @@ flowchart TB
   Index --> Result
 ```
 
-所有主机主动操作先经过能力层和领域服务，再进入统一执行记录；MCP 无直连 Agent、任意 SSH 或数据库写入旁路。读取中心元数据记调用审计，不创建虚假的远端执行。持续指标和日志按配置 revision 管理，不为每个采样生成任务实例。
+AI/MCP 的写操作以原生提案进入审批，管理员确认后由原领域服务执行真实写入或动作。所有主机主动操作先经过能力层和领域服务，再进入统一执行记录；MCP 无直连 Agent、任意 SSH、数据库写入、审批或通用执行旁路。读取中心元数据记调用审计，不创建虚假的远端执行。持续指标和日志按配置 revision 管理，不为每个采样生成任务实例。
 
 ## 3. 当前事实与待建设部分
 
-SDD 046 调研时，`assistant/types.ts` 的 Tool 只有 name/schema/effect/execute，传入登录用户和助手 session。SDD 047 新增基于平台用户的 MCP 入口、OAuth/PAT、role/scope 与主机范围授权及 Dispatcher，并迁移首批任务工具及通用任务提案，任务提案复用平台审批；服务主体尚未支持。其余告警、运维和源码工具尚未整体迁移，不能把原助手工具直接对外导出；中心代码工作区也没有变成用户本地工作区。
+SDD 046 调研时，`assistant/types.ts` 的 Tool 只有 name/schema/effect/execute，传入登录用户和助手 session。当前 `runtime/src/capabilities/` 已提供统一描述符、Principal、Dispatcher、授权、审计、安全投影和幂等；SDD 134～151 已迁移多领域读取，并开放任务、告警、部署、运维和 Agent 首装提案。服务主体、持续授权、真实客户端完整矩阵和其余未迁移领域仍未完成；中心代码工作区也没有变成用户本地工作区。
 
-现有 TaskRunStore、Agent job、运维 run、部署计划和生命周期操作继续负责真实状态、租约、取消和恢复。Agent 升级/回退已随 [PR #21 / SDD 045](https://github.com/workhold/lightmoni/pull/21) 合入主干，维护继续使用独立审批与 SSH 生命周期协议；首期 MCP 不开放维护写工具。统一执行索引是关联和投影，不是另建一个取代所有领域的队列，跨领域完整统一执行读模型仍待后续建设。
+现有 TaskRunStore、AlertProposalService、Agent job、运维 Run、部署计划和生命周期操作继续负责真实状态、租约、取消和恢复。提案获得管理员审批后，允许这些原领域路径发生真实写入或执行；MCP/AI 不获得 apply/approve/execute 工具。Agent 升级/回退已随 [PR #21 / SDD 045](https://github.com/workhold/lightmoni/pull/21) 合入主干，维护继续使用独立审批与 SSH 生命周期协议；Agent 升级、恢复、卸载等后续维护提案尚未开放。统一执行索引是关联和投影，不是另建一个取代所有领域的队列，跨领域完整统一执行读模型仍待后续建设。
 
 ## 4. LLD：能力描述符与调用链
 
-能力定义归属拟新增 `runtime/src/capabilities/`，从 assistant 目录中分离。每个描述符声明稳定 ID/版本、输入输出 JSON Schema、所需 scope、资源解析、read/propose/execute 影响、执行策略、审批、幂等、投影、审计与时间/结果上限。模型不能动态注册服务器任意代码。
+能力定义位于 `runtime/src/capabilities/`，与 assistant 目录分离。每个描述符声明稳定 ID/版本、输入输出 JSON Schema、所需 scope、资源解析、read/propose/execute 影响、执行策略、审批、幂等、投影、审计与时间/结果上限。模型不能动态注册服务器任意代码。
 
-SDD 135 已将上述字段落实到既有 10 项描述符。当前 execute 仍不开放；targetResolver 的 Host 引用由 Dispatcher 通用校验，任务、执行和提案等非 Host 目标继续由领域适配器解析并复验。曝光按 assistant/mcp/http 分别检查，发现过滤与直接调用使用同一策略。每主体每能力默认限制为 120 次/分钟、4 并发和 15 秒，输入/完整响应延续 16 KiB/64 KiB 上限；描述符可收紧。
+SDD 135 已将上述字段落实到既有 10 项描述符。通用 execute/apply/approve 不向模型或 MCP 开放；这不阻止管理员审批后由原领域服务执行真实写操作。targetResolver 的 Host 引用由 Dispatcher 通用校验，任务、执行和提案等非 Host 目标继续由领域适配器解析并复验。曝光按 assistant/mcp/http 分别检查，发现过滤与直接调用使用同一策略。每主体每能力默认限制为 120 次/分钟、4 并发和 15 秒，输入/完整响应延续 16 KiB/64 KiB 上限；描述符可收紧。
 
 调用链固定为：认证主体 → 校验 schema → 解析真实资源 → 检查当前 role/scope/资源授权 → 限流及幂等 → 领域服务 → 安全结果投影，全链路由统一审计包围。拒绝、schema 失败、取消及幂等命中也写安全摘要；认证失败记录网关安全事件，不记录原始令牌。发现、直接调用、资源读取和分页都执行授权；工具隐藏只是使用体验，不能代替服务端检查。
 
@@ -209,9 +212,9 @@ SDD 150 新增 operations.propose 与 lightmoni_operations_plan，复用 Operati
 
 SDD 151 新增 agents.maintain.propose 与 lightmoni_agent_installations_plan，复用 ManagedMachineStore 的 fresh check_id、固定版本/架构、主机 revision 和原生首装审阅页。外部计划与稳定 grant 同事务接受；原管理员 Apply 前复验 propose/read 和 machine_id 主机授权，撤销后不签发 enrollment、不执行 SSH。内部 propose_agent_install 统一 Dispatcher。SSH 预检、直接安装、审批、恢复、升级和卸载未开放。告警模块启用时共 49 个工具。
 
-`runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手任务/遥测/告警事件与通知/日志/Trace/服务部署/运维/主机 Agent/大盘/插桩读取工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。表、遥测数据、日志、Trace、告警、服务部署、运维、大盘和中心工作区均没有主机级数据隔离，只允许全主机范围授权；告警接手/重试、部署回滚/取消、运维资源与 Schedule 写入、Agent 直接安装/升级/恢复/卸载、大盘和插桩写工具尚未开放。
+`runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影、提案幂等与稳定执行授权。任务、告警、部署、运维和 Agent 首装均可创建原生提案，管理员审批后由原领域执行；模型/MCP 无直接写、审批或通用执行权限。MCP、HTTP 能力接口及内置助手任务/遥测/告警事件与通知/日志/Trace/服务部署/运维/主机 Agent/大盘/插桩读取工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。表、遥测数据、日志、Trace、告警、服务部署、运维、大盘和中心工作区均没有主机级数据隔离，只允许全主机范围授权；告警接手/重试、部署回滚/取消、运维资源与 Schedule 写入、Agent 直接安装/升级/恢复/卸载、大盘和插桩写工具尚未开放。
 
-外部任务操作仅创建已有任务的派发、取消与重试提案。TaskProposalService 保存真实来源、凭据与稳定 grant，不伪造助手 session；既有 owner 和人工审批边界保留。审批前与 Agent 领取排队项前分别复验外部授权，撤销、过期、降权或主机范围缩小后不得开始新项。新脚本/任务定义、持续授权和服务主体不属于本期。短期 OAuth access token 到期不使已批准项失效，稳定 grant 到期/撤销才阻止尚未开始项。若 MCP 配置失效、Dispatcher 未创建或审批前/后的授权适配器缺少任一项，尚未完成的 MCP 来源提案拒绝应用，不能由助手 fallback 降级为内部操作。排队项和自动重试保留稳定授权，缺少领取前校验器时 fail closed；主干的计划、并发、队列及任务版本校验继续生效。
+外部任务操作支持创建/修改任务定义以及已有任务的派发、取消与重试提案。TaskProposalService 保存真实来源、凭据与稳定 grant，不伪造助手 session；既有 owner 和人工审批边界保留，审批后由原任务中心执行真实保存或动作。审批前与 Agent 领取排队项前分别复验外部授权，撤销、过期、降权或主机范围缩小后不得开始新项。新脚本/任务定义、持续授权和服务主体不属于本期。短期 OAuth access token 到期不使已批准项失效，稳定 grant 到期/撤销才阻止尚未开始项。若 MCP 配置失效、Dispatcher 未创建或审批前/后的授权适配器缺少任一项，尚未完成的 MCP 来源提案拒绝应用，不能由助手 fallback 降级为内部操作。排队项和自动重试保留稳定授权，缺少领取前校验器时 fail closed；主干的计划、并发、队列及任务版本校验继续生效。
 
 主机资产名称与系统观测分别展示：`name` 由用户配置，`observed_hostname` 只读取当前绑定且未移除的 Agent；替换后尚未注册或旧缓存没有来源时返回空值。
 

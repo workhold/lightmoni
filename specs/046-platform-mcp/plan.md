@@ -35,3 +35,7 @@
 5. 回归：现有告警/静默、任务、服务发布、运维与生命周期状态机保持语义；迁移前历史提案的 owner/审批约束不得放宽。
 6. 客户端：记录 Codex/Claude 实际版本、授权方式、tools/list、tools/call、提案链接和真实执行回执，不以 curl 成功代替客户端互操作。
 7. 文档：仓库与 Doca 同 PR 同步，图用原生块，回读验证文本、节点、边。
+
+## 2026-11-14 现行 HLD/LLD 修订
+
+“首期工具仅安全读取和提案”应理解为 AI/MCP 入口只直接调用 read/propose；提案在 Web 审批后允许原领域执行真实写操作，并保留执行 ID、原生回执和授权复验。不得把“不开放 apply/commit 工具”扩展解释为平台业务只能读。当前提案—审批—原生执行图和 LLD 见 [SDD 152](../152-assistant-model-execution-boundaries/plan.md)。

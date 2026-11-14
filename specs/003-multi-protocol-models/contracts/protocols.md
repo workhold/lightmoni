@@ -43,3 +43,7 @@ Old user tab5 is not reloaded because it has unsaved fields; fresh final tab vis
 
 ## Native durable metadata
 Neutral ToolCall may carry `provider_options:Record<string,Record<string,string>>`; Message may carry `provider_state:{type:"reasoning"|"text",text?:string,provider_options:Record<string,Record<string,string>>}[]`. Allowlisted keys are `google.thoughtSignature` and `openai.itemId` / `openai.reasoningEncryptedContent` only. A text record retains the original visible answer slice to associate its signature with that exact native part; reasoning records may not carry text. Runtime reconstructs SDK providerOptions and native parts when replaying. Persist only ciphertext/signatures/item IDs plus already-public answer slices, never hidden plaintext reasoning. Go stores and passes through bounded allowlisted state, but excludes provider_state/provider_options from browser-facing session responses. Each opaque string≤256KiB, aggregate encoded provider metadata≤1MiB per checkpoint and resulting stored history, with existing2MiB session/NDJSON limits. Metadata contributes to history/context limits; oversized state is an explicit failure, not silent dropping. Fixtures verify Gemini text/tool signatures and Responses ciphertext across a second fresh worker.
+
+## 2026-11-14 网关复用澄清
+
+未来模型网关使用本文件已有的一种具体协议和规范化 Base URL，不增加自动猜测的 `gateway` 协议。网关模型目录只作为目录证据，不能替代真实生成与工具调用验证；网关未返回 usage 时中心保持未知。现有四种协议、配置字段和错误契约不因该未来方向改变。

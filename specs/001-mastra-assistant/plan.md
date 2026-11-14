@@ -29,3 +29,9 @@ Mastra owns the multi-step agent loop. Go does not reimplement a parallel produc
 
 ## Delivery
 Implement US1 transport first, US2 context compaction, US3 usage/UI/cancel. Verify before task closure. Container build may be unverified without Docker; document that limitation rather than claiming it passed.
+
+## 2026-11-14 现行 HLD/LLD 修订
+
+早期“interactive read/draft tools only”和“Mastra cannot register writes”描述模型直接调用边界：Mastra 可以注册读取和原生提案工具，不能注册通用审批/执行工具。管理员审批后的真实写入由原领域 Apply/Job 完成，不属于模型 execute 权限，也不在本 worker 复制业务状态机。
+
+模型运行时继续保持薄接入：基本配置、流式工具调用、多轮历史、取消/超时、安全错误和真实用量是必须的；现有 provider 适配保留，未来供应商路由和复杂协议治理由网关承担。当前权威设计见 [SDD 152](../152-assistant-model-execution-boundaries/plan.md)，本计划中的 Go 目录和原始交付描述属于历史实现记录。

@@ -76,3 +76,7 @@ Members can stop work, inspect reported model usage, and review generated dashbo
 - At most four turns run concurrently per instance; a busy response leaves sessions intact. Browser disconnection cancels the active turn; completed checkpoints survive, in-flight work does not auto-resume after process restart.
 - Model configuration is supplied explicitly by an administrator. No personal Doca credentials are read.
 - Real model quality requires a configured provider; protocol fixtures verify integration and boundaries only.
+
+## 2026-11-14 现行边界修订
+
+本 Spec 的 `read/draft` 是首期模型工具范围，不是平台只能读、不能写的产品结论。当前允许 AI/MCP 创建原生写操作提案，管理员审批后由原领域服务执行真实写入或动作；模型仍无通用 apply/approve/execute 权限。模型接入只维护助手所需基本契约，未来复杂供应商适配由模型网关承担。详见 [SDD 152](../152-assistant-model-execution-boundaries/spec.md)；上述修订不改变本文件已有 fixture 验收证据。
