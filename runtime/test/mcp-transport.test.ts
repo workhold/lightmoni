@@ -31,7 +31,9 @@ import { Dashboards, normalizeDashboard } from "../src/domains/dashboards.js";
 import { DashboardReadService } from "../src/domains/dashboard-read.js";
 import { ExecutionGrantRegistry } from "../src/capabilities/execution-grants.js";
 import { InstrumentationService } from "../src/assistant/instrumentation.js";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { Store as UsageStore } from "../src/assistant/usage.js";
+import { registerAssistant } from "../src/assistant/index.js";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 async function fixture(wrap?:(d:CapabilityDispatcher)=>CapabilityDispatcherContract){
@@ -282,18 +284,26 @@ test("dashboard capabilities expose real catalog, details and versions through t
   const denied=await ordinaryClient.callTool({name:"lightmoni_dashboards_get",arguments:{id:custom.id}});assert.equal(denied.isError,true);assert.equal((denied.structuredContent as any).error.detail_code,"capability_forbidden");
  }finally{await client.close();await ordinaryClient.close();await f.close();}
 });
-test("instrumentation capabilities scan and read proposals through the official MCP client",async()=>{
- let instrumentation!:InstrumentationService;
- const root=mkdtempSync(join(tmpdir(),"lm-mcp-instrumentation-"));writeFileSync(join(root,"package.json"),JSON.stringify({dependencies:{"@lightmoni/sdk":"0.1.0",express:"5.0.0"}}));writeFileSync(join(root,"server.ts"),"import {createLightMoni} from '@lightmoni/sdk';\nimport express from 'express';\nconst app=express();\napp.get('/orders',async(_req,res)=>res.send('ok'));\n");
- const f=await fixture(d=>{instrumentation=new InstrumentationService(root);return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,instrumentation});});
+test("official MCP client creates an instrumentation proposal for native human apply and real workspace verification",async()=>{
+ let instrumentation!:InstrumentationService,assistant:any;
+ const root=mkdtempSync(join(tmpdir(),"lm-mcp-instrumentation-"));mkdirSync(join(root,"src"));writeFileSync(join(root,"package.json"),JSON.stringify({dependencies:{"@lightmoni/sdk":"0.3.0",express:"5.0.0"}}));
+ writeFileSync(join(root,"src","server.ts"),["import express from 'express';","import { createLightMoni } from '@lightmoni/sdk';","const app = express();","const mon = createLightMoni({ service: 'checkout', env: 'prod' });","app.get('/health', async (req, res) => {","  res.send('ok');","});",""].join("\n"));
+ const f=await fixture(d=>{
+  const usage=new UsageStore(d.deps.db,d.deps.now),store={get:<T>(key:string)=>{const saved=usage.get<string>(key);return saved?JSON.parse(d.deps.decrypt(saved)) as T:undefined},put:(key:string,value:unknown)=>usage.put(key,d.deps.encrypt(JSON.stringify(value)))};
+  instrumentation=new InstrumentationService(root,{store,now:d.deps.now});const grants=new ExecutionGrantRegistry(d.deps),dispatcher=new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,instrumentation,executionGrants:grants});
+  assistant=registerAssistant(d.deps,{capabilities:dispatcher,instrumentationService:instrumentation,runtime:async()=>{}});return dispatcher;
+ });
  const client=new Client({name:"instrumentation-read",version:"1"});
  try{
-  const key=f.access.createToken(f.user,{name:"Instrumentation",scopes:["code.workspace.read","code.workspace.detail.read"],host_ids:null});await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
-  const tools=await client.listTools();assert.ok(tools.tools.some(t=>t.name==="lightmoni_code_instrumentation_scan"));assert.ok(tools.tools.some(t=>t.name==="lightmoni_code_instrumentation_get"));assert.equal(tools.tools.some(t=>/propose|apply|code_task/.test(t.name)),false);
+  const key=f.access.createToken(f.user,{name:"Instrumentation",scopes:["code.workspace.read","code.workspace.detail.read","code.workspace.propose"],host_ids:null});await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
+  const tools=await client.listTools();for(const name of ["lightmoni_code_instrumentation_scan","lightmoni_code_instrumentation_get","lightmoni_code_instrumentation_plan"])assert.ok(tools.tools.some(t=>t.name===name),name);assert.equal(tools.tools.some(t=>/apply|code_task/.test(t.name)),false);
   const scan=await client.callTool({name:"lightmoni_code_instrumentation_scan",arguments:{workspace:"."}}),scanData=(scan.structuredContent as any).data;assert.equal(scanData.sdk.found,true);
-  const plan=await instrumentation.propose({workspace:".",intent:"instrument requests",base_revision:scanData.base_revision},new AbortController().signal);
-  const read=await client.callTool({name:"lightmoni_code_instrumentation_get",arguments:{plan_id:plan.plan_id}});assert.equal((read.structuredContent as any).data.plan.plan_id,plan.plan_id);assert.equal(Object.hasOwn((read.structuredContent as any).data,"before"),false);
- }finally{await client.close();await f.close();rmSync(root,{recursive:true,force:true});}
+  const planned=await client.callTool({name:"lightmoni_code_instrumentation_plan",arguments:{workspace:".",intent:"instrument requests",base_revision:scanData.base_revision,reason:"external review",idempotency_key:"instrumentation-plan-one"}});assert.ok(!planned.isError,JSON.stringify(planned));
+  const plannedData=(planned.structuredContent as any).data;assert.equal(plannedData.proposal.status,"awaiting_approval");assert.equal(plannedData.plan.files[0].patch,undefined);assert.ok(plannedData.proposal.review_url.includes("/api/v1/instrumentation-plans/"));
+  const applied=await fetch(f.externalURL+`/api/v1/instrumentation-plans/${plannedData.proposal.id}/apply`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({base_revision:scanData.base_revision,approval:"apply"})});assert.equal(applied.status,200,await applied.text());
+  assert.match(readFileSync(join(root,"src","server.ts"),"utf8"),/mon\.record\("service", "requests_total"/);
+  const read=await client.callTool({name:"lightmoni_code_instrumentation_get",arguments:{plan_id:plannedData.proposal.id}});assert.equal((read.structuredContent as any).data.applied.state,"applied");assert.equal(Object.hasOwn((read.structuredContent as any).data,"before"),false);
+ }finally{await client.close();await assistant.close?.();await f.close();rmSync(root,{recursive:true,force:true});}
 });
 test("transport rejects wrong credentials, Origin, methods, versions, oversized and malformed messages",async()=>{
  const f=await fixture();try{
