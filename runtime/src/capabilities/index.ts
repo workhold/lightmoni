@@ -20,8 +20,9 @@ import type { InstrumentationService } from "../assistant/instrumentation.js";
 import { ExecutionGrantRegistry } from "./execution-grants.js";
 import { ProposalIndex, type ProposalDomain, type ProposalIndexEntry } from "./proposal-index.js";
 import { ExecutionIndex, type ExecutionDomain, type ExecutionIndexEntry } from "./execution-index.js";
+import { capabilityOpenAPI, capabilityPrincipal } from "./http-api.js";
 import { capabilityDigest } from "./idempotency.js";
-import type { CapabilityAuthority, CapabilityDispatcherContract, CapabilitySummary, InvocationContext, Principal, SessionAuthority } from "./types.js";
+import type { AccessAuthority, CapabilityAuthority, CapabilityDispatcherContract, CapabilitySummary, InvocationContext, Principal, SessionAuthority } from "./types.js";
 import { defineCapability, validateCapabilityRegistry, type CapabilityDefinition, type CapabilityDefinitionSeed } from "./descriptor.js";
 import { capabilityErrorCategory, capabilityErrorDetail, capabilityErrorStatus } from "./errors.js";
 
@@ -727,14 +728,15 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     }}];
   }
 }
-export function registerCapabilities(deps:Dependencies,dispatcher:CapabilityDispatcher,authority:SessionAuthority) {
-  deps.router.get("/api/v1/capabilities",c=>c.json(dispatcher.list(authority.sessionPrincipal(c.user,"web"))));
+export function registerCapabilities(deps:Dependencies,dispatcher:CapabilityDispatcher,authority:SessionAuthority,external?:AccessAuthority) {
+  deps.router.get("/api/v1/openapi.json",c=>c.json(capabilityOpenAPI(deps,dispatcher,capabilityPrincipal(c,authority,external))));
+  deps.router.get("/api/v1/capabilities",c=>c.json(dispatcher.list(capabilityPrincipal(c,authority,external))));
   deps.router.post("/api/v1/capabilities/:name/invoke",async c=>{
     try {
       let input:unknown;
       try {input=JSON.parse((await c.raw(16<<10)).toString());}
       catch(error){if(error instanceof HTTPError)throw error;fail(400,"invalid_input");}
-      c.json(await dispatcher.invoke(authority.sessionPrincipal(c.user,"web"),c.params.name,input,{signal:c.signal}));
+      c.json(await dispatcher.invoke(capabilityPrincipal(c,authority,external),c.params.name,input,{signal:c.signal}));
     } catch(error) {
       const status=capabilityErrorStatus(error),message=status>=500?"服务暂不可用":String((error as Error)?.message??"调用未完成");
       c.json({error:message,code:capabilityErrorCategory(status),detail_code:capabilityErrorDetail(error,status)},status);
