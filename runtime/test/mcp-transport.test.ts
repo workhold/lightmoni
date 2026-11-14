@@ -19,6 +19,7 @@ import { registerAgentJobs } from "./helpers/domain-jobs.js";
 import { Alerts } from "../src/domains/alerts.js";
 import { AlertCapabilities } from "../src/domains/alert-capabilities.js";
 import { AlertProposalService } from "../src/assistant/alert-proposals.js";
+import { registerAssistant } from "../src/assistant/index.js";
 import { Logs } from "../src/domains/logs.js";
 import { LogReadService } from "../src/domains/log-read.js";
 import { TraceReadService } from "../src/domains/trace-read.js";
@@ -123,19 +124,20 @@ test("telemetry capabilities use installation scopes through the official MCP cl
  }finally{await f.close();}
 });
 test("alert read capabilities separate SQL details and proposals through the official MCP client",async()=>{
- let alerts!:Alerts,caps!:AlertCapabilities,proposals!:AlertProposalService;
+ let alerts!:Alerts,caps!:AlertCapabilities,proposals!:AlertProposalService,assistant:any;
  const f=await fixture(d=>{
   d.deps.cat.list=async()=>[{id:"log_app",name:"log_app",logical_name:"app",kind:"log",columns:[],services:["api"],system:false,retention_days:null,effective_retention_days:7}];
   d.deps.referencedTables=async()=>["log_app"];
   alerts=new Alerts(d.deps);caps=new AlertCapabilities(alerts);proposals=new AlertProposalService(d.deps.db,caps,d.deps.now,d.deps.encrypt,d.deps.decrypt);
-  return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,alerts:caps,alertProposals:proposals});
+  const dispatcher=new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,alerts:caps,alertProposals:proposals});assistant=registerAssistant(d.deps,{capabilities:dispatcher,alerts:caps,alertProposals:proposals,runtime:async()=>{}});return dispatcher;
  });
  let client:Client|undefined,ordinaryClient:Client|undefined;
  try{
-  const prepared=await caps.prepareRuleSave(f.user,{name:"API errors",enabled:true,kind:"sql",severity:"P2",sql:"SELECT count() AS value FROM log_app",value_field:"value",source_table_ids:["log_app"],threshold:"1",operator:"gt",interval_seconds:10,window_seconds:60,evidence_profile:{}});
+  f.db.run("INSERT INTO alert_groups VALUES('group-one','Ops',?)",JSON.stringify({id:"group-one",name:"Ops",enabled:true,members:["admin"],policies:{},targets:[]}));
+  const prepared=await caps.prepareRuleSave(f.user,{name:"API errors",enabled:true,kind:"sql",severity:"P2",sql:"SELECT count() AS value FROM log_app",value_field:"value",source_table_ids:["log_app"],group_ids:["group-one"],threshold:"1",operator:"gt",interval_seconds:10,window_seconds:60,evidence_profile:{}});
   const rule=f.db.transaction(()=>caps.commitRuleSave(f.user,prepared));
   const proposal=await proposals.create(f.user,"session-one",{operation:"rule.update",target_id:rule.id,patch:{threshold:"2"},reason:"review"},new AbortController().signal);
-  const at=new Date().toISOString();f.db.run("INSERT INTO alert_responses(id,episode,group_id,state,created_at,body) VALUES('incident-one','episode-one','group-one','firing',?,?)",at,JSON.stringify({id:"incident-one",episode:"episode-one",group_id:"group-one",group_name:"Ops",rule_id:rule.id,original_priority:"P1",event:{rule_name:"API errors"},state:"firing",priority:"P1",created_at:at}));
+  const at=new Date().toISOString();f.db.run("INSERT INTO alert_responses(id,episode,group_id,state,created_at,body) VALUES('incident-one','episode-one','group-one','firing',?,?)",at,JSON.stringify({id:"incident-one",episode:"episode-one",group_id:"group-one",group_name:"Ops",rule_id:rule.id,original_priority:"P1",event:{rule_name:"API errors"},state:"firing",priority:"P1",generation:0,stage:"primary",created_at:at,group:{id:"group-one",name:"Ops",members:["admin"],policies:{},targets:[]},evidence:{logs:"private-evidence"}}));
   f.db.run("INSERT INTO alert_assignments(response_id,user_id,user_name,stage,priority,notified_at,ack_at,ack_method,outcome) VALUES('incident-one','admin','Admin','primary','P1',?,?,'web','acknowledged')",at,at);
   f.db.run("INSERT INTO alert_response_events(id,response_id,at,body) VALUES('response-event-one','incident-one',?,?)",at,JSON.stringify({state:"firing"}));
   f.db.run("INSERT INTO alert_outbox(id,event_id,channel_id,target,status,next_attempt,created_at,body) VALUES('delivery-one','event-one','channel-one','private-contact','failed','',?,?)",at,JSON.stringify({id:"delivery-one",response_id:"incident-one",rule_id:rule.id,status:"failed",attempts:1,error:"private-error"}));
@@ -150,6 +152,10 @@ test("alert read capabilities separate SQL details and proposals through the off
   const incident=await client.callTool({name:"lightmoni_alert_incidents_get",arguments:{id:"incident-one"}});assert.equal((incident.structuredContent as any).data.timeline.length,1);
   const deliveries=await client.callTool({name:"lightmoni_alert_deliveries_list",arguments:{status:"failed"}});assert.equal((deliveries.structuredContent as any).data.items[0].id,"delivery-one");assert.equal(JSON.stringify(deliveries).includes("private-contact"),false);assert.equal(JSON.stringify(deliveries).includes("private-error"),false);
   const statistics=await client.callTool({name:"lightmoni_alert_response_statistics_get",arguments:{group_id:"group-one"}});assert.equal((statistics.structuredContent as any).data.users[0].ack_rate,100);
+  const acknowledged=await client.callTool({name:"lightmoni_alerts_plan",arguments:{operation:"incident.ack",target_id:"incident-one",reason:"take ownership",idempotency_key:"incident-plan-one"}});assert.ok(!acknowledged.isError,JSON.stringify(acknowledged));
+  const ackData=(acknowledged.structuredContent as any).data;assert.equal(ackData.proposal.status,"awaiting_approval");assert.equal(ackData.proposal.before.state,"firing");assert.ok(ackData.proposal.review_url.includes("/api/v1/assistant/alert-proposals/"));assert.equal(JSON.stringify(ackData).includes("private-evidence"),false);
+  const ackApplied=await fetch(f.externalURL+`/api/v1/assistant/alert-proposals/${ackData.proposal.id}/apply`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});assert.equal(ackApplied.status,200,await ackApplied.text());
+  const ackRead=await client.callTool({name:"lightmoni_alert_incidents_get",arguments:{id:"incident-one"}});assert.equal((ackRead.structuredContent as any).data.incident.state,"acknowledged");assert.equal((ackRead.structuredContent as any).data.incident.owner_id,"admin");
   const changed=await client.callTool({name:"lightmoni_alerts_plan",arguments:{operation:"rule.update",target_id:rule.id,patch:{threshold:"2"},reason:"external review",idempotency_key:"alert-rule-one"}}),changedProposal=(changed.structuredContent as any).data.proposal;
   assert.equal(changedProposal.status,"awaiting_approval");assert.equal(changedProposal.session_id,"");assert.equal(caps.getRule(f.user,rule.id).threshold,"1");
   await proposals.apply(f.user,changedProposal.id,new AbortController().signal);assert.equal(caps.getRule(f.user,rule.id).threshold,"2");
@@ -158,7 +164,7 @@ test("alert read capabilities separate SQL details and proposals through the off
   await ordinaryClient.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+ordinaryKey.token}}}));
   assert.equal((await ordinaryClient.listTools()).tools.some(t=>t.name==="lightmoni_alert_rules_get"),false);
   const denied=await ordinaryClient.callTool({name:"lightmoni_alert_rules_get",arguments:{id:rule.id}});assert.equal(denied.isError,true);assert.equal((denied.structuredContent as any).error.detail_code,"capability_forbidden");
- }finally{await client?.close();await ordinaryClient?.close();await alerts.close();await f.close();}
+ }finally{await client?.close();await ordinaryClient?.close();await assistant.close?.();await alerts.close();await f.close();}
 });
 test("log and trace capabilities share frozen reads through the official MCP client",async()=>{
  let logs!:Logs;

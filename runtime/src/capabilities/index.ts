@@ -108,10 +108,11 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     const nodes = options.taskCenter.nodes;
     const telemetry = options.telemetry ?? new TelemetryService(deps);
     const alertReads = options.alerts ? new AlertReadService(options.alerts, options.alertProposals) : undefined;
-    options.alertProposals?.useAuthorization({beforeApply:(actor,source)=>{
+    options.alertProposals?.useAuthorization({beforeApply:(actor,source,change)=>{
       if(source.source!=="mcp")return;
       const current=this.grant(source,actor.id);
       this.authorize(current,"alerts.propose",true);this.authorize(current,"alerts.detail.read",true);
+      if(change.operation==="incident.ack")this.authorize(current,"alerts.incidents.read",true);
     }});
     options.instrumentation?.useAuthorization({beforeApply:(planID,source)=>{
       if(source.source!=="mcp")return;
@@ -183,7 +184,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       {name:"lightmoni_alert_response_statistics_get",description:"Read native alert response statistics with the existing time, group and priority filters. No records are modified.",scope:"alerts.statistics.read",allHosts:true,effect:"read",inputSchema:schema({from:{...string,maxLength:128},to:{...string,maxLength:128},group_id:string,priority:string}),execute:async(_p,i)=>alertReads!.responseStatistics(i)},
     );
     if(options.alerts&&options.alertProposals)definitions.push({name:"lightmoni_alerts_plan",description:"Create one reviewable alert rule or silence proposal. Requires alerts.propose and alerts.detail.read. Never approves or applies.",scope:"alerts.propose",allHosts:true,effect:"propose",inputSchema:schema({
-      operation:{...string,enum:["rule.update","rule.silence","silence.create","silence.update","silence.end"]},target_id:string,
+      operation:{...string,enum:["incident.ack","rule.update","rule.silence","silence.create","silence.update","silence.end"]},target_id:string,
       patch:{type:"object",properties:{},additionalProperties:true},silence:{type:"object",properties:{},additionalProperties:true},until:{type:"string",minLength:0,maxLength:128},
       reason:{type:"string",minLength:1,maxLength:1000},idempotency_key:{type:"string",minLength:1,maxLength:128}},["operation","reason","idempotency_key"]),execute:(p,i,c)=>this.planAlert(p,i,c)});
     if(options.logs) {
@@ -361,10 +362,11 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   }
   private async planAlert(p:Principal,i:any,c:InvocationContext):Promise<any> {
     const {idempotency_key,...intent}=i,service=this.options.alertProposals!;
+    if(intent.operation==="incident.ack")this.authorize(p,"alerts.incidents.read",true);
     const proposal=await service.createFrom(p.user,{source:p.source,grant_id:p.grant_id,credential_id:p.credential_id,...(c.session_id?{session_id:c.session_id}:{})},intent,c.signal,
       {installationID:this.installationID,capability:"lightmoni_alerts_plan",key:idempotency_key});
     const {idempotency_replayed,...value}=proposal;
-    return {proposal:value,...(idempotency_replayed?{idempotency_replayed:true}:{})};
+    return {proposal:{...value,review_url:this.review(`/api/v1/assistant/alert-proposals/${encodeURIComponent(value.id)}`)},...(idempotency_replayed?{idempotency_replayed:true}:{})};
   }
   private deploymentProposal(plan:any):any {
     const deployment=this.options.deployments!.assistantDeployment(plan.id);

@@ -148,6 +148,7 @@ function measurement(rule: any): string {
 }
 
 export type AlertOperation =
+  | "incident.ack"
   | "rule.update"
   | "rule.silence"
   | "silence.create"
@@ -281,6 +282,14 @@ export function alertVersion(value: any): string {
   delete copy.version;
   return String(copy.revision ?? 0) + ":" + fingerprint(copy);
 }
+function incidentVersion(response: any, rule: any, group: any): string {
+  return [alertVersion(response), alertVersion(rule), alertVersion(group)].join("|");
+}
+function incidentView(value: any): any {
+  return Object.fromEntries(["id", "episode", "group_id", "group_name", "rule_id", "state", "priority", "original_priority", "generation",
+    "owner_id", "owner_name", "ack_at", "ack_method", "handling_until", "stage", "stage_round", "round", "exhausted"]
+    .filter(key => value[key] !== undefined).map(key => [key, clone(value[key])]));
+}
 function view(value: any): any {
   return { ...clone(value), version: alertVersion(value) };
 }
@@ -413,8 +422,18 @@ export class AlertCapabilities {
   async prepare(actor: Actor, operation: AlertOperation, input: any, signal?: AbortSignal): Promise<AlertChange> {
     this.actor(actor);
     signal?.throwIfAborted();
-    let before: any = null, after: any, target_id = "", impact: string[] = [];
-    if (operation === "rule.update" || operation === "rule.silence") {
+    let before: any = null, after: any, target_id = "", impact: string[] = [], expectedVersion = "";
+    if (operation === "incident.ack") {
+      object(input, ["id"]);
+      const response = this.alerts.response(input.id);
+      if (!response) fail(404, "告警事件不存在", "resource_not_found");
+      await this.alerts.prepareAcknowledge(input.id, actor.id);
+      const rule = this.alerts.body("alert_rules", response.rule_id), group = this.alerts.group(response.group_id), owner = this.alerts.member(actor.id);
+      before = incidentView(response); target_id = before.id;
+      after = { ...before, state: "acknowledged", owner_id: actor.id, owner_name: owner.name, ack_method: "web", generation: (before.generation ?? 0) + 1 };
+      expectedVersion = incidentVersion(response, rule, group);
+      impact.push("审批后由原告警服务接手事件、记录处理人并取消尚未发送的升级通知；预览不代表已经接手。");
+    } else if (operation === "rule.update" || operation === "rule.silence") {
       object(input, operation === "rule.update" ? ["id", "revision", "patch"] : ["id", "revision", "until"]);
       before = withoutVersion(this.getRule(actor, input.id));
       checkRevision(before, input.revision);
@@ -460,8 +479,8 @@ export class AlertCapabilities {
       this.checkSilencePermission(actor, before, after, operation === "silence.end");
     } else fail(400, "不支持的告警操作");
     signal?.throwIfAborted();
-    const change: AlertChange = { operation, target_id, expected_version: alertVersion(before), before, after,
-      summary: ({ "rule.update": "修改告警规则", "rule.silence": "调整规则静默", "silence.create": "创建静默窗口", "silence.update": "修改静默窗口", "silence.end": "结束静默窗口" })[operation] + "：" + (after.name || after.reason || target_id), impact };
+    const change: AlertChange = { operation, target_id, expected_version: expectedVersion || alertVersion(before), before, after,
+      summary: ({ "incident.ack": "接手告警事件", "rule.update": "修改告警规则", "rule.silence": "调整规则静默", "silence.create": "创建静默窗口", "silence.update": "修改静默窗口", "silence.end": "结束静默窗口" })[operation] + "：" + (after.name || after.reason || target_id), impact };
     this.prepared.set(change, fingerprint(change));
     return change;
   }
@@ -469,6 +488,12 @@ export class AlertCapabilities {
     this.actor(actor);
     signal?.throwIfAborted();
     object(stored, ["operation", "target_id", "expected_version", "before", "after", "summary", "impact"]);
+    if (stored.operation === "incident.ack") {
+      const checked = await this.prepare(actor, stored.operation, { id: stored.target_id }, signal);
+      if (checked.expected_version !== stored.expected_version) fail(409, "事件、规则或责任组已更新，请重新生成提案", "revision_conflict");
+      if (fingerprint(checked.before) !== fingerprint(stored.before) || fingerprint(checked.after) !== fingerprint(stored.after)) fail(409, "事件预览已变化，请重新生成提案", "revision_conflict");
+      const change = clone(stored); this.prepared.set(change, fingerprint(change)); return change;
+    }
     if (!["rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"].includes(stored.operation)) fail(400, "不支持的告警操作");
     if (!stored.target_id || typeof stored.target_id !== "string" || stored.after?.id !== stored.target_id) fail(400, "变更目标无效");
     const rule = stored.operation.startsWith("rule.");
@@ -510,6 +535,11 @@ export class AlertCapabilities {
   commit(actor: Actor, change: AlertChange): any {
     this.actor(actor);
     this.integrity(change);
+    if (change.operation === "incident.ack") {
+      const response = this.alerts.response(change.target_id), rule = response && this.alerts.body("alert_rules", response.rule_id), group = response && this.alerts.group(response.group_id);
+      if (!response || incidentVersion(response, rule, group) !== change.expected_version) fail(409, "事件、规则或责任组已更新，请重新生成提案", "revision_conflict");
+      return incidentView(this.alerts.commitAcknowledge(change.target_id, actor.id, "web", this.alerts.now(), rule.revision));
+    }
     const rule = change.operation.startsWith("rule.");
     const current = this.alerts.body(rule ? "alert_rules" : "alert_silences", change.target_id);
     if (alertVersion(current) !== change.expected_version) fail(409, "目标已更新，请刷新并重新生成提案", "revision_conflict");

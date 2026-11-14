@@ -1394,80 +1394,53 @@ export class Alerts implements Module {
       this.saveResponse(r);
     }
   }
-  async acknowledge(
-    key: string,
-    userID: string,
-    method: string,
-    now = this.now(),
-  ): Promise<any> {
-    let r = this.response(key);
-    const user = this.member(userID),
-      g = r && this.group(r.group_id);
+  /** Read-only admission checks shared by direct and reviewed acknowledgement. */
+  async prepareAcknowledge(key: string, userID: string): Promise<number> {
+    const r = this.response(key), user = this.member(userID), g = r && this.group(r.group_id);
     if (!r) throw Error("告警事件不存在");
-    if (!user || !g?.members.includes(userID))
-      throw Error("接手人不是当前有效告警组成员");
+    if (!user || !g?.members.includes(userID)) throw Error("接手人不是当前有效告警组成员");
     if (["resolved", "cancelled"].includes(r.state)) throw Error("告警已恢复");
+    if (r.state === "acknowledged" && r.owner_id !== userID) throw Error("已由" + r.owner_name + "接手");
     const rule = this.body("alert_rules", r.rule_id);
     if (!rule) throw Error("告警规则已删除");
-    if (
-      !rule.enabled ||
-      !(await this.ruleGroups(rule)).some((g) => g.id === r.group_id)
-    )
-      throw Error("告警规则已暂停或责任组已变更");
+    if (!rule.enabled || !(await this.ruleGroups(rule)).some((g) => g.id === r.group_id)) throw Error("告警规则已暂停或责任组已变更");
+    return rule.revision;
+  }
+
+  /** Synchronous native commit; callers own the surrounding SQLite transaction. */
+  commitAcknowledge(key: string, userID: string, method: string, now = this.now(), expectedRuleRevision?: number): any {
+    let r = this.response(key);
+    const ruleRevision = expectedRuleRevision ?? this.body("alert_rules", r.rule_id)?.revision;
     this.deps.db.transaction(() => {
       // Catalog lookup yields to other handlers. Re-read mutable state before claiming.
-      const latest = this.response(key),
-        currentRule = this.body("alert_rules", r.rule_id),
-        currentGroup = this.group(r.group_id),
-        currentUser = this.member(userID);
+      const latest = this.response(key), currentRule = this.body("alert_rules", r.rule_id), currentGroup = this.group(r.group_id), currentUser = this.member(userID);
       if (!latest) throw Error("告警事件不存在");
-      if (["resolved", "cancelled"].includes(latest.state))
-        throw Error("告警已恢复");
-      if (
-        !currentRule?.enabled ||
-        currentRule.revision !== rule.revision ||
-        !currentGroup?.enabled
-      )
-        throw Error("告警规则或责任组已变更，请重试");
-      if (!currentUser || !currentGroup.members.includes(userID))
-        throw Error("接手人不是当前有效告警组成员");
+      if (["resolved", "cancelled"].includes(latest.state)) throw Error("告警已恢复");
+      if (!currentRule?.enabled || currentRule.revision !== ruleRevision || !currentGroup?.enabled) throw Error("告警规则或责任组已变更，请重试");
+      if (!currentUser || !currentGroup.members.includes(userID)) throw Error("接手人不是当前有效告警组成员");
       r = latest;
       if (r.state === "acknowledged") {
         if (r.owner_id === userID) return;
         throw Error("已由" + r.owner_name + "接手");
       }
-      Object.assign(r, {
-        state: "acknowledged",
-        owner_id: userID,
-        owner_name: user.name,
-        ack_method: method,
-        ack_at: stamp(now),
-        generation: r.generation + 1,
-        last_tick: stamp(now),
-        exhausted: false,
-        deferred_reason: "",
-      });
+      Object.assign(r, { state: "acknowledged", owner_id: userID, owner_name: currentUser.name, ack_method: method,
+        ack_at: stamp(now), generation: r.generation + 1, last_tick: stamp(now), exhausted: false, deferred_reason: "" });
       const seconds = policy(r.group, r.priority).handling_seconds;
-      if (seconds > 0)
-        r.handling_until = stamp(new Date(now.getTime() + seconds * 1000));
+      if (seconds > 0) r.handling_until = stamp(new Date(now.getTime() + seconds * 1000));
       this.saveResponse(r);
       this.cancelQueue(r.id);
-      this.deps.db.run(
-        "UPDATE alert_assignments SET outcome='peer_claimed' WHERE response_id=? AND outcome='pending' AND user_id<>?",
-        r.id,
-        userID,
-      );
-      this.deps.db.run(
-        "UPDATE alert_assignments SET ack_at=CASE WHEN ack_at='' THEN ? ELSE ack_at END,ack_method=CASE WHEN ack_at='' THEN ? ELSE ack_method END,outcome='claimed' WHERE response_id=? AND user_id=?",
-        r.ack_at,
-        method,
-        r.id,
-        userID,
-      );
-      this.audit(r, "acknowledged", userID, method, user.name + "已接手", now);
+      this.deps.db.run("UPDATE alert_assignments SET outcome='peer_claimed' WHERE response_id=? AND outcome='pending' AND user_id<>?", r.id, userID);
+      this.deps.db.run("UPDATE alert_assignments SET ack_at=CASE WHEN ack_at='' THEN ? ELSE ack_at END,ack_method=CASE WHEN ack_at='' THEN ? ELSE ack_method END,outcome='claimed' WHERE response_id=? AND user_id=?", r.ack_at, method, r.id, userID);
+      this.audit(r, "acknowledged", userID, method, currentUser.name + "已接手", now);
     });
     return r;
   }
+
+  async acknowledge(key: string, userID: string, method: string, now = this.now()): Promise<any> {
+    const ruleRevision = await this.prepareAcknowledge(key, userID);
+    return this.commitAcknowledge(key, userID, method, now, ruleRevision);
+  }
+
   updateDelivery(d: any): void {
     this.deps.db.run(
       `UPDATE alert_outbox SET status=CASE WHEN json_extract(body,'$.delivery_status')='answered' THEN 'confirmed' ELSE ? END,next_attempt=CASE WHEN json_extract(body,'$.delivery_status')='answered' THEN '' ELSE ? END,body=CASE WHEN json_extract(body,'$.delivery_status')='answered' THEN json_set(?,'$.status','confirmed','$.next_attempt','','$.delivery_status','answered','$.provider_id',json_extract(body,'$.provider_id')) ELSE ? END WHERE id=?`,
