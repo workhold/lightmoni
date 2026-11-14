@@ -1,6 +1,7 @@
 import type { Dependencies, User } from "../shared/types.js";
 import { fail } from "../shared/http.js";
 import { CAPABILITY_SCOPES, type CapabilityAuthority, type ExternalAuthority, type Principal } from "./types.js";
+import type { CapabilityDefinition } from "./descriptor.js";
 
 export function scopesForUser(user: User): string[] {
   return user.role === "admin" ? [...CAPABILITY_SCOPES] : [];
@@ -48,5 +49,15 @@ export class CapabilityAccess extends SessionAccess implements CapabilityAuthori
   validateGrant(grantID: string, userID?: string): Principal {
     if (!this.external?.validateGrant) fail(503, "外部授权校验不可用");
     return this.external.validateGrant(grantID, userID);
+  }
+
+  allowsCapability(principal: Principal, definition: CapabilityDefinition): boolean {
+    if (principal.subject_type === "service" && !this.external?.allowsCapability) fail(503, "外部授权校验不可用");
+    return this.external?.allowsCapability?.(principal, definition) ?? true;
+  }
+
+  authorizeInvocation(principal: Principal, definition: CapabilityDefinition, input: unknown): void {
+    if (principal.subject_type === "service" && !this.external?.authorizeInvocation) fail(503, "外部授权校验不可用");
+    this.external?.authorizeInvocation?.(principal, definition, input);
   }
 }
