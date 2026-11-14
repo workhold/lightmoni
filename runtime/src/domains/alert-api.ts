@@ -366,26 +366,8 @@ export function registerAlertAPI(m: Alerts): void {
     c.json(await reads.nativeDeliveries(Object.fromEntries(c.url.searchParams), c.signal));
   });
   r.post("/api/v1/notify/deliveries/:id/retry", async (c) => {
-    const row = db.get<any>(
-      "SELECT body,status FROM alert_outbox WHERE id=?",
-      c.params.id,
-    );
-    if (!row) c.error(404, "notification not found");
-    if (!["failed", "unknown", "expired"].includes(row.status))
-      c.error(409, "only failed/unknown/expired tasks can retry");
     const body = await c.body<any>();
-    if (row.status === "unknown" && !body.confirm_possible_duplicate)
-      c.error(409, "重试可能重复发送，请明确确认");
-    const d = parseJSON(row.body);
-    Object.assign(d, {
-      status: "queued",
-      attempts: 0,
-      error: "",
-      next_attempt: stamp(m.now()),
-      created_at: stamp(m.now()),
-    });
-    m.updateDelivery(d);
-    c.json(d);
+    c.json(guarded(c, () => m.retryDelivery(c.params.id, body.confirm_possible_duplicate === true), 409));
   });
   r.get("/api/v1/alerts/annotations", (c) => {
     const q = c.url.searchParams,

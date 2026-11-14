@@ -26,6 +26,7 @@ async function fixture() {
   const prepared=await capabilities.prepareRuleSave(admin,{name:"API errors",enabled:true,kind:"sql",severity:"P2",sql:"SELECT count() AS value FROM log_app",value_field:"value",source_table_ids:["log_app"],group_ids:["group-one"],threshold:"1",operator:"gt",interval_seconds:10,window_seconds:60,evidence_profile:{}});
   const rule=db.transaction(()=>capabilities.commitRuleSave(admin,prepared)),runs=new TaskRunStore(deps),principal:Principal={user:admin,scopes:[...CAPABILITY_SCOPES],host_ids:null,credential_id:"token",grant_id:"grant",source:"mcp"};let revoked=false,grantPrincipal=structuredClone(principal);
   db.run("INSERT INTO alert_responses(id,episode,group_id,state,created_at,body) VALUES('incident-one','episode-one','group-one','firing',?,?)",deps.now().toISOString(),encode({id:"incident-one",episode:"episode-one",group_id:"group-one",group_name:"Ops",rule_id:rule.id,state:"firing",priority:"P1",original_priority:"P1",generation:0,stage:"primary",created_at:deps.now().toISOString(),last_tick:deps.now().toISOString(),owner_id:"",owner_name:"",group:{id:"group-one",name:"Ops",members:["admin"],policies:{},targets:[]},evidence:{logs:"private-evidence"}}));
+  db.run("INSERT INTO alert_outbox(id,event_id,channel_id,target,status,next_attempt,created_at,body) VALUES('delivery-one','event-one','channel-one','private-contact','failed','',?,?)",deps.now().toISOString(),encode({id:"delivery-one",response_id:"incident-one",event_id:"event-one",rule_id:rule.id,channel_id:"channel-one",group_ids:["group-one"],table_ids:["log_app"],service:"api",status:"failed",delivery_status:"failed",attempts:2,error:"raw provider error",recipient:{kind:"email",value:"private-contact"},payload:{secret:"private-payload"},created_at:deps.now().toISOString()}));
   const access=new CapabilityAccess(deps,{validate(){if(revoked)throw Error("revoked")},validateGrant(){if(revoked)throw Error("revoked");return structuredClone(grantPrincipal)}});
   const dispatcher=new CapabilityDispatcher(deps,access,{taskCenter:runs,alerts:capabilities,alertProposals:proposals});
   const invoke=(name:string,input:any,p=structuredClone(principal))=>dispatcher.invoke(p,name,input,{signal:new AbortController().signal});
@@ -170,5 +171,36 @@ test("internal incident renewal uses the same proposal and native commit path",a
   f.advance(60_000);const before=f.alerts.response("incident-one").handling_until,created=await f.dispatcher.assistantTools().find(t=>t.name==="propose_alert_change")!.execute({operation:"incident.renew",target_id:"incident-one",reason:"internal renew"},new AbortController().signal,admin,{session_id:"session-one"});
   assert.equal(created.proposal.session_id,"session-one");await f.proposals.apply(admin,created.proposal.id,new AbortController().signal);
   assert.ok(Date.parse(f.alerts.response("incident-one").handling_until)>Date.parse(before));assert.equal(f.alerts.response("incident-one").generation,1);
+ }finally{await f.close();}
+});
+
+test("delivery retry proposals restore native outbox queue without exposing provider material",async()=>{
+ const f=await fixture();try{
+  const withoutNotifications={...structuredClone(f.principal),scopes:f.principal.scopes.filter(s=>s!=="alerts.notifications.read")};
+  await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"delivery.retry",target_id:"delivery-one",reason:"x",idempotency_key:"scope"},withoutNotifications),/scope_required|capability_forbidden/);
+  const input={operation:"delivery.retry",target_id:"delivery-one",reason:"review retry",idempotency_key:"retry-one"},created=await f.invoke("lightmoni_alerts_plan",input),proposal=created.data.proposal;
+  assert.equal(proposal.before.status,"failed");assert.equal(proposal.after.status,"queued");assert.equal(proposal.before.error_present,true);assert.equal(proposal.after.error_present,false);
+  assert.equal(f.db.get<any>("SELECT status FROM alert_outbox WHERE id='delivery-one'")!.status,"failed");assert.equal(JSON.stringify(created).includes("private-contact"),false);assert.equal(JSON.stringify(created).includes("private-payload"),false);assert.equal(JSON.stringify(created).includes("raw provider error"),false);
+  assert.equal((await f.invoke("lightmoni_alerts_plan",input)).data.proposal.id,proposal.id);await assert.rejects(f.invoke("lightmoni_alerts_plan",{...input,reason:"changed"}),/idempotency_conflict/);
+  const applied=await f.proposals.apply(admin,proposal.id,new AbortController().signal);assert.equal(applied.result.status,"queued");assert.equal(f.db.get<any>("SELECT status FROM alert_outbox WHERE id='delivery-one'")!.status,"queued");
+  assert.equal(JSON.stringify(applied).includes("private-contact"),false);assert.equal(JSON.stringify(applied).includes("private-payload"),false);
+ }finally{await f.close();}
+});
+
+test("unknown delivery retry requires explicit possible duplicate confirmation",async()=>{
+ const f=await fixture();try{
+  f.db.run("UPDATE alert_outbox SET status='unknown' WHERE id='delivery-one'");
+  await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"delivery.retry",target_id:"delivery-one",reason:"retry",idempotency_key:"unknown-unconfirmed"}),/明确确认/);
+  const created=await f.invoke("lightmoni_alerts_plan",{operation:"delivery.retry",target_id:"delivery-one",confirm_possible_duplicate:true,reason:"confirmed retry",idempotency_key:"unknown-confirmed"});
+  await f.proposals.apply(admin,created.data.proposal.id,new AbortController().signal);assert.equal(f.db.get<any>("SELECT status FROM alert_outbox WHERE id='delivery-one'")!.status,"queued");
+  f.db.run("UPDATE alert_outbox SET status='succeeded' WHERE id='delivery-one'");await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"delivery.retry",target_id:"delivery-one",reason:"invalid",idempotency_key:"invalid-state"}),/only failed/);
+ }finally{await f.close();}
+});
+
+test("internal delivery retry uses the same proposal and native outbox path",async()=>{
+ const f=await fixture();try{
+  const created=await f.dispatcher.assistantTools().find(t=>t.name==="propose_alert_change")!.execute({operation:"delivery.retry",target_id:"delivery-one",reason:"internal retry"},new AbortController().signal,admin,{session_id:"session-one"});
+  assert.equal(created.proposal.session_id,"session-one");assert.equal(f.db.get<any>("SELECT status FROM alert_outbox WHERE id='delivery-one'")!.status,"failed");
+  await f.proposals.apply(admin,created.proposal.id,new AbortController().signal);assert.equal(f.db.get<any>("SELECT status FROM alert_outbox WHERE id='delivery-one'")!.status,"queued");
  }finally{await f.close();}
 });

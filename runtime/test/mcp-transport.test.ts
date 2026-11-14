@@ -173,6 +173,10 @@ test("alert read capabilities separate SQL details and proposals through the off
   assert.equal(changedProposal.status,"awaiting_approval");assert.equal(changedProposal.session_id,"");assert.equal(caps.getRule(f.user,rule.id).threshold,"1");
   await proposals.apply(f.user,changedProposal.id,new AbortController().signal);assert.equal(caps.getRule(f.user,rule.id).threshold,"2");
   const completed=await client.callTool({name:"lightmoni_alert_proposals_get",arguments:{id:changedProposal.id}});assert.equal((completed.structuredContent as any).data.proposal.status,"completed");
+  const retried=await client.callTool({name:"lightmoni_alerts_plan",arguments:{operation:"delivery.retry",target_id:"delivery-one",reason:"review retry",idempotency_key:"delivery-retry-one"}});assert.ok(!retried.isError,JSON.stringify(retried));
+  const retryData=(retried.structuredContent as any).data;assert.equal(retryData.proposal.after.status,"queued");assert.equal(JSON.stringify(retryData).includes("private-contact"),false);assert.equal(JSON.stringify(retryData).includes("private-error"),false);
+  const retryApplied=await fetch(f.externalURL+`/api/v1/assistant/alert-proposals/${retryData.proposal.id}/apply`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});assert.equal(retryApplied.status,200,await retryApplied.text());
+  const retryRead=await client.callTool({name:"lightmoni_alert_deliveries_list",arguments:{status:"queued"}});assert.equal((retryRead.structuredContent as any).data.items[0].status,"queued");assert.equal((retryRead.structuredContent as any).data.items[0].id,"delivery-one");
   const ordinaryKey=f.access.createToken(f.user,{name:"Alert catalog",scopes:["alerts.read"],host_ids:null});ordinaryClient=new Client({name:"alert-catalog",version:"1"});
   await ordinaryClient.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+ordinaryKey.token}}}));
   assert.equal((await ordinaryClient.listTools()).tools.some(t=>t.name==="lightmoni_alert_rules_get"),false);
