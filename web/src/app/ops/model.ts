@@ -99,19 +99,62 @@ export function errorText(error: unknown) {
 export function time(value?: string) {
   return value ? new Date(value).toLocaleString() : "—";
 }
+export function publishedApplicationRevisions(resource: Resource): number[] {
+  return [...new Set(Object.values<Spec>(resource.status?.deployments ?? {})
+    .filter(deployment => deployment.enabled && Number(deployment.desired_revision) > 0)
+    .map(deployment => Number(deployment.desired_revision)))].sort((a,b) => a-b);
+}
 export function resourceState(resource: Resource): string {
   const s = resource.status ?? {};
   const current = (Array.isArray(s.instances) ? s.instances : []).filter((instance: Spec) => !instance.retired);
   if (resource.kind === "application" && Array.isArray(resource.spec.deployments)) {
-    const published = Object.values(s.deployments ?? {}).filter((deployment: any) => deployment.enabled && Number(deployment.desired_revision) > 0) as Spec[];
+    const published = Object.entries<Spec>(s.deployments ?? {}).filter(([, deployment]) => deployment.enabled && Number(deployment.desired_revision) > 0);
     if (published.length) {
-      if (current.some((instance: Spec) => instance.state === "unknown")) return "unknown";
-      const allApplied = published.every((deployment) => Number(deployment.applied_revision) === Number(deployment.desired_revision));
-      if (allApplied && current.length && current.every((instance: Spec) => instance.healthy && instance.state === "running")) return "running";
-      if (allApplied && !current.length && resource.spec.deployment_mode === "managed" && resource.spec.deployments.every((deployment: Spec) => deployment.replicas === 0)) return "stopped";
-      if (published.some((deployment) => deployment.last_error) || current.some((instance: Spec) => ["failed", "error"].includes(instance.state))) return "failed";
+      const publishedByCluster = new Map(published);
+      const active = current.filter((instance: Spec) => publishedByCluster.has(instance.cluster_id));
+      if (active.some((instance: Spec) => instance.state === "unknown" || typeof instance.unresolved_run_id === "string" && instance.unresolved_run_id.trim())) return "unknown";
+      if (published.some(([, deployment]) => deployment.last_error) || active.some((instance: Spec) => ["failed", "error"].includes(instance.state))) return "failed";
+      if (active.some((instance: Spec) => ["retained", "grace", "protected"].includes(instance.availability) ||
+        instance.state === "running" && instance.availability !== "ready" ||
+        instance.recovery?.state === "blocked" && (instance.recovery?.code ?? instance.recovery?.error) === "unknown_execution_result") || s.instances_truncated) return "unverified";
+      const allApplied = published.every(([, deployment]) => Number(deployment.applied_revision) === Number(deployment.desired_revision));
+      if (allApplied && resource.spec.deployment_mode === "managed" && published.every(([clusterID, deployment]) =>
+        Number(deployment.desired_revision) === resource.revision &&
+        resource.spec.deployments.find((value: Spec) => value.cluster_id === clusterID)?.replicas === 0 &&
+        active.filter((instance: Spec) => instance.cluster_id === clusterID).every((instance: Spec) => ["stopped", "removed"].includes(instance.state)))) return "stopped";
+      const allTargetsReady = published.every(([clusterID, deployment]) => {
+        // The current spec cannot prove the target count for an older published revision.
+        if (Number(deployment.desired_revision) !== resource.revision) return false;
+        const target = resource.spec.deployments.find((value: Spec) => value.cluster_id === clusterID);
+        const machines: string[] = target?.machine_ids ?? [];
+        const expected = resource.spec.deployment_mode === "managed" ? Number(target?.replicas) : machines.length;
+        const instances = active.filter((instance: Spec) => instance.cluster_id === clusterID);
+        const managed = resource.spec.deployment_mode === "managed";
+        const targets = managed ? instances.filter((instance: Spec) => {
+          const slot = Number(instance.slot);
+          return Number.isInteger(slot) && slot >= 0 && slot < expected && String(instance.slot) === String(slot);
+        }) : instances;
+        const extras = managed ? instances.filter((instance: Spec) => !targets.includes(instance)) : [];
+        const counted = managed ? instances.filter((instance: Spec) => !String(instance.slot).startsWith("surge-")).length : expected;
+        if (managed && expected === 0) return Number(deployment.instances_total) === counted &&
+          Number(deployment.ready_instances) === 0 && instances.every((instance: Spec) => ["stopped", "removed"].includes(instance.state));
+        return Number.isInteger(expected) && expected > 0 && targets.length === expected &&
+          (!managed || new Set(targets.map((instance: Spec) => Number(instance.slot))).size === expected && extras.every((instance: Spec) => ["stopped", "removed"].includes(instance.state))) &&
+          Number(deployment.instances_total) === counted && Number(deployment.ready_instances) === expected &&
+          (resource.spec.deployment_mode === "managed" || machines.every(machineID => instances.some((instance: Spec) => instance.machine_id === machineID))) &&
+          targets.every((instance: Spec) => instance.state === "running" && instance.healthy === true &&
+            instance.availability === "ready" && String(instance.observed_generation) === String(deployment.desired_revision));
+      });
+      if (allApplied && allTargetsReady) return "running";
+      if (published.some(([, deployment]) => Number(deployment.desired_revision) !== resource.revision)) return "unverified";
       return "pending";
     }
+    if (Object.keys(s.deployments ?? {}).length) {
+      if (s.instances_truncated || current.some((instance: Spec) => !["stopped", "removed"].includes(instance.state))) return "unverified";
+      return "stopped";
+    }
+    if (s.instances_truncated || current.some((instance: Spec) => !["stopped", "removed"].includes(instance.state)) || s.state === "running") return "unverified";
+    if (current.length) return "stopped";
   }
   if (s.state) return String(s.state);
   if (s.phase) return String(s.phase);
@@ -391,5 +434,8 @@ export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
 }
 
 export function filterApplicationsByState(applications:Resource[],filter:string):Resource[]{
- return applications.filter(r=>filter==='all'||(filter==='failed'?['failed','degraded','error','unknown'].includes(resourceState(r)):filter==='pending'?!['running','stopped','failed','degraded','error','unknown'].includes(resourceState(r)):resourceState(r)===filter));
+ return applications.filter(r=>{
+  const state=resourceState(r);
+  return filter==='all'||(filter==='failed'?['failed','degraded','error','unknown'].includes(state):filter==='pending'?['pending','queued'].includes(state):state===filter);
+ });
 }

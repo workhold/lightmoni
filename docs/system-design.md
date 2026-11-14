@@ -2847,3 +2847,23 @@ flowchart LR
 ### 131.3 静态资源升级
 
 中心对主 HTML 和 SPA 回退发送 `Cache-Control: no-store`；Vite 构建的 `/assets/` 内容哈希 URL 使用一年 `immutable`，每次构建由新 HTML 引用变更后的 URL。未版本化静态文件使用一小时有界缓存；缺失的构建资源返回 404，不回退为 HTML。API 的鉴权和缓存头沿用各自契约。规格、接口、任务与验收见 [SDD131](../specs/131-panel-responsive/spec.md)；本章与第 107 章在同一 PR 同步到 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 并回读原生图块。
+
+## 162. 应用总览状态与未知执行核对（SDD162）
+
+应用页的定时与窗口焦点刷新遇到未完成的总览读取时跳过，显式刷新仍可替换旧请求；中心 `/ops/overview` 在单次请求中复用一次资源读取计算列表与总数，不改变鉴权、排序和上限。中心从实例当前 `current_run_id` 对应、尚未按现有流程核对的 unknown 运行记录派生可选 `status.instances[].unresolved_run_id`，在资源公开摘要中提供，不保存新状态或载荷。即使日志作业未知结果时实例仍为 `running/healthy`，页面也据此显示结果未知。其他已安装状态按启用且已发布集群的非退休当前实例与目标副本、就绪数量、部署修订及健康证据投影；保留、宽限、保护和未知恢复标记待核实，明确失败不被保护态遮盖，已保存新配置与旧已发布版本分开说明。零副本目标无运行实例或仅有已停实例时可视为就绪，全零目标显示停止；2→1 缩容要求目标槽位就绪、额外未退休实例已停。禁用集群的遗留实例不污染启用集群的发布态；没有启用发布集群时，非退休遗留实例仍活动或摘要截断则标待核实，停稳后才可显示停止；已退休历史不参与状态。
+
+卡片动作对所有非退休实例保持未知执行门禁，包括已禁用集群的阻塞实例，以及已移除但仍关联未核对执行的实例；已退休历史不触发本轮新增的应用动作门禁，但登记删除仍受既有 `store.remove` 对未核对历史运行的独立保护。所有“核对状态”入口均打开既有应用安装记录抽屉，只读调用 `/ops/resources/:id` 和 `/ops/runs?resource_id=:id`，优先显示当前未核对的 unknown 记录。历史列表最多 100 条；若摘要中的 `unresolved_run_id` 不在列表，抽屉使用既有 `GET /ops/runs/:id` 定向补读原记录。仅有 `recovery=blocked/unknown_execution_result` 而无当前运行 ID 时，抽屉显示待核实，并优先选择该应用历史中的 unknown 原记录。有当前未核对记录时，已核对的旧 unknown 不抢占默认选择，用户手选记录后轮询不抢回，不再派发新的 `inspect` 作业。需要核对的卡片限制升级、停止、卸载和删除登记，未知执行阻塞还限制部署/重新部署；记录抽屉对待核实/结果未知禁用编辑、重新部署和快装重试。中心对用户发起的 `deploy|stop|remove|reconcile` 在写入部署意图或实例期望状态前拒绝未核对 unknown，返回冲突且原意图不变；服务自动恢复沿用原机制。历史 unknown 回执、管理员人工核对、主机写入围栏与审计不改变。规格和验收见 [SDD162](../specs/162-app-overview-state/spec.md)。
+
+```mermaid
+flowchart LR
+  run["当前未核对 unknown 运行记录"] --> summary["实例公开摘要：unresolved_run_id"]
+  summary --> card["应用卡片：结果未知 / 待核实"]
+  card --> verify["核对状态：只读抽屉"]
+  verify --> resource["GET /ops/resources/:id"]
+  verify --> runs["GET /ops/runs?resource_id=:id"]
+  runs --> original["相关 unknown 原执行记录"]
+  runs --> missing["列表无当前记录：GET /ops/runs/:id"]
+  missing --> original
+  card --> gate["用户部署 / 停止 / 卸载 / 调和"]
+  gate --> reject["写意图前 409：原部署意图不变"]
+```
