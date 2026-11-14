@@ -22,3 +22,7 @@ Go: internal/assistant/{provider,protocol_rules,types,service,discovery,discover
 Node: ai-runtime/src/model.ts, protocol.ts, runner.ts, tests, package.json/package-lock.json.
 UI: ModelSettings.tsx, model-discovery.ts/tests, types.ts, model-protocol.ts helper if needed.
 Ownership: backend, runtime, frontend separate agents after shared contract; root coordinates docs/final review/build and user tab handoff.
+
+## 2026-11-14 现行 HLD/LLD 修订
+
+保留本计划的地址规范化、具体协议选择、连接测试和现有四种 provider 适配，不再以扩展供应商特定能力为中心目标。未来网关复用现有明确协议入口；中心不实现第二套路由、配额或供应商秘密系统。精简范围不能移除流式工具调用、多轮历史、取消/超时或安全错误，否则破坏 Mastra 助手基本闭环。现行契约见 [SDD 152](../152-assistant-model-execution-boundaries/plan.md)。
