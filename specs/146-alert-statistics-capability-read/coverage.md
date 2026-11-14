@@ -14,6 +14,7 @@
 | 大盘 | 自定义/系统目录、详情和版本 | 保存/复制/删除/draft 外部化未开放 |
 | SDK 插桩 | 中心受限工作区扫描和既有提案读取 | SDD 153 已增加插桩提案、审阅和 Apply 授权；code_task 与代码结果读取需独立设计 |
 | 跨领域提案索引 | 任务、告警、部署、运维、Agent 首装的 domain/native_id 安全投影 | SDD 159 已完成提案 list/get 与原生状态刷新；执行索引、OpenAPI/Bearer、服务主体未完成 |
+| 跨领域执行索引 | Task Run、Deployment、Operation Run、Agent 首装/维护的原生状态投影 | SDD 160 已完成执行 list/get 与原生状态刷新；OpenAPI/Bearer、服务主体未完成 |
 
 ## 明确不进入普通 MCP 的能力
 

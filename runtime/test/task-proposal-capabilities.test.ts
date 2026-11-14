@@ -76,3 +76,15 @@ test("cross-domain proposal index enforces owner, scope, host and refreshed pagi
   f.dispatcher.proposals.apply(admin,first.id);const completed=await f.invoke("lightmoni_domain_proposals_list",{domain:"task",state:"completed"});assert.equal(completed.data.items.some(item=>item.native_id===first.id),true);
  }finally{f.close();}
 });
+
+test("cross-domain execution index preserves native runs and host authorization",async()=>{
+ const f=fixture();try{
+  const proposal=(await f.invoke("lightmoni_tasks_plan",{operation:"task.dispatch",task_id:"script-one",host_ids:["one"],reason:"dispatch",idempotency_key:"execution-index-one"})).data.proposal;
+  const applied=f.dispatcher.proposals.apply(admin,proposal.id),run=(applied.result as any).runs[0];
+  const scoped={...structuredClone(f.principal),host_ids:["one"]},execution=await f.invoke("lightmoni_domain_executions_get",{id:`task:${run.id}`},scoped);
+  assert.equal(execution.data.execution.native_state,"queued");assert.equal(execution.data.execution.host_id,"one");
+  const otherHost={...structuredClone(f.principal),host_ids:["two"]};await assert.rejects(f.invoke("lightmoni_domain_executions_get",{id:`task:${run.id}`},otherHost),/resource_not_found/);
+  const withoutExecutions={...structuredClone(f.principal),scopes:f.principal.scopes.filter(s=>s!=="executions.read")};await assert.rejects(f.invoke("lightmoni_domain_executions_list",{},withoutExecutions),/scope_required|capability_forbidden/);
+  const page=await f.invoke("lightmoni_domain_executions_list",{domain:"task",state:"queued",limit:1});assert.equal(page.data.items[0].native_state,"queued");
+ }finally{f.close();}
+});

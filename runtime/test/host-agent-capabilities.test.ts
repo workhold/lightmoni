@@ -37,6 +37,7 @@ test("detailed hosts and Agent receipts use safe domain views without changing l
   assert.equal((await f.invoke("lightmoni_agent_releases_list",{})).data.releases[0].version,"1.2.3");
   assert.equal((await f.invoke("lightmoni_agent_installations_get",{deployment_id:"install-one"})).data.installation.status,"unknown");
   assert.equal((await f.invoke("lightmoni_agent_updates_get",{machine_id:"one",update_id:"update-one"})).data.update.status,"rolled_back");
+  const execution=await f.invoke("lightmoni_domain_executions_get",{id:"agent_update:one/update-one"});assert.equal(execution.data.execution.native_state,"rolled_back");
   assert.equal(f.dispatcher.definitions.some(d=>/propose|approve|apply|execute/.test(d.name)),false);
  }finally{f.close();}
 });
