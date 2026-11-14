@@ -105,6 +105,14 @@ const METADATA: Record<string, Metadata> = {
     approvalPolicy: "none", idempotencyPolicy: "none",
     targetResolver: input => input?.id ? [{ kind: "proposal", id: input.id }] : [],
   },
+  lightmoni_domain_proposals_list: {
+    id: "proposals.domain.list", outputSchema: data({items:arrayOfRecords,total:count,offset:count,limit:count,has_more:flag,truncated:flag},["items","total","offset","limit","has_more","truncated"]),
+    risk: "R1", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [],
+  },
+  lightmoni_domain_proposals_get: {
+    id: "proposals.domain.get", outputSchema: data({proposal:record},["proposal"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: input => input?.id ? [{kind:"proposal",id:input.id}] : [],
+  },
   lightmoni_executions_list: {
     id: "executions.list", outputSchema: data({ executions: arrayOfRecords, output_omitted: flag }, ["executions", "output_omitted"]),
     risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: hostID,

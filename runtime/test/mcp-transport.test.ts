@@ -48,7 +48,7 @@ async function fixture(wrap?:(d:CapabilityDispatcher)=>CapabilityDispatcherContr
  taskHelperFixture(deps,runs);
  const access=new McpAccess(deps);registerMcpAccess(deps,access);const dispatcher=new CapabilityDispatcher(deps,access,{taskCenter:runs});
  const module=registerMcpTransport(deps,access,wrap?wrap(dispatcher):dispatcher),endpoint=externalURL+"/api/v1/mcp";
- const key=access.createToken(user,{name:"Test client",scopes:["hosts.read","tasks.read","tasks.propose","executions.read"],host_ids:null});
+ const key=access.createToken(user,{name:"Test client",scopes:["hosts.read","tasks.read","tasks.propose","executions.read","proposals.read"],host_ids:null});
  const headers={authorization:"Bearer "+key.token,accept:"application/json, text/event-stream","content-type":"application/json","mcp-protocol-version":"2025-11-25"};
  const rpc=(body:unknown,extra:Record<string,string>={})=>fetch(endpoint,{method:"POST",headers:{...headers,...extra},body:typeof body==="string"?body:JSON.stringify(body)});
  const task=()=>runs.nodes.task({name:"Reviewed script",type:"script",enabled:true,target_all:false,host_ids:["one"],label_ids:[],schedule:{mode:"once"},script:{runtime:"node",code:"console.log('hidden-source')",timeout_seconds:5,max_output_bytes:4096}},"script-one",true);
@@ -68,6 +68,8 @@ test("official SDK client discovers tools, creates an idempotent proposal and po
   f.task();const p=await client.callTool({name:"lightmoni_tasks_plan",arguments:intent});assert.ok(!p.isError,JSON.stringify(p));const proposal=(p.structuredContent as any).data.proposal;
   assert.ok(proposal.review_url.startsWith(f.externalURL));assert.equal(f.runs.list().length,0);
   const repeat=await client.callTool({name:"lightmoni_tasks_plan",arguments:intent});assert.equal((repeat.structuredContent as any).data.proposal.id,proposal.id);
+  const indexed=await client.callTool({name:"lightmoni_domain_proposals_get",arguments:{id:`task:${proposal.id}`}});assert.equal((indexed.structuredContent as any).data.proposal.native_id,proposal.id);assert.equal((indexed.structuredContent as any).data.proposal.status,"awaiting_approval");
+  const indexedList=await client.callTool({name:"lightmoni_domain_proposals_list",arguments:{domain:"task",state:"awaiting_approval",limit:1}});assert.equal((indexedList.structuredContent as any).data.items[0].native_id,proposal.id);
   const applied=f.dispatcher.proposals.apply(f.user,proposal.id),run=(applied.result as any).runs[0];assert.equal(run.state,"queued");
   const state=await client.callTool({name:"lightmoni_executions_get",arguments:{id:run.id}});assert.equal((state.structuredContent as any).data.execution.native_state,"queued");
   assert.ok(!JSON.stringify(state).includes("hidden-source"));assert.ok(!JSON.stringify(state).includes("lease_token"));
@@ -142,7 +144,7 @@ test("alert read capabilities separate SQL details and proposals through the off
   f.db.run("INSERT INTO alert_assignments(response_id,user_id,user_name,stage,priority,notified_at,ack_at,ack_method,outcome) VALUES('incident-one','admin','Admin','primary','P1',?,?,'web','acknowledged')",at,at);
   f.db.run("INSERT INTO alert_response_events(id,response_id,at,body) VALUES('response-event-one','incident-one',?,?)",at,JSON.stringify({state:"firing"}));
   f.db.run("INSERT INTO alert_outbox(id,event_id,channel_id,target,status,next_attempt,created_at,body) VALUES('delivery-one','event-one','channel-one','private-contact','failed','',?,?)",at,JSON.stringify({id:"delivery-one",response_id:"incident-one",rule_id:rule.id,status:"failed",attempts:1,error:"private-error"}));
-  const key=f.access.createToken(f.user,{name:"Alert read",scopes:["alerts.read","alerts.detail.read","alerts.incidents.read","alerts.notifications.read","alerts.statistics.read","alerts.propose"],host_ids:null});client=new Client({name:"alert-read",version:"1"});
+  const key=f.access.createToken(f.user,{name:"Alert read",scopes:["alerts.read","alerts.detail.read","alerts.incidents.read","alerts.notifications.read","alerts.statistics.read","alerts.propose","proposals.read"],host_ids:null});client=new Client({name:"alert-read",version:"1"});
   await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
   const tools=await client.listTools();for(const name of ["lightmoni_alert_rules_list","lightmoni_alert_rules_get","lightmoni_alert_silences_list","lightmoni_alert_silences_get","lightmoni_alert_groups_list","lightmoni_alert_proposals_get","lightmoni_alert_incidents_list","lightmoni_alert_incidents_get","lightmoni_alert_deliveries_list","lightmoni_alert_response_statistics_get","lightmoni_alerts_plan"])assert.ok(tools.tools.some(t=>t.name===name),name);
   assert.equal(tools.tools.some(t=>/apply|approve|propose/.test(t.name)),false);
@@ -173,6 +175,7 @@ test("alert read capabilities separate SQL details and proposals through the off
   assert.equal(changedProposal.status,"awaiting_approval");assert.equal(changedProposal.session_id,"");assert.equal(caps.getRule(f.user,rule.id).threshold,"1");
   await proposals.apply(f.user,changedProposal.id,new AbortController().signal);assert.equal(caps.getRule(f.user,rule.id).threshold,"2");
   const completed=await client.callTool({name:"lightmoni_alert_proposals_get",arguments:{id:changedProposal.id}});assert.equal((completed.structuredContent as any).data.proposal.status,"completed");
+  const indexed=await client.callTool({name:"lightmoni_domain_proposals_get",arguments:{id:`alert:${changedProposal.id}`}});assert.equal((indexed.structuredContent as any).data.proposal.status,"completed");assert.equal((indexed.structuredContent as any).data.proposal.native_id,changedProposal.id);
   const retried=await client.callTool({name:"lightmoni_alerts_plan",arguments:{operation:"delivery.retry",target_id:"delivery-one",reason:"review retry",idempotency_key:"delivery-retry-one"}});assert.ok(!retried.isError,JSON.stringify(retried));
   const retryData=(retried.structuredContent as any).data;assert.equal(retryData.proposal.after.status,"queued");assert.equal(JSON.stringify(retryData).includes("private-contact"),false);assert.equal(JSON.stringify(retryData).includes("private-error"),false);
   const retryApplied=await fetch(f.externalURL+`/api/v1/assistant/alert-proposals/${retryData.proposal.id}/apply`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});assert.equal(retryApplied.status,200,await retryApplied.text());

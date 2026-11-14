@@ -50,7 +50,7 @@ callback_port = 1455
 
 ## 首批工具
 
-告警模块启用时提供 50 个工具。默认任务通过任务目录读取，不另设模板目录。
+告警模块启用时提供 52 个工具。默认任务通过任务目录读取，不另设模板目录。
 
 | 工具 | scope | 行为 |
 | --- | --- | --- |
@@ -60,6 +60,7 @@ callback_port = 1455
 | `lightmoni_tasks_get` 的 `include_source` | 还需 `tasks.source.read` | 显式读取脚本源码 |
 | `lightmoni_tasks_plan` | `tasks.propose` | 自定义任务创建、任务修改、已有任务派发、执行取消和重试的审阅提案 |
 | `lightmoni_proposals_get` | `tasks.read` | 提案状态；执行详情还需 `executions.read` |
+| `lightmoni_domain_proposals_list/get` | `proposals.read` + 各领域 Scope/Host | 跨领域提案索引，读取 owner 可见的原生最新状态，不开放审批或执行 |
 | `lightmoni_executions_list/get` | `executions.read` | 原生任务执行状态，省略源码、原始输出和租约 |
 | `lightmoni_telemetry_catalog` | `telemetry.catalog.read` | 表结构目录，仅全主机范围授权，无数据行/SQL |
 | `lightmoni_telemetry_describe` | `telemetry.catalog.read` | 按稳定 ID 或名称读取一个目录表，仅全主机范围授权，无数据行 |
@@ -127,10 +128,12 @@ SDK 插桩提案使用 `lightmoni_code_instrumentation_plan`，返回 Diff 摘�
 
 通知重试使用 `delivery.retry` 和原 delivery ID，额外要求 `alerts.notifications.read`。只有 `failed/unknown/expired` 可创建；`unknown` 必须设置 `confirm_possible_duplicate=true`，明确接受可能重复发送。审批只把原 outbox 恢复为 `queued`，等待原通知 worker 领取，不表示已发送或送达，也不会自动重试。联系人、payload、供应商响应和原始错误不进入提案结果。
 
+跨领域提案查询使用 `lightmoni_domain_proposals_list/get`，同时要求 `proposals.read` 与对应领域 Scope。列表按 domain/state 过滤并有界分页，返回 `domain:native_id`、原生状态和安全审阅地址。仅当前 owner 可见，Host 范围凭据只能读取匹配主机；原生提案仍是事实来源，索引不用于审批或执行。
+
 ## 部署条件与当前边界
 
 设置 `LIGHTMONI_EXTERNAL_URL` 为可信 HTTPS origin（不带路径、查询、凭据），本机调试可用 loopback HTTP。未满足时仅 MCP、PAT/OAuth 和外部授权管理禁用；统一能力层、会话鉴权的能力 HTTP 与内部助手共享工具继续运行。尚未完成的 MCP 来源提案在授权适配器缺失时拒绝批准；已有外部排队项和自动重试继续绑定原稳定授权，领取前无法复验则拒绝开始。内部助手提案仍可按原人工审批流程处理。代理需保留 Authorization 与 JSON 响应，不缓存授权与工具结果。服务无协议会话，不要求粘性路由或持久 SSE。
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-任务、告警规则/静默/事件值班与通知重试、部署、运维、Agent 首装和 SDK 插桩计划由 AI/MCP 创建提案，管理员在原页面审批后由原领域服务执行真实写入或动作；AI/MCP 不能直接执行或自动批准。通知测试、部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent SSH 预检/直接安装/升级/恢复/卸载工具、插桩 Apply/code_task、服务主体或持续授权仍未开放。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。
+任务、告警规则/静默/事件值班与通知重试、部署、运维、Agent 首装和 SDK 插桩计划由 AI/MCP 创建提案，管理员在原页面审批后由原领域服务执行真实写入或动作；AI/MCP 不能直接执行或自动批准。通知测试、部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent SSH 预检/直接安装/升级/恢复/卸载工具、插桩 Apply/code_task、跨领域执行索引、OpenAPI/Bearer、服务主体或持续授权仍未开放。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。

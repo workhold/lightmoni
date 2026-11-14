@@ -14,7 +14,7 @@ import type { Dependencies, User } from "../src/shared/types.js";
 const admin: User = {id:"admin",name:"Admin",role:"admin"};
 const definition = (name="Reviewed script") => ({name,type:"script",enabled:true,target_all:false,host_ids:["one"],label_ids:[],schedule:{mode:"once"},script:{runtime:"node",code:"console.log('reviewed')",timeout_seconds:5,max_output_bytes:4096}});
 function fixture() {
-  const db=new DB(":memory:");accountSchema(db);db.run("INSERT INTO users(id,name,role,active,created_at) VALUES('admin','Admin','admin',1,'2026-11-14')");
+  const db=new DB(":memory:");accountSchema(db);db.run("INSERT INTO users(id,name,role,active,created_at) VALUES('admin','Admin','admin',1,'2026-11-14'),('other','Other','admin',1,'2026-11-14')");
   const deps={db,router:new Router(),now:()=>new Date("2026-11-14T00:00:00Z"),externalURL:"https://moni.example.test",...cipher(Buffer.alloc(32,25)),cat:{list:async()=>[]},logger:{info(){},warn(){},error(){}}} as unknown as Dependencies;
   const runs=new TaskRunStore(deps);for(const id of ["one","two"])db.run("INSERT INTO managed_machines(id,name,address,port,connection_method,agent_id,created_at,updated_at) VALUES(?,?,?,22,'direct_ssh',?,?,?)",id,"Host "+id,id+".test","agent-"+id,deps.now().toISOString(),deps.now().toISOString());taskHelperFixture(deps,runs);
   for(const id of ["one","two"])runs.nodes.task({...definition("Script "+id),host_ids:[id]},"script-"+id,true);
@@ -32,6 +32,7 @@ test("external task create/update remain proposals until native approval and pre
   assert.equal((await f.invoke("lightmoni_tasks_plan",{operation:"task.create",task:definition(),reason:"create",idempotency_key:"create-one"})).data.proposal.id,proposal.id);
   await assert.rejects(f.invoke("lightmoni_tasks_plan",{operation:"task.create",task:definition(),reason:"changed",idempotency_key:"create-one"}),/idempotency_conflict/);
   assert.equal(f.dispatcher.proposals.apply(admin,proposal.id).status,"completed");assert.equal(f.runs.nodes.getTask(proposal.task_id).name,"Reviewed script");assert.equal(f.runs.list().length,0);
+  const indexed=await f.invoke("lightmoni_domain_proposals_get",{id:`task:${proposal.id}`});assert.equal(indexed.data.proposal.status,"completed");assert.equal(indexed.data.proposal.native_id,proposal.id);assert.equal(indexed.data.proposal.capability,"lightmoni_tasks_plan");
   const updated=await f.invoke("lightmoni_tasks_plan",{operation:"task.update",task_id:proposal.task_id,task:{name:"Updated script"},reason:"rename",idempotency_key:"update-one"});
   assert.equal(f.runs.nodes.getTask(proposal.task_id).name,"Reviewed script");assert.equal(f.dispatcher.proposals.apply(admin,updated.data.proposal.id).status,"completed");assert.equal(f.runs.nodes.getTask(proposal.task_id).name,"Updated script");assert.equal(f.runs.list().length,0);
  }finally{f.close();}
@@ -58,5 +59,20 @@ test("internal create/update use the same dispatcher and proposal service",async
   const updated=await tool.execute({operation:"task.update",task_id:created.proposal.task_id,task:{name:"Internal updated"},reason:"rename"},new AbortController().signal,admin,{session_id:"session-one"});
   f.dispatcher.proposals.apply(admin,updated.proposal.id);assert.equal(f.runs.nodes.getTask(created.proposal.task_id).name,"Internal updated");
   assert.ok(f.db.get("SELECT 1 FROM capability_invocations WHERE source='assistant' AND capability='lightmoni_tasks_plan'"));
+ }finally{f.close();}
+});
+
+test("cross-domain proposal index enforces owner, scope, host and refreshed pagination",async()=>{
+ const f=fixture();try{
+  const first=(await f.invoke("lightmoni_tasks_plan",{operation:"task.create",task:definition(),reason:"one",idempotency_key:"index-one"})).data.proposal;
+  const second=(await f.invoke("lightmoni_tasks_plan",{operation:"task.create",task:{...definition("Other host"),host_ids:["two"]},reason:"two",idempotency_key:"index-two"})).data.proposal;
+  const scoped={...structuredClone(f.principal),host_ids:["one"]},page=await f.invoke("lightmoni_domain_proposals_list",{domain:"task",limit:1},scoped);
+  assert.equal(page.data.items.length,1);assert.equal(page.data.items[0].native_id,first.id);
+  const fullPage=await f.invoke("lightmoni_domain_proposals_list",{domain:"task",limit:1});assert.equal(fullPage.data.has_more,true);
+  await assert.rejects(f.invoke("lightmoni_domain_proposals_get",{id:`task:${second.id}`},scoped),/resource_not_found/);
+  const withoutIndex={...structuredClone(f.principal),scopes:f.principal.scopes.filter(s=>s!=="proposals.read")};await assert.rejects(f.invoke("lightmoni_domain_proposals_list",{},withoutIndex),/scope_required|capability_forbidden/);
+  const withoutTasks={...structuredClone(f.principal),scopes:f.principal.scopes.filter(s=>s!=="tasks.read")};await assert.rejects(f.invoke("lightmoni_domain_proposals_get",{id:`task:${first.id}`},withoutTasks),/capability_forbidden/);
+  const other={...structuredClone(f.principal),user:{id:"other",name:"Other",role:"admin"}};assert.equal((await f.invoke("lightmoni_domain_proposals_list",{},other)).data.total,0);
+  f.dispatcher.proposals.apply(admin,first.id);const completed=await f.invoke("lightmoni_domain_proposals_list",{domain:"task",state:"completed"});assert.equal(completed.data.items.some(item=>item.native_id===first.id),true);
  }finally{f.close();}
 });
