@@ -22,3 +22,5 @@
 - 本轮为文档修正，未重新运行 runtime/ai-runtime/web 测试或构建。
 - 未实现或验证模型网关，未执行真实供应商、Codex/Claude 或生产业务 E2E。
 - 独立审核与合入由后续 PR 评审完成；本记录不代表功能验收或生产发布。
+
+交付 PR：[workhold/lightmoni#207](https://github.com/workhold/lightmoni/pull/207)，目标为 main；仅提交文档修正，等待独立评审，未由本轮自动合并。

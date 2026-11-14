@@ -5,4 +5,4 @@
 - [x] T03 修正当前系统设计与平台 MCP HLD/LLD/接入指南。
 - [x] T04 在 SDD 001/003/046 相关 Spec/Plan/契约中增加现行修订，保留历史证据。
 - [x] T05 执行文档结构、链接、差异与秘密检查，记录 validation.md。
-- [ ] T06 同步 origin/main，提交并创建面向 main 的文档 PR；不自动合并。
+- [x] T06 同步 origin/main，提交并创建面向 main 的文档 PR；不自动合并。
