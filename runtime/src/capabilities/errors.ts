@@ -8,6 +8,7 @@ const DETAILS = new Set([
   "idempotency_conflict", "authorization_unavailable", "unsupported_external_proposal", "input_too_large",
   "result_too_large", "output_invalid", "rate_limited", "concurrency_limit", "timeout", "cancelled",
   "capability_unavailable",
+  "automation_capability_forbidden", "automation_input_forbidden", "automation_budget_exhausted",
 ]);
 export function capabilityErrorStatus(error: unknown): number {
   const value = (error as {status?: unknown})?.status;

@@ -22,6 +22,8 @@ export interface Context {
 }
 export type Handler = (ctx: Context) => unknown | Promise<unknown>;
 export interface Router {
+  auth?: Auth;
+  checkOrigin?(req: IncomingMessage): void;
   get(path: string, handler: Handler, options?: { public?: boolean }): void;
   post(path: string, handler: Handler, options?: { public?: boolean }): void;
   put(path: string, handler: Handler, options?: { public?: boolean }): void;

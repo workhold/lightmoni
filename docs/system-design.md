@@ -877,9 +877,19 @@ SDD 160 扩展 execution_index 为跨领域执行投影，新增 domain executio
 
 SDD 161 新增 GET /api/v1/openapi.json，从当前主体可见描述符生成 OpenAPI 3.1，包含真实输入/输出 Schema、capability/version、effect/risk、Scope 和安全错误。Capability HTTP 在保留 Web 会话的同时支持现有 PAT/OAuth Bearer，复用 McpAccess 与同一 Principal、Dispatcher、Scope、Host、限流和审计；不模拟 MCP，不提升角色或资源范围。文档不包含秘密或目标数据，服务主体和持续授权未完成。
 
+SDD 162 开始 Slice 5，增加独立服务主体与固定只读自动化。mcp_service_accounts 将服务 ID、管理员 Owner、能力/version/固定输入规则、总预算和期限绑定到独立 service grant/token；服务 ID 不写入 users，Principal 以 subject_type=service 和 owner_user_id 区分个人主体，调用审计增加 subject_type，旧记录默认 user。Owner 必须保持有效管理员，撤销、到期、降权或停用立即失败关闭。
+
+服务规则只接受当前 Registry 中 read、center_read、R0/R1 且 MCP/HTTP 可见的能力，派生最小 Scope 并保留 Host 封闭范围。Dispatcher 的发现/OpenAPI 可见性和执行前授权复用同一规则；固定输入是递归 JSON 子集，不接受代码或模板。通过 Schema、Host 与限流后以单条条件 UPDATE 原子消耗预算，领域失败不退款，预算不代表成功。本切片不开放 propose、execute、远程探测或持续写授权，不增加 54 个工具的清单。
+
+Capability HTTP 的路由调整为可选认证：Bearer 无需 Web Cookie，Cookie 会话由平台 Auth 解析且写调用继续执行 Origin 校验，未认证请求仍失败关闭。该修正让 PAT/OAuth/服务 Bearer 在真实 Router 中与普通程序契约一致，不放宽管理 API 或 MCP 权限。
+
+SDD 163 将服务持续授权扩展到现有任务的三项原生提案：task.dispatch、run.cancel、run.retry。每条服务规则必须固定一种 operation，不开放 task.create/update 或周期计划。任务 ProposalSource 加密保存 service subject、Owner 与原始 capability/version/input 证据；Stored.owner_id 仍为服务 ID，只有人类 Owner 可读取并 Apply，服务自身和其他管理员不能审批。审批 actor、任务 requested_by 与审计使用人类 Owner，不伪造服务执行。
+
+持续授权拆为提交时 authorizeInvocation 和不扣预算的 authorizeContinuation。Owner 审批、helper 领取及自动重试入队/领取均复验稳定 grant、服务策略、原始输入、Scope 和 Host；提交预算只限制新调用，不撤销已审批执行。capability_run_authorizations 增加 proposal_id 并在自动重试复制，beforeStart 通过原提案证据失败关闭；没有新增提案或执行状态机。个人 PAT/OAuth 与旧 proposal_id 为空的记录保持兼容，queued/running/unknown 语义不变。
 
 
-完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 153](../specs/153-instrumentation-proposal-capability-write/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md)、[SDD 156](../specs/156-alert-escalation-proposal-capability-write/spec.md)、[SDD 157](../specs/157-alert-renewal-proposal-capability-write/spec.md)、[SDD 158](../specs/158-alert-delivery-retry-proposal-capability-write/spec.md)、[SDD 159](../specs/159-cross-domain-proposal-index/spec.md)、[SDD 160](../specs/160-cross-domain-execution-index/spec.md)、[SDD 161](../specs/161-capability-openapi-bearer/spec.md) 和 [MCP 接入指南](mcp.md)。
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 153](../specs/153-instrumentation-proposal-capability-write/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md)、[SDD 156](../specs/156-alert-escalation-proposal-capability-write/spec.md)、[SDD 157](../specs/157-alert-renewal-proposal-capability-write/spec.md)、[SDD 158](../specs/158-alert-delivery-retry-proposal-capability-write/spec.md)、[SDD 159](../specs/159-cross-domain-proposal-index/spec.md)、[SDD 160](../specs/160-cross-domain-execution-index/spec.md)、[SDD 161](../specs/161-capability-openapi-bearer/spec.md)、[SDD 162](../specs/162-service-principal-capability-automation/spec.md)、[SDD 163](../specs/163-service-task-proposal-automation/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 

@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { Dependencies, User } from "../shared/types.js";
+import type { Context, Dependencies, User } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
 import { TaskProposalService, runMetadata, taskMetadata, taskTools, taskDraftSchema, type ProposalSource } from "../assistant/task-tools.js";
 import type { TaskRunStore } from "../server/task-center.js";
@@ -70,17 +70,28 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   private readonly limits = new Map<string,{start:number;count:number;active:number}>();
   constructor(readonly deps: Dependencies, readonly authority: CapabilityAuthority, readonly options: {taskCenter: TaskRunStore; alerts?: AlertCapabilities; alertProposals?: AlertProposalService; telemetry?: TelemetryService; logs?: LogReadService; traces?: TraceReadService; deployments?: ServiceDeploymentStore; operations?: OperationsStore; operationSchedules?: OperationScheduleReader; machines?: ManagedMachineStore; dashboards?: DashboardReadService; instrumentation?: InstrumentationService; executionGrants?: ExecutionGrantRegistry}) {
     deps.db.exec(`CREATE TABLE IF NOT EXISTS capability_installation(id TEXT PRIMARY KEY);
-      CREATE TABLE IF NOT EXISTS capability_invocations(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,credential_id TEXT NOT NULL,source TEXT NOT NULL,capability TEXT NOT NULL,input_hash TEXT NOT NULL,decision TEXT NOT NULL,code TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,finished_at TEXT NOT NULL DEFAULT '',proposal_id TEXT NOT NULL DEFAULT '');
+      CREATE TABLE IF NOT EXISTS capability_invocations(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,credential_id TEXT NOT NULL,source TEXT NOT NULL,capability TEXT NOT NULL,input_hash TEXT NOT NULL,decision TEXT NOT NULL,code TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,finished_at TEXT NOT NULL DEFAULT '',proposal_id TEXT NOT NULL DEFAULT '',subject_type TEXT NOT NULL DEFAULT 'user');
       CREATE INDEX IF NOT EXISTS capability_invocations_owner ON capability_invocations(user_id,created_at);
       CREATE TABLE IF NOT EXISTS capability_idempotency(installation_id TEXT NOT NULL,user_id TEXT NOT NULL,capability TEXT NOT NULL,key_hash TEXT NOT NULL,input_hash TEXT NOT NULL,proposal_id TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(installation_id,user_id,capability,key_hash));
-      CREATE TABLE IF NOT EXISTS capability_run_authorizations(run_id TEXT PRIMARY KEY,grant_id TEXT NOT NULL,user_id TEXT NOT NULL,host_id TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS capability_run_authorizations(run_id TEXT PRIMARY KEY,grant_id TEXT NOT NULL,user_id TEXT NOT NULL,host_id TEXT NOT NULL,proposal_id TEXT NOT NULL DEFAULT '');
       CREATE TABLE IF NOT EXISTS execution_index(id TEXT PRIMARY KEY,domain TEXT NOT NULL,native_id TEXT NOT NULL,host_id TEXT NOT NULL,state TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(domain,native_id));`);
+    if(!deps.db.all<{name:string}>("PRAGMA table_info(capability_invocations)").some(column=>column.name==="subject_type"))
+      deps.db.exec("ALTER TABLE capability_invocations ADD COLUMN subject_type TEXT NOT NULL DEFAULT 'user'");
+    if(!deps.db.all<{name:string}>("PRAGMA table_info(capability_run_authorizations)").some(column=>column.name==="proposal_id"))
+      deps.db.exec("ALTER TABLE capability_run_authorizations ADD COLUMN proposal_id TEXT NOT NULL DEFAULT ''");
     const existing = deps.db.get<{id:string}>("SELECT id FROM capability_installation LIMIT 1");
     this.installationID = existing?.id ?? randomUUID();
     if (!existing) deps.db.run("INSERT INTO capability_installation(id) VALUES(?)", this.installationID);
     this.proposalIndex = new ProposalIndex(deps);
     this.executionIndex = new ExecutionIndex(deps);
     this.proposals = new TaskProposalService(deps, options.taskCenter, {
+      beforeCreate: (_actor, source, intent) => {
+        if(source.subject_type!=="service")return;
+        const current=this.grant(source,_actor.id);this.authorize(current,"tasks.propose");
+        if(intent.operation==="task.dispatch")for(const id of intent.host_ids??[])this.host(current,id);
+        else this.host(current,options.taskCenter.get(intent.run_id!).host_id);
+        this.authorizeAutomation(current,source);
+      },
       afterCreate: (_actor, source, intent, proposal) => {
         const ids = intent.host_ids ?? (intent.task as any)?.host_ids;
         this.proposalIndex.link({ domain: "task", nativeID: proposal.id, capability: "lightmoni_tasks_plan", ownerID: _actor.id, source: source.source,
@@ -99,23 +110,30 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
           this.assertStaticTaskTargets(current, intent.task);
         }
         else fail(403, "unsupported_external_proposal");
+        this.authorizeAutomation(current,source);
       },
       afterApply: (actor, source, _intent, proposal) => {
         if (source.source !== "mcp") return;
         const result = proposal.result as any;
         const runs = result?.runs ?? (result?.host_id ? [result] : []);
         for (const run of runs) {
-          deps.db.run("INSERT OR IGNORE INTO capability_run_authorizations(run_id,grant_id,user_id,host_id) VALUES(?,?,?,?)", run.id, source.grant_id, actor.id, run.host_id);
+          deps.db.run("INSERT OR IGNORE INTO capability_run_authorizations(run_id,grant_id,user_id,host_id,proposal_id) VALUES(?,?,?,?,?)", run.id, source.grant_id, source.subject_id??actor.id, run.host_id, proposal.id);
           this.index(run);
         }
       },
     });
     options.taskCenter.beforeStart = run => {
-      const binding = deps.db.get<{grant_id:string;user_id:string;host_id:string}>("SELECT * FROM capability_run_authorizations WHERE run_id=?", run.id);
+      const binding = deps.db.get<{grant_id:string;user_id:string;host_id:string;proposal_id:string}>("SELECT * FROM capability_run_authorizations WHERE run_id=?", run.id);
       if (!binding) return true;
       try {
         const p = this.grant({source:"mcp",grant_id:binding.grant_id}, binding.user_id);
-        this.authorize(p,"tasks.propose"); this.host(p,binding.host_id); return true;
+        this.authorize(p,"tasks.propose"); this.host(p,binding.host_id);
+        if(p.subject_type==="service"){
+          if(!binding.proposal_id)fail(403,"authorization_revoked");
+          const source=this.proposals.source(p.user,binding.proposal_id);if(!source)fail(403,"authorization_revoked");
+          this.authorizeAutomation(p,source);
+        }
+        return true;
       } catch { return false; }
     };
     const nodes = options.taskCenter.nodes;
@@ -296,7 +314,16 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   }
   private grant(source:ProposalSource,userID:string):Principal {
     if(!source.grant_id||!this.authority.validateGrant)fail(403,"authorization_unavailable");
-    return this.authority.validateGrant(source.grant_id,userID);
+    return this.authority.validateGrant(source.grant_id,source.subject_id??userID);
+  }
+  private authorizeAutomation(p:Principal,source:ProposalSource):void {
+    if(p.subject_type!=="service")return;
+    const capability=source.capability;
+    if(!capability||capability.id!=="tasks.plan"||capability.name!=="lightmoni_tasks_plan"||capability.version!==1)fail(403,"automation_capability_forbidden");
+    const definition=this.definitions.find(d=>d.id===capability.id&&d.name===capability.name&&d.version===capability.version);
+    if(!definition)fail(403,"automation_capability_forbidden");
+    if(!this.authority.authorizeContinuation)fail(503,"authorization_unavailable");
+    this.authority.authorizeContinuation(p,definition,capability.input);
   }
   private authorize(p:Principal,scope:string,allHosts=false,roles:("admin"|"member")[]=["admin"]) {
     if(!roles.includes(p.user.role as "admin"|"member")||!p.scopes.includes(scope)||allHosts&&p.host_ids!==null)fail(403,"capability_forbidden");
@@ -450,7 +477,9 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     return this.deps.db.transaction(()=>{
       const old=this.deps.db.get<{input_hash:string;proposal_id:string}>("SELECT input_hash,proposal_id FROM capability_idempotency WHERE installation_id=? AND user_id=? AND capability='lightmoni_tasks_plan' AND key_hash=?",this.installationID,p.user.id,keyHash);
       if(old){if(old.input_hash!==inputHash)fail(409,"idempotency_conflict");return {...this.proposalView(p,old.proposal_id),idempotency_replayed:true};}
-      const source:ProposalSource={source:p.source,grant_id:p.grant_id,credential_id:p.credential_id,...(c.session_id?{session_id:c.session_id}:{})};
+      const source:ProposalSource={source:p.source,grant_id:p.grant_id,credential_id:p.credential_id,...(c.session_id?{session_id:c.session_id}:{}),
+        ...(p.subject_type==="service"?{subject_type:"service" as const,subject_id:p.user.id,owner_user_id:p.owner_user_id,
+          capability:{id:"tasks.plan",name:"lightmoni_tasks_plan",version:1,input:structuredClone(i)}}:{})};
       if(p.source==="assistant"&&!source.session_id)fail(400,"assistant_session_required");
       const v=this.proposals.createFrom(p.user,source,intent);
       this.deps.db.run("INSERT INTO capability_idempotency(installation_id,user_id,capability,key_hash,input_hash,proposal_id,created_at) VALUES(?,?,'lightmoni_tasks_plan',?,?,?,?)",this.installationID,p.user.id,keyHash,inputHash,v.id,this.deps.now().toISOString());
@@ -561,7 +590,8 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     const channel=principal.source==="mcp"?"mcp":principal.source==="assistant"?"assistant":"http";
     return this.definitions.filter(d=>d.exposure[channel]&&d.roles.includes(principal.user.role as "admin"|"member")&&principal.scopes.includes(d.scope)
       &&(!d.additionalScopes||d.additionalScopes.every(scope=>principal.scopes.includes(scope)))
-      &&(!d.allHosts||principal.host_ids===null)).map(d=>this.summary(d));
+      &&(!d.allHosts||principal.host_ids===null)
+      &&(principal.subject_type==="service"?this.authority.allowsCapability?.(principal,d)===true:(this.authority.allowsCapability?.(principal,d)??true))).map(d=>this.summary(d));
   }
   listPage(principal:Principal,cursor?:string,pageSize=50):{tools:CapabilitySummary[];nextCursor?:string} {
     const tools=this.list(principal);
@@ -602,7 +632,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     const invocationID=randomUUID(),at=this.deps.now().toISOString();
     // Audit stores a digest, never scripts, output, secrets or supplied identity fields.
     let inputHash="invalid";try{inputHash=digest(input);}catch{}
-    this.deps.db.run("INSERT INTO capability_invocations(id,user_id,credential_id,source,capability,input_hash,decision,created_at) VALUES(?,?,?,?,?,?,'started',?)",invocationID,principal.user.id,principal.credential_id,principal.source,/^[a-z0-9_]{1,80}$/.test(name)?name:"invalid",inputHash,at);
+    this.deps.db.run("INSERT INTO capability_invocations(id,user_id,credential_id,source,capability,input_hash,decision,created_at,subject_type) VALUES(?,?,?,?,?,?,'started',?,?)",invocationID,principal.user.id,principal.credential_id,principal.source,/^[a-z0-9_]{1,80}$/.test(name)?name:"invalid",inputHash,at,principal.subject_type??"user");
     let release:(()=>void)|undefined,timeout:AbortSignal|undefined;
     try {
       this.authority.validate(principal);context.signal.throwIfAborted();
@@ -615,6 +645,8 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       validate(input,d.inputSchema);
       for(const target of d.targetResolver(input))if(target.kind==="host")this.host(principal,target.id);
       release=this.acquire(principal,d);
+      if(principal.subject_type==="service"&&!this.authority.authorizeInvocation)fail(503,"authorization_unavailable");
+      this.authority.authorizeInvocation?.(principal,d,input);
       timeout=AbortSignal.timeout(d.limits.timeoutMs);
       const executed=await d.execute(principal,input,{...context,signal:AbortSignal.any([context.signal,timeout])});
       const data=d.resultProjection(executed);
@@ -767,17 +799,19 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   }
 }
 export function registerCapabilities(deps:Dependencies,dispatcher:CapabilityDispatcher,authority:SessionAuthority,external?:AccessAuthority) {
-  deps.router.get("/api/v1/openapi.json",c=>c.json(capabilityOpenAPI(deps,dispatcher,capabilityPrincipal(c,authority,external))));
-  deps.router.get("/api/v1/capabilities",c=>c.json(dispatcher.list(capabilityPrincipal(c,authority,external))));
+  const principal=(c:Context)=>capabilityPrincipal(c,authority,external,()=>deps.auth?.user(c.req)??deps.router.auth?.user(c.req));
+  deps.router.get("/api/v1/openapi.json",c=>c.json(capabilityOpenAPI(deps,dispatcher,principal(c))),{public:true});
+  deps.router.get("/api/v1/capabilities",c=>c.json(dispatcher.list(principal(c))),{public:true});
   deps.router.post("/api/v1/capabilities/:name/invoke",async c=>{
     try {
+      if(c.req.headers.authorization===undefined)deps.router.checkOrigin?.(c.req);
       let input:unknown;
       try {input=JSON.parse((await c.raw(16<<10)).toString());}
       catch(error){if(error instanceof HTTPError)throw error;fail(400,"invalid_input");}
-      c.json(await dispatcher.invoke(capabilityPrincipal(c,authority,external),c.params.name,input,{signal:c.signal}));
+      c.json(await dispatcher.invoke(principal(c),c.params.name,input,{signal:c.signal}));
     } catch(error) {
       const status=capabilityErrorStatus(error),message=status>=500?"服务暂不可用":String((error as Error)?.message??"调用未完成");
       c.json({error:message,code:capabilityErrorCategory(status),detail_code:capabilityErrorDetail(error,status)},status);
     }
-  });
+  },{public:true});
 }

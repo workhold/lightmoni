@@ -23,6 +23,9 @@ export const CAPABILITY_SCOPES = [
 export type CapabilityScope = typeof CAPABILITY_SCOPES[number];
 export interface Principal {
   user: User;
+  /** Absence retains the legacy human/user subject semantics. */
+  subject_type?: "user" | "service";
+  owner_user_id?: string;
   scopes: string[];
   /** null explicitly grants all registered hosts; an empty list grants none. */
   host_ids: string[] | null;
@@ -36,6 +39,9 @@ export interface SessionAuthority {
 export interface ExternalAuthority {
   validate(principal: Principal): void;
   validateGrant?(grantID: string, userID?: string): Principal;
+  allowsCapability?(principal: Principal, definition: CapabilityDefinition): boolean;
+  authorizeContinuation?(principal: Principal, definition: CapabilityDefinition, input: unknown): void;
+  authorizeInvocation?(principal: Principal, definition: CapabilityDefinition, input: unknown): void;
 }
 export interface CapabilityAuthority extends SessionAuthority, ExternalAuthority {}
 export interface AccessAuthority extends CapabilityAuthority {
