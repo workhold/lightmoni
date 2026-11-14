@@ -1474,6 +1474,28 @@ export class Alerts implements Module {
     return this.commitTransfer(key, actor, targetUserID);
   }
 
+  prepareRenew(key: string, actor: {id:string;role:string}): void {
+    const r = this.response(key);
+    if (!r) throw new HTTPError(404, "事件不存在");
+    if (r.state !== "acknowledged" || r.owner_id !== actor.id) throw new HTTPError(403, "只有当前接手人可以续期");
+  }
+
+  commitRenew(key: string, actor: {id:string;role:string}): any {
+    let r: any;
+    this.deps.db.transaction(() => {
+      this.prepareRenew(key, actor);
+      r = this.response(key); const now = this.now();
+      r.handling_until = stamp(new Date(now.getTime() + (policy(r.group, r.priority).handling_seconds || 3600) * 1000));
+      this.saveResponse(r); this.audit(r, "renewed", actor.id, "web", "确认仍在处理，延长处理期限", now);
+    });
+    return r;
+  }
+
+  renew(key: string, actor: {id:string;role:string}): any {
+    this.prepareRenew(key, actor);
+    return this.commitRenew(key, actor);
+  }
+
   prepareEscalate(key: string, actor: {id:string;role:string}): void {
     const r = this.response(key);
     if (!r) throw new HTTPError(404, "事件不存在");

@@ -476,20 +476,7 @@ export function registerAlertAPI(m: Alerts): void {
     );
   });
   r.post("/api/v1/alerts/incidents/:id/renew", (c) => {
-    const v = incident(m, c);
-    if (v.state !== "acknowledged" || v.owner_id !== c.user.id)
-      c.error(403, "只有当前接手人可以续期");
-    v.handling_until = stamp(
-      new Date(
-        m.now().getTime() +
-          (policy(v.group, v.priority).handling_seconds || 3600) * 1000,
-      ),
-    );
-    db.transaction(() => {
-      m.saveResponse(v);
-      m.audit(v, "renewed", c.user.id, "web", "确认仍在处理，延长处理期限");
-    });
-    c.json(v);
+    c.json(guarded(c, () => m.renew(c.params.id, c.user), 400));
   });
   r.post("/api/v1/alerts/incidents/:id/transfer", async (c) => {
     const body = await c.body<any>();

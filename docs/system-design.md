@@ -865,7 +865,9 @@ SDD 155 将告警事件转交纳入同一提案路径：Alert API 的转交和�
 
 SDD 156 将主动升级纳入同一提案路径：Alert API 的主动升级提取为 Alerts.prepareEscalate/commitEscalate，复用 resetPaging 和 primary→backup、其他→fallback 规则。incident.escalate 额外要求 incidents.read，审批后事件 unclaimed、owner 清空并写 manual_escalation 审计；升级完成不表示目标成员已接手或通知已送达。续期和通知重试/测试仍不开放。
 
-完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md)、[SDD 156](../specs/156-alert-escalation-proposal-capability-write/spec.md) 和 [MCP 接入指南](mcp.md)。
+SDD 157 将值班续期纳入同一提案路径：Alert API 的续期提取为 Alerts.prepareRenew/commitRenew，只有当前 acknowledged 事件的 owner 可以续期，管理员不绕过 owner 约束。incident.renew 额外要求 incidents.read，审批后按原 handling_seconds/3600 秒更新 handling_until 并写 renewed 审计，不增加 generation；预览只表达将延期，实际期限以原生回执为准。通知重试/测试仍不开放。
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md)、[SDD 156](../specs/156-alert-escalation-proposal-capability-write/spec.md)、[SDD 157](../specs/157-alert-renewal-proposal-capability-write/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 
