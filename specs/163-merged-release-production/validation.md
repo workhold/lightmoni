@@ -16,6 +16,7 @@
 - `LIGHTMONI_CH_PASSWORD=placeholder docker compose config --quiet` 通过；`docker compose config --images` 回读中心为 `docker.heyphp.com/lightmoni/lightmoni:20261114-eb1690b`、ClickHouse 为 `clickhouse/clickhouse-server:26.8`。占位值仅作为本地校验进程的环境变量，未写入文件。
 - 暂存差异执行 `git diff --cached --check` 通过；变更仅含根 Compose 的中心镜像引用与 SDD163 五个文件。
 - [发行 PR #221](https://github.com/workhold/lightmoni/pull/221) 已创建，目标为 GitHub `main`；合入尚待执行。PR 描述记录最终行为、兼容影响、相关检查、架构与 Doca 不适用理由及后续发布/生产验收门槛。
+- 发行期间 `main` 新合入 #222（AI/MCP 文档及端到端检查）；发布分支已合入其 `71a5a5b6` 提交，无冲突。#222 不修改本镜像的 Runtime/Web/Agent 源码，已发布镜像的源码身份仍固定为 `eb1690bb42a47c8f5bc28df404c0d957aa9b391b`。合入后的 Compose 校验及相对最新 `main` 的差异检查再次通过。
 
 ## 固定标签镜像发布与隔离验收
 
