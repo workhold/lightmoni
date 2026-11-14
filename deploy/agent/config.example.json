@@ -10,6 +10,8 @@
   "min_free_bytes": 33554432,
   "max_receipts": 100000,
   "max_age_seconds": 86400,
+  "max_retention_seconds": 3600,
+  "replay_interval_ms": 1000,
   "receipt_seconds": 172800,
   "collect_interval_seconds": 15,
   "control_interval_seconds": 30,

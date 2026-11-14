@@ -107,6 +107,9 @@ export function resourceState(resource: Resource): string {
     if (published.length) {
       if (current.some((instance: Spec) => instance.state === "unknown")) return "unknown";
       const allApplied = published.every((deployment) => Number(deployment.applied_revision) === Number(deployment.desired_revision));
+      if (current.some((instance: Spec) => ["retained", "grace", "protected"].includes(instance.availability) ||
+        instance.state === "running" && instance.availability && instance.availability !== "ready" ||
+        instance.recovery?.state === "blocked" && instance.recovery?.code === "unknown_execution_result")) return "unverified";
       if (allApplied && current.length && current.every((instance: Spec) => instance.healthy && instance.state === "running")) return "running";
       if (allApplied && !current.length && resource.spec.deployment_mode === "managed" && resource.spec.deployments.every((deployment: Spec) => deployment.replicas === 0)) return "stopped";
       if (published.some((deployment) => deployment.last_error) || current.some((instance: Spec) => ["failed", "error"].includes(instance.state))) return "failed";

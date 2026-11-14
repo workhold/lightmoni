@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,writeFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 import {tmpdir} from 'node:os';
 import {join,delimiter} from 'node:path';
 import {DB} from '../src/shared/sqlite.js';
@@ -9,7 +10,7 @@ import {ApplicationObserver,dockerBytes} from '../src/agent/application-observer
 import {applicationTargets,bindApplicationRows,dockerInventory} from '../src/shared/application-observation.js';
 import {defaultConfig} from '../src/agent/config.js';
 import {createAgent} from '../src/agent/agent.js';
-import {decodeOTLP,nowNano,formatNanoTime} from '../src/shared/otlp.js';
+import {decodeOTLP,nowNano,formatNanoTime,parseNanoTime} from '../src/shared/otlp.js';
 import {Catalog} from '../src/server/catalog.js';
 import {systemTable} from '../src/server/auth.js';
 function dbFixture(t:any){const db=new DB(':memory:');t.after(()=>db.close());return db;}
@@ -96,6 +97,22 @@ test('same-timestamp log lines resume from durable cursor; queue failure does no
  const agent=agentFixture(t),time=formatNanoTime(nowNano()-1000000000n);const read=async()=>({stdout:`${time} one\n${time} two\n${time} three\n`,stderr:''});const observer=new ApplicationObserver(agent,async()=>({stdout:'',stderr:''}),read);await observer.collectLogs(container,target);
  const first=agent.queue.next()!;const msg:any=decodeOTLP('logs',first.payload,first.content_type);assert.equal(msg.resourceLogs[0].scopeLogs[0].logRecords.length,3);const before=agent.queue.db.all('SELECT * FROM log_cursors');await observer.collectLogs(container,target);assert.deepEqual(agent.queue.db.all('SELECT * FROM log_cursors'),before);
  const newer=formatNanoTime(nowNano());const next=new ApplicationObserver(agent,async()=>({stdout:'',stderr:''}),async()=>({stdout:`${time} one\n${time} two\n${time} three\n${newer} four\n`,stderr:''}));const accept=agent.accept.bind(agent);agent.accept=()=>{throw Error('queue full')};await assert.rejects(next.collectLogs(container,target),/queue full/);assert.deepEqual(agent.queue.db.all('SELECT * FROM log_cursors'),before);agent.accept=accept;await next.collectLogs(container,target);assert.equal(agent.queue.db.all<any>('SELECT generation FROM log_cursors')[0].generation,1);
+});
+test('Docker log recovery skips events before the queue retention window without resetting source sequence',async t=>{
+ const agent=agentFixture(t);agent.config.max_retention_seconds=60;
+ const old=formatNanoTime(nowNano()-120000000000n),recent=formatNanoTime(nowNano()-1000000000n);
+ const source='docker:'+container.id+':stdout',key=createHash('sha256').update(source).digest('hex');
+ agent.queue.db.run('INSERT INTO log_cursors(id,offset,generation,prefix,path) VALUES(?,?,?,?,?)',key,parseNanoTime(old),3n,Buffer.from('5'),source);
+ let since=0n;
+ const observer=new ApplicationObserver(agent,async()=>({stdout:'',stderr:''}),async(args)=>{
+  if(args.includes('--since'))since=parseNanoTime(args[args.indexOf('--since')+1]);
+  return {stdout:`${old} stale\n${recent} current\n`,stderr:''};
+ });
+ await observer.collectLogs(container,target);
+ assert(since>parseNanoTime(old));
+ const queued=agent.queue.next()!,rows:any[]=decodeOTLP('logs',queued.payload,queued.content_type).resourceLogs[0].scopeLogs[0].logRecords;
+ assert.deepEqual(rows.map(row=>row.body.stringValue),['current']);
+ assert.equal(rows[0].attributes.find((value:any)=>value.key==='lightmoni.source_seq').value.intValue,'6');
 });
 test('automatic Docker discovery records app gauges and does not adopt external containers',async t=>{
  const agent=agentFixture(t);let stats=false;const observer=new ApplicationObserver(agent,async(_file,args)=>{if(args.includes('stats')){stats=true;return {stdout:JSON.stringify({ID:container.id,CPUPerc:'2.4%',MemUsage:'32MiB / 1GiB',MemPerc:'3.12%',NetIO:'1MB / 2MB',BlockIO:'3MB / 4MB',PIDs:'5'})+'\n',stderr:''};}return {stdout:[{ID:container.id,Names:container.name,Image:container.image,State:'running',Ports:'',Labels:'io.lightmoni.platform.instance=instance-a'},{ID:'b'.repeat(64),Names:'external',Image:'busybox',State:'exited',Ports:'',Labels:''}].map(x=>JSON.stringify(x)).join('\n'),stderr:''};},async()=>({stdout:'',stderr:''}));observer.targets=[target];await observer.collect();assert(stats);assert.equal(observer.inventory?.containers.length,2);assert.equal(observer.inventory?.containers[1].deployment_id,'');await agent.sdk.flush({timeoutMs:1000});const batch=agent.queue.next()!;const msg:any=decodeOTLP('metrics',batch.payload,batch.content_type);assert.equal(batch.table,'lightmoni_application');assert(msg.resourceMetrics[0].scopeMetrics[0].metrics.some((m:any)=>m.name==='container.memory.used'));
