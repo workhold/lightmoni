@@ -38,3 +38,5 @@
 - 未执行真实 Codex/Claude 客户端、真实 Agent、生产普通程序或生产业务 E2E；Dispatcher、原生服务与 helper fixture 只是开发证据。
 - 不开放 task.create/update、周期计划、其他领域服务提案、直接 execute、任意脚本/Shell 或自动批准。
 - 服务策略编辑/轮换、真实 Web 页面兼容矩阵、其他领域持续授权和完整平台真实业务闭环仍需后续独立 SDD。
+
+交付 PR：[workhold/lightmoni#219](https://github.com/workhold/lightmoni/pull/219)，目标为 main，依赖 #218，合并顺序为 #218 → #219；实现与验证完成，等待评审，未获本轮合并授权。
