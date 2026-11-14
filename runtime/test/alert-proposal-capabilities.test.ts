@@ -16,8 +16,9 @@ import type { Dependencies, User } from "../src/shared/types.js";
 
 const admin: User = {id:"admin",name:"Admin",role:"admin"}, member: User = {id:"member",name:"Member",role:"member"};
 async function fixture() {
+  let clock=new Date("2026-11-14T00:00:00Z");
   const db=new DB(":memory:");accountSchema(db);db.run("INSERT INTO users(id,name,role,active,created_at) VALUES('admin','Admin','admin',1,'2026-11-14'),('member','Member','member',1,'2026-11-14')");
-  const deps={db,router:new Router(),now:()=>new Date("2026-11-14T00:00:00Z"),externalURL:"https://moni.example.test",...cipher(Buffer.alloc(32,26)),
+  const deps={db,router:new Router(),now:()=>clock,externalURL:"https://moni.example.test",...cipher(Buffer.alloc(32,26)),
     cat:{list:async()=>[{id:"log_app",name:"log_app",logical_name:"app",kind:"log",columns:[],services:["api"],system:false,retention_days:null,effective_retention_days:7}]},
     referencedTables:async()=>["log_app"],query:async()=>({request_id:"",results:[]}),logger:{info(){},warn(){},error(){}}} as unknown as Dependencies;
   const alerts=new Alerts(deps),capabilities=new AlertCapabilities(alerts),proposals=new AlertProposalService(db,capabilities,deps.now,deps.encrypt,deps.decrypt);
@@ -28,7 +29,7 @@ async function fixture() {
   const access=new CapabilityAccess(deps,{validate(){if(revoked)throw Error("revoked")},validateGrant(){if(revoked)throw Error("revoked");return structuredClone(grantPrincipal)}});
   const dispatcher=new CapabilityDispatcher(deps,access,{taskCenter:runs,alerts:capabilities,alertProposals:proposals});
   const invoke=(name:string,input:any,p=structuredClone(principal))=>dispatcher.invoke(p,name,input,{signal:new AbortController().signal});
-  return{db,alerts,capabilities,proposals,rule,dispatcher,principal,access,invoke,revoke:()=>{revoked=true},shrinkIncidents:()=>{grantPrincipal={...grantPrincipal,scopes:grantPrincipal.scopes.filter(s=>s!=="alerts.incidents.read")};},close:async()=>{await alerts.close();db.close();}};
+  return{db,alerts,capabilities,proposals,rule,dispatcher,principal,access,invoke,advance:(ms:number)=>{clock=new Date(clock.getTime()+ms);},revoke:()=>{revoked=true},shrinkIncidents:()=>{grantPrincipal={...grantPrincipal,scopes:grantPrincipal.scopes.filter(s=>s!=="alerts.incidents.read")};},close:async()=>{await alerts.close();db.close();}};
 }
 
 test("external alert rule and silence proposals use native approval and transactional idempotency",async()=>{
@@ -81,6 +82,7 @@ test("incident proposals require incident scope and live grant, and reject chang
   const withoutIncidents={...structuredClone(f.principal),scopes:f.principal.scopes.filter(s=>s!=="alerts.incidents.read")};
   await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"incident.ack",target_id:"incident-one",reason:"x",idempotency_key:"scope"},withoutIncidents),/scope_required|capability_forbidden/);
   await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"incident.escalate",target_id:"incident-one",reason:"x",idempotency_key:"scope-escalate"},withoutIncidents),/scope_required|capability_forbidden/);
+  await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"incident.renew",target_id:"incident-one",reason:"x",idempotency_key:"scope-renew"},withoutIncidents),/scope_required|capability_forbidden/);
   const ruleCompatible=await f.invoke("lightmoni_alerts_plan",{operation:"rule.update",target_id:f.rule.id,patch:{threshold:"2"},reason:"compatible",idempotency_key:"compatible"},withoutIncidents);assert.equal(ruleCompatible.data.proposal.status,"awaiting_approval");
   const hostScoped={...structuredClone(f.principal),host_ids:["one"]};await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"incident.ack",target_id:"incident-one",reason:"x",idempotency_key:"host"},hostScoped),/capability_forbidden/);
   const memberSession=f.access.sessionPrincipal(member,"assistant");await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"incident.ack",target_id:"incident-one",reason:"x",idempotency_key:"member"},memberSession),/capability_forbidden/);
@@ -146,5 +148,27 @@ test("internal incident escalation uses the same proposal and native commit path
   const created=await f.dispatcher.assistantTools().find(t=>t.name==="propose_alert_change")!.execute({operation:"incident.escalate",target_id:"incident-one",reason:"internal escalate"},new AbortController().signal,admin,{session_id:"session-one"});
   assert.equal(created.proposal.session_id,"session-one");assert.equal(alertsState(f),"firing");await f.proposals.apply(admin,created.proposal.id,new AbortController().signal);
   assert.equal(alertsState(f),"unclaimed");assert.equal(f.alerts.response("incident-one").stage,"backup");
+ }finally{await f.close();}
+});
+
+test("incident renewal extends only the current owner's handling deadline",async()=>{
+ const f=await fixture();try{
+  const ack=(await f.invoke("lightmoni_alerts_plan",{operation:"incident.ack",target_id:"incident-one",reason:"ack",idempotency_key:"ack-for-renew"})).data.proposal;await f.proposals.apply(admin,ack.id,new AbortController().signal);
+  f.advance(60_000);const before=f.alerts.response("incident-one"),input={operation:"incident.renew",target_id:"incident-one",reason:"still working",idempotency_key:"renew-one"},created=await f.invoke("lightmoni_alerts_plan",input),proposal=created.data.proposal;
+  assert.equal(proposal.after.renewal,"extend_handling_deadline");assert.equal(f.alerts.response("incident-one").handling_until,before.handling_until);
+  assert.equal((await f.invoke("lightmoni_alerts_plan",input)).data.proposal.id,proposal.id);await assert.rejects(f.invoke("lightmoni_alerts_plan",{...input,reason:"changed"}),/idempotency_conflict/);
+  const applied=await f.proposals.apply(admin,proposal.id,new AbortController().signal),response=f.alerts.response("incident-one");
+  assert.equal(applied.result.renewal,"extend_handling_deadline");assert.ok(Date.parse(response.handling_until)>Date.parse(before.handling_until));assert.equal(response.generation,before.generation);assert.equal(response.state,"acknowledged");
+  assert.throws(()=>f.alerts.renew("incident-one",member),/只有当前接手人/);
+  assert.equal(JSON.stringify(applied).includes("private-evidence"),false);
+ }finally{await f.close();}
+});
+
+test("internal incident renewal uses the same proposal and native commit path",async()=>{
+ const f=await fixture();try{
+  const ack=(await f.invoke("lightmoni_alerts_plan",{operation:"incident.ack",target_id:"incident-one",reason:"ack",idempotency_key:"ack-for-internal-renew"})).data.proposal;await f.proposals.apply(admin,ack.id,new AbortController().signal);
+  f.advance(60_000);const before=f.alerts.response("incident-one").handling_until,created=await f.dispatcher.assistantTools().find(t=>t.name==="propose_alert_change")!.execute({operation:"incident.renew",target_id:"incident-one",reason:"internal renew"},new AbortController().signal,admin,{session_id:"session-one"});
+  assert.equal(created.proposal.session_id,"session-one");await f.proposals.apply(admin,created.proposal.id,new AbortController().signal);
+  assert.ok(Date.parse(f.alerts.response("incident-one").handling_until)>Date.parse(before));assert.equal(f.alerts.response("incident-one").generation,1);
  }finally{await f.close();}
 });
