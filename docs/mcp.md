@@ -50,7 +50,7 @@ callback_port = 1455
 
 ## 首批工具
 
-告警模块启用时提供 49 个工具。默认任务通过任务目录读取，不另设模板目录。
+告警模块启用时提供 50 个工具。默认任务通过任务目录读取，不另设模板目录。
 
 | 工具 | scope | 行为 |
 | --- | --- | --- |
@@ -89,6 +89,7 @@ callback_port = 1455
 | `lightmoni_dashboards_versions` | `dashboards.read` | 大盘真实 revision 历史元数据 |
 | `lightmoni_code_instrumentation_scan` | `code.workspace.read` | 明确配置的中心工作区只读 SDK/边界扫描，不执行项目代码 |
 | `lightmoni_code_instrumentation_get` | `code.workspace.detail.read` | 既有插桩提案与安全应用回执，不返回 before 快照 |
+| `lightmoni_code_instrumentation_plan` | `code.workspace.propose` + `code.workspace.detail.read` | 在中心受限工作区创建插桩提案；MCP 返回 Diff 摘要和原生审阅地址，不修改文件 |
 | `lightmoni_alert_incidents_list/get` | `alerts.incidents.read` | 告警事件安全摘要，或真实事件与值班时间线 |
 | `lightmoni_alert_deliveries_list` | `alerts.notifications.read` | 通知投递安全状态和关联，省略联系人、payload、供应商响应与原始错误 |
 | `lightmoni_alert_response_statistics_get` | `alerts.statistics.read` | 原值班响应统计、接手率/时长和筛选；不修改记录 |
@@ -114,10 +115,12 @@ callback_port = 1455
 
 Agent 首装提案使用 `lightmoni_agent_installations_plan`，必须提供现有主机、成功且新鲜的 `check_id`、固定版本和匹配架构。返回真实 `review_url` 后由管理员在原主机页面审阅；MCP 不执行预检、审批或安装。`running`/`unknown` 和人工结束均不能冒充安装成功。
 
+SDK 插桩提案使用 `lightmoni_code_instrumentation_plan`，返回 Diff 摘要和受保护的 `review_url`。管理员通过该原生地址审阅完整 Diff，并在人类会话中调用原 Apply；MCP 不提供 Apply 或 code_task。提案和 Apply 接受不代表遥测已经验证，结果继续通过原计划读取。
+
 ## 部署条件与当前边界
 
 设置 `LIGHTMONI_EXTERNAL_URL` 为可信 HTTPS origin（不带路径、查询、凭据），本机调试可用 loopback HTTP。未满足时仅 MCP、PAT/OAuth 和外部授权管理禁用；统一能力层、会话鉴权的能力 HTTP 与内部助手共享工具继续运行。尚未完成的 MCP 来源提案在授权适配器缺失时拒绝批准；已有外部排队项和自动重试继续绑定原稳定授权，领取前无法复验则拒绝开始。内部助手提案仍可按原人工审批流程处理。代理需保留 Authorization 与 JSON 响应，不缓存授权与工具结果。服务无协议会话，不要求粘性路由或持久 SSE。
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-任务、告警、部署、运维和 Agent 首装计划由 AI/MCP 创建提案，管理员在原页面审批后由原领域服务执行真实写入或动作；AI/MCP 不能直接执行或自动批准。部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent SSH 预检/直接安装/升级/恢复/卸载工具、插桩生成/应用、code_task、服务主体或持续授权仍未开放。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。
+任务、告警、部署、运维、Agent 首装和 SDK 插桩计划由 AI/MCP 创建提案，管理员在原页面审批后由原领域服务执行真实写入或动作；AI/MCP 不能直接执行或自动批准。部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent SSH 预检/直接安装/升级/恢复/卸载工具、插桩 Apply/code_task、服务主体或持续授权仍未开放。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。
