@@ -79,11 +79,29 @@ export interface InstrumentationApplyResult {
   idempotent?: boolean;
 }
 
+export interface InstrumentationProposalSource {
+  source: "assistant" | "mcp" | "web";
+  user_id: string;
+  reason: string;
+  session_id?: string;
+  grant_id?: string;
+  credential_id?: string;
+}
+export interface InstrumentationProposeOptions {
+  source?: InstrumentationProposalSource;
+  /** Called synchronously after scanning so the application can atomically accept the plan. */
+  persist?(plan: InstrumentationPlan, save: () => void): void;
+}
+export interface InstrumentationAuthorization {
+  beforeApply(planID: string, source: InstrumentationProposalSource): void;
+}
+
 interface StoredInstrumentationPlan {
   plan: InstrumentationPlan;
   before: Record<string, string>;
   applied: InstrumentationApplyResult | null;
   idempotency_key?: string;
+  source?: InstrumentationProposalSource;
 }
 
 export interface InstrumentationStore {
@@ -221,9 +239,12 @@ async function atomicReplace(path: string, content: string, mode: number): Promi
 export class InstrumentationService {
   private readonly records = new Map<string, StoredInstrumentationPlan>();
   private readonly now: () => Date;
+  private authorization?: InstrumentationAuthorization;
   constructor(readonly root: string, private readonly options: InstrumentationServiceOptions = {}) {
     this.now = options.now ?? (() => new Date());
   }
+
+  useAuthorization(authorization: InstrumentationAuthorization): void { this.authorization = authorization; }
 
   private loadPlan(id: string): StoredInstrumentationPlan | undefined {
     if (!/^ip_[a-f0-9]{24}$/.test(id)) return undefined;
@@ -235,7 +256,10 @@ export class InstrumentationService {
     const serialized = JSON.stringify(value);
     if (Buffer.byteLength(serialized) > MAX_PLAN_BYTES) throw Error("instrumentation plan is too large");
     this.options.store?.put(planKey(id), structuredClone(value));
-    this.records.set(id, structuredClone(value));
+    // A persistent store is authoritative after the caller's acceptance
+    // transaction completes. Do not retain a phantom plan if that transaction
+    // later rolls back; the in-memory map is only the no-store fallback.
+    if (this.options.store) this.records.delete(id); else this.records.set(id, structuredClone(value));
     if (this.records.size > 100) {
       const first = this.records.keys().next().value as string | undefined;
       if (first) this.records.delete(first);
@@ -359,7 +383,7 @@ export class InstrumentationService {
    * ambiguous imports, one-line handlers, or missing SDK initialization become
    * manual steps instead of speculative source edits.
    */
-  async propose(input: InstrumentationProposalInput, signal?: AbortSignal): Promise<InstrumentationPlan> {
+  async propose(input: InstrumentationProposalInput, signal?: AbortSignal, options: InstrumentationProposeOptions = {}): Promise<InstrumentationPlan> {
     if (!input || typeof input.workspace !== "string" || !input.workspace.trim())
       throw Error("workspace is required");
     if (typeof input.intent !== "string" || !input.intent.trim() || input.intent.length > 2000)
@@ -507,7 +531,9 @@ export class InstrumentationService {
       if (snapshot === undefined) throw Error("instrumentation source disappeared");
       before[file.path] = snapshot;
     }
-    this.savePlan(plan.plan_id, { plan, before, applied: null });
+    const stored: StoredInstrumentationPlan = { plan, before, applied: null, ...(options.source ? { source: structuredClone(options.source) } : {}) };
+    const save = () => this.savePlan(plan.plan_id, stored);
+    if (options.persist) options.persist(plan, save); else save();
     return plan;
   }
 
@@ -525,6 +551,8 @@ export class InstrumentationService {
       // receipt. A changed key cannot make the source write a second time.
       return { ...record.applied, idempotent: true };
     }
+    if (record.source?.source === "mcp" && !this.authorization) throw Error("authorization_unavailable");
+    if (record.source) this.authorization?.beforeApply(planID, record.source);
     if (record.plan.state !== "awaiting_approval" || input.base_revision !== record.plan.base_revision)
       throw Error("revision conflict");
     if (!record.plan.files.length) throw Error("instrumentation plan has no changes");

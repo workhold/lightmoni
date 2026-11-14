@@ -21,7 +21,7 @@
 - `lightmoni_domain_proposals_get` 返回各领域原生最新状态；任务/告警审批后统一 status=completed，部署/运维/Agent 首装保持 awaiting_approval。
 - 列表在原生刷新后执行 domain/state 过滤，limit 分页、owner 隔离、proposals.read、领域 Scope 和 Host 授权生效；跨 owner 返回空集，错误 Host 不可见。
 - 内部助手、MCP 和会话 HTTP 复用同一索引。官方 MCP 客户端发现并读取 task/alert 索引，status 与原生记录一致。
-- 工具总数由 49 增至 51；原任务专用 lightmoni_proposals_get 保持兼容。OpenAPI/Bearer、执行索引、服务主体和持续授权未开放。
+- 工具总数由 50 增至 52；原任务专用 lightmoni_proposals_get 保持兼容。OpenAPI/Bearer、执行索引、服务主体和持续授权未开放。
 
 ## 未验证与剩余范围
 

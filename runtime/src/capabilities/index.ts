@@ -124,12 +124,18 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       if(change.operation.startsWith("incident."))this.authorize(current,"alerts.incidents.read",true);
       if(change.operation==="delivery.retry")this.authorize(current,"alerts.notifications.read",true);
     }});
+    options.instrumentation?.useAuthorization({beforeApply:(planID,source)=>{
+      if(source.source!=="mcp")return;
+      if(!options.executionGrants)fail(503,"authorization_unavailable");
+      options.executionGrants.assert("instrumentation",planID,true);
+    });
     options.alertProposals?.useProposalIndex({afterCreate:(actor,source,change,proposal)=>{
       this.proposalIndex.link({domain:"alert",nativeID:proposal.id,capability:"lightmoni_alerts_plan",ownerID:actor.id,source:source.source,
         operation:change.operation,status:"awaiting_approval",nativeState:proposal.status,reviewURL:`/api/v1/assistant/alert-proposals/${encodeURIComponent(proposal.id)}`,createdAt:proposal.created_at});
+    });
     }});
     options.executionGrants?.use(binding=>{
-      if(!["deployment","operation","agent_installation"].includes(binding.domain))return;
+      if(!["deployment","operation","agent_installation","instrumentation"].includes(binding.domain))return;
       const current=this.grant({source:"mcp",grant_id:binding.grant_id},binding.user_id);
       if(binding.domain==="deployment"){
         this.authorize(current,"deployments.propose",true);this.authorize(current,"deployments.read",true);
@@ -139,6 +145,8 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         this.authorize(current,"agents.maintain.propose");this.authorize(current,"agents.read");
         const installation=deps.db.get<{machine_id:string}>("SELECT machine_id FROM machine_deployments WHERE id=?",binding.native_id);
         if(!installation)fail(403,"capability_forbidden");this.host(current,installation.machine_id);
+      }else if(binding.domain==="instrumentation"){
+        this.authorize(current,"code.workspace.propose",true);this.authorize(current,"code.workspace.detail.read",true);
       }
     });
     const page = {limit:{type:"integer",minimum:1,maximum:100},offset:{type:"integer",minimum:0,maximum:100000}};
@@ -276,6 +284,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
           const value=service.read(i.plan_id);if(!value)fail(404,"resource_not_found");return value;
         }},
       );
+      if(options.executionGrants)definitions.push({name:"lightmoni_code_instrumentation_plan",description:"Create a reviewable SDK instrumentation plan in the configured center workspace. Requires code.workspace.propose and code.workspace.detail.read. Returns a bounded diff summary and native review URL; never applies code.",scope:"code.workspace.propose",allHosts:true,effect:"propose",inputSchema:schema({workspace:{...string,maxLength:512},intent:{type:"string",minLength:2,maxLength:2000},base_revision:{...string,maxLength:128},service:{...string,maxLength:128},env:{...string,maxLength:128},mode:{...string,enum:["direct"]},table:{...string,maxLength:48},metric:{...string,maxLength:128},reason:{type:"string",minLength:1,maxLength:1000},idempotency_key:{type:"string",minLength:1,maxLength:128}},["workspace","intent","reason","idempotency_key"]),execute:(p,i,c)=>this.planInstrumentation(p,i,c)});
     }
     this.definitions = definitions.map(defineCapability);
     validateCapabilityRegistry(this.definitions);
@@ -476,6 +485,29 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       return this.agentInstallationProposal(plan);
     });
   }
+  private instrumentationProposal(planID:string,source:Principal["source"]):any {
+    const value=this.options.instrumentation!.read(planID);if(!value)fail(404,"resource_not_found");
+    const path=`/api/v1/instrumentation-plans/${encodeURIComponent(planID)}`,full=value.plan;
+    const plan=source==="assistant"?full:{...full,files:full.files.map((file:any)=>({...file,patch:undefined,operations:undefined,diff_omitted:true})),diff_omitted:"Full diff is available to an administrator at review_url."};
+    return {proposal:{id:planID,operation:"instrumentation.create",status:value.applied?"completed":"awaiting_approval",
+      native_status:value.applied?.state??full.state,review_url:this.review(path)},plan,applied:value.applied};
+  }
+  private async planInstrumentation(p:Principal,i:any,c:InvocationContext):Promise<any> {
+    const {idempotency_key,base_revision,...identityInput}=i,intent={...identityInput,...(base_revision!==undefined?{base_revision}:{})},keyHash=digest(idempotency_key),inputHash=digest({version:1,input:identityInput}),service=this.options.instrumentation!;
+    const previous=()=>this.deps.db.get<{input_hash:string;proposal_id:string}>("SELECT input_hash,proposal_id FROM capability_idempotency WHERE installation_id=? AND user_id=? AND capability='lightmoni_code_instrumentation_plan' AND key_hash=?",this.installationID,p.user.id,keyHash);
+    const replay=(proposalID:string)=>({...this.instrumentationProposal(proposalID,p.source),idempotency_replayed:true});
+    const old=previous();if(old){if(old.input_hash!==inputHash)fail(409,"idempotency_conflict");return replay(old.proposal_id);}
+    const {reason,...input}=intent;let raced="";
+    const plan=await service.propose(input,c.signal,{source:{source:p.source,user_id:p.user.id,reason,...(c.session_id?{session_id:c.session_id}:{}),...(p.grant_id?{grant_id:p.grant_id}:{}),...(p.credential_id?{credential_id:p.credential_id}:{})},persist:(created,save)=>{
+      this.deps.db.transaction(()=>{
+        const current=previous();if(current){if(current.input_hash!==inputHash)fail(409,"idempotency_conflict");raced=current.proposal_id;return;}
+        save();
+        if(p.source==="mcp")this.options.executionGrants!.bind("instrumentation",created.plan_id,{grant_id:p.grant_id,user_id:p.user.id,source:p.source,reason});
+        this.deps.db.run("INSERT INTO capability_idempotency(installation_id,user_id,capability,key_hash,input_hash,proposal_id,created_at) VALUES(?,?,'lightmoni_code_instrumentation_plan',?,?,?,?)",this.installationID,p.user.id,keyHash,inputHash,created.plan_id,this.deps.now().toISOString());
+      });
+    }});
+    return raced?replay(raced):this.instrumentationProposal(plan.plan_id,p.source);
+  }
   private summary(d:CapabilityDefinition):CapabilitySummary {
     return {id:d.id,version:d.version,name:d.name,description:d.description,inputSchema:d.inputSchema,outputSchema:d.outputSchema,
       effect:d.effect,risk:d.risk,operationKind:d.operationKind,idempotencyPolicy:d.idempotencyPolicy};
@@ -674,8 +706,15 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         const v=await this.invoke(p,target,input,{signal,session_id:scope?.session_id});return v.data;
       }};
     });
+    const instrumentationProposal = this.definitions.some(d=>d.name==="lightmoni_code_instrumentation_plan") ? (()=>{
+      const d=this.definitions.find(x=>x.name==="lightmoni_code_instrumentation_plan")!,properties=Object.fromEntries(Object.entries(d.inputSchema.properties).filter(([key])=>!["idempotency_key","reason"].includes(key)));
+      return[{name:"propose_sdk_instrumentation",description:d.description,schema:{...d.inputSchema,properties,required:["workspace","intent"]},effect:"draft" as const,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+        if(!user)fail(401,"login_required");const p=this.authority.sessionPrincipal(user as User,"assistant");
+        const v=await this.invoke(p,"lightmoni_code_instrumentation_plan",{...input,reason:"Internal assistant instrumentation proposal",idempotency_key:randomUUID()},{signal,session_id:scope?.session_id});return v.data.plan;
+      }}];
+    })() : [];
     const old=taskTools(this.proposals).find(t=>t.name==="propose_task_action")!;
-    return [...shared,...telemetry,...alerts,...alertProposal,...logTrace,...deployments,...deploymentProposal,...operationReads,...operationProposal,...hostAgent,...agentInstallationProposal,...dashboardReads,...instrumentation,{...old,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+    return [...shared,...telemetry,...alerts,...alertProposal,...logTrace,...deployments,...deploymentProposal,...operationReads,...operationProposal,...hostAgent,...agentInstallationProposal,...dashboardReads,...instrumentation,...instrumentationProposal,{...old,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
       if(!user)fail(401,"login_required");
       const p=this.authority.sessionPrincipal(user as User,"assistant");
       const result=await this.invoke(p,"lightmoni_tasks_plan",{...input,idempotency_key:randomUUID()},{signal,session_id:scope?.session_id});
