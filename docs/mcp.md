@@ -50,7 +50,7 @@ callback_port = 1455
 
 ## 首批工具
 
-告警模块启用时提供 48 个工具。默认任务通过任务目录读取，不另设模板目录。
+告警模块启用时提供 49 个工具。默认任务通过任务目录读取，不另设模板目录。
 
 | 工具 | scope | 行为 |
 | --- | --- | --- |
@@ -82,6 +82,7 @@ callback_port = 1455
 | `lightmoni_operations_plan` | `operations.propose` + `operations.read` | 为既有运维资源的固定允许动作创建审批计划；审批与 privileged SSH 派发前复验稳定 grant |
 | `lightmoni_agent_releases_list` | `agents.read` | 实际 Agent Release、架构、build 和 SHA256；安装级授权 |
 | `lightmoni_agent_installations_get` | `agents.read` | 按部署 ID 读取安全安装计划/回执，并复验结果主机 |
+| `lightmoni_agent_installations_plan` | `agents.maintain.propose` + `agents.read` | 基于 fresh 预检创建原生 Agent 首装计划；按 machine_id 复验主机授权，不运行 SSH 或直接安装 |
 | `lightmoni_agent_updates_get` | `agents.read` | 按主机和维护 ID 读取升级/回退回执；unknown/rolled_back 不等于成功 |
 | `lightmoni_dashboards_list` | `dashboards.read` | 自定义/系统大盘摘要、搜索和分页，无面板 SQL |
 | `lightmoni_dashboards_get` | `dashboards.detail.read` | 完整大盘面板、变量和 SQL；安装级高敏读取 |
@@ -111,10 +112,12 @@ callback_port = 1455
 
 运维提案使用 `lightmoni_operations_plan`，输入 `resource_id`、领域允许的 `operation`、结构化 `input`、原因和稳定幂等键。它只创建 `awaiting_approval` 的原生 Run，不直接执行；管理员仍在原页面审批。审批后的 `queued`、实际执行和 `unknown` 均通过 Run 查询，不能报告为成功。
 
+Agent 首装提案使用 `lightmoni_agent_installations_plan`，必须提供现有主机、成功且新鲜的 `check_id`、固定版本和匹配架构。返回真实 `review_url` 后由管理员在原主机页面审阅；MCP 不执行预检、审批或安装。`running`/`unknown` 和人工结束均不能冒充安装成功。
+
 ## 部署条件与当前边界
 
 设置 `LIGHTMONI_EXTERNAL_URL` 为可信 HTTPS origin（不带路径、查询、凭据），本机调试可用 loopback HTTP。未满足时仅 MCP、PAT/OAuth 和外部授权管理禁用；统一能力层、会话鉴权的能力 HTTP 与内部助手共享工具继续运行。尚未完成的 MCP 来源提案在授权适配器缺失时拒绝批准；已有外部排队项和自动重试继续绑定原稳定授权，领取前无法复验则拒绝开始。内部助手提案仍可按原人工审批流程处理。代理需保留 Authorization 与 JSON 响应，不缓存授权与工具结果。服务无协议会话，不要求粘性路由或持久 SSE。
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-任务、告警、部署和运维计划只创建提案，不能直接执行或自动批准。部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent 预检/安装/升级/卸载写工具、插桩生成/应用、code_task、服务主体或持续授权仍未开放。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。
+任务、告警、部署、运维和 Agent 首装计划只创建提案，不能直接执行或自动批准。部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent SSH 预检/直接安装/升级/恢复/卸载工具、插桩生成/应用、code_task、服务主体或持续授权仍未开放。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。

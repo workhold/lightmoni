@@ -853,6 +853,8 @@ SDD 149 新增部署计划提案和 ExecutionGrantRegistry：deployment 与稳�
 
 SDD 150 将既有运维动作计划接入统一能力层：operations.propose 与 operations.read 同时必需，外部 Run 在同一 SQLite 事务中绑定 operation/native_id 与稳定 grant。OperationsStore.approve 在创建 Job 前复验，中心 privileged SSH 派发在获取主机租约前按 agent_jobs.operation_id 再复验；授权撤销只失败关闭尚未开始项，不重放 unknown。内部 propose_operations_action 统一 Dispatcher 且保留 `{run}` 安全元数据，无外部绑定。原生 OperationsStore、审批、Agent Job 和恢复状态机保持事实来源，未开放资源/Schedule 写入、MCP 审批、取消、触发或直接执行。
 
+SDD 151 将 Agent 首装计划接入统一能力层：agents.maintain.propose 与 agents.read 同时必需，目标 machine_id 复用主机授权。外部 machine_deployments 计划、幂等与 agent_installation 稳定 grant 在同一 SQLite 事务保存；原管理员 Apply 在任何 enrollment/SSH 安装动作前复验 grant、Scope、当前账户和主机范围。内部 propose_agent_install 统一 Dispatcher，保持原计划结构且无外部绑定。fresh 预检、目标/凭据 revision、固定版本/架构、runtime/helper、恢复和 unknown 仍由原领域实现；未开放 SSH 预检、直接安装或后续生命周期工具。
+
 完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134](../specs/134-capability-core-decoupling/spec.md)、[SDD 135](../specs/135-capability-descriptor-contracts/spec.md)、[SDD 136](../specs/136-telemetry-capability-read/spec.md)、[SDD 137](../specs/137-alert-capability-read/spec.md)、[SDD 138](../specs/138-log-trace-capability-read/spec.md)、[SDD 139](../specs/139-deployment-capability-read/spec.md)、[SDD 140](../specs/140-operation-capability-read/spec.md)、[SDD 141](../specs/141-host-agent-capability-read/spec.md)、[SDD 142](../specs/142-dashboard-capability-read/spec.md)、[SDD 144](../specs/144-instrumentation-capability-read/spec.md)、[SDD 145](../specs/145-alert-operations-capability-read/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知

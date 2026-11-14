@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { createAgentUpdatesSchema, registerMachineAgentUpdates, type AgentUpdateStore } from "./machine-agent-updates.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import type { PrivilegedExecutorStore } from "./privileged-executors.js";
+import type { ExecutionGrantRegistry } from "../capabilities/execution-grants.js";
 import { createAgentRuntimeSchema, recordAgentRuntime, registerMachineAgentRuntime, validAgentRuntimeMode, validAgentRuntimeObservation } from './machine-agent-runtime.js';
 import { assertNoPendingAgentRuntime } from './machine-agent-runtime-guard.js';
 import { PRIVILEGED_CAPABILITIES } from '../shared/privileged-executor.js';
@@ -198,6 +199,7 @@ export interface ManagedMachineStore {
 
 export interface ManagedMachinesOptions {
   agentCredentials?: AgentCredentialStore;
+  executionGrants?: ExecutionGrantRegistry;
   sshRunner?: SSHRunner;
   downloadsDir?: string;
   dataDir?: string;
@@ -901,6 +903,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const machine = ensureMachine(ctx.params.id), deployment = db.get<any>("SELECT * FROM machine_deployments WHERE id=? AND machine_id=?", ctx.params.deploymentId, machine.id);
     if (!deployment) fail(404, "部署计划不存在");
     if (deployment.status !== "awaiting_approval") fail(409, "部署计划已执行或不可用");
+    options.executionGrants?.assert("agent_installation", deployment.id);
     const savedPlan = parseJSON<any>(deployment.plan_json, {});
     if (!Number.isFinite(Date.parse(savedPlan.expires_at)) || Date.parse(savedPlan.expires_at) <= now().getTime()) {
       db.run("UPDATE machine_deployments SET status='cancelled',finished_at=?,error=? WHERE id=?", iso(now()), "部署计划已过期", deployment.id);
