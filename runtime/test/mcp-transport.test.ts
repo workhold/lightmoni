@@ -75,6 +75,18 @@ test("official SDK client discovers tools, creates an idempotent proposal and po
   }finally{await readClient.close();}
  }finally{await client.close();await f.close();}
 });
+test("official SDK client creates and updates task definitions only through reviewed proposals",async()=>{
+ const f=await fixture(),client=new Client({name:"task-proposal",version:"1"});try{
+  f.task();await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:f.headers.authorization}}}));
+  const task={name:"External reviewed script",type:"script",enabled:true,target_all:false,host_ids:["one"],label_ids:[],schedule:{mode:"once"},script:{runtime:"node",code:"console.log('reviewed')",timeout_seconds:5,max_output_bytes:4096}};
+  const created=await client.callTool({name:"lightmoni_tasks_plan",arguments:{operation:"task.create",task,reason:"create",idempotency_key:"create-one"}}),proposal=(created.structuredContent as any).data.proposal;
+  assert.equal(proposal.status,"awaiting_approval");assert.throws(()=>f.runs.nodes.getTask(proposal.task_id));assert.equal(f.runs.list().length,0);
+  f.dispatcher.proposals.apply(f.user,proposal.id);assert.equal(f.runs.nodes.getTask(proposal.task_id).name,task.name);
+  const updated=await client.callTool({name:"lightmoni_tasks_plan",arguments:{operation:"task.update",task_id:proposal.task_id,task:{name:"External updated"},reason:"rename",idempotency_key:"update-one"}});
+  f.dispatcher.proposals.apply(f.user,(updated.structuredContent as any).data.proposal.id);assert.equal(f.runs.nodes.getTask(proposal.task_id).name,"External updated");assert.equal(f.runs.list().length,0);
+  const readback=await client.callTool({name:"lightmoni_proposals_get",arguments:{id:proposal.id}});assert.equal((readback.structuredContent as any).data.proposal.status,"completed");
+ }finally{await client.close();await f.close();}
+});
 test("official SDK client follows bounded tools/list cursors without dropping tools",async()=>{
  const f=await fixture(),client=new Client({name:"pagination-test",version:"1"});try{
   const template=f.dispatcher.definitions.find(d=>d.name==="lightmoni_hosts_get")!;
