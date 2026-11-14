@@ -2,7 +2,7 @@ import type { InvocationContext, Principal } from "./types.js";
 
 export type CapabilityRisk = "R0" | "R1" | "R2" | "R3";
 export type OperationKind = "center_read" | "telemetry_query" | "remote_probe" | "domain_change" | "long_running";
-export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence" | "log" | "trace" | "service" | "deployment"; id: string; revision?: string | number }
+export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence" | "log" | "trace" | "service" | "deployment" | "operation_resource" | "operation_run" | "operation_schedule"; id: string; revision?: string | number }
 export interface CapabilityLimits {
   timeoutMs: number;
   maxInputBytes: number;
@@ -198,6 +198,30 @@ const METADATA: Record<string, Metadata> = {
     id: "deployments.events", outputSchema: data({deployment_id:{type:"string"},events:arrayOfRecords},["deployment_id","events"]),
     risk: "R1", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none",
     targetResolver: input => input?.deployment_id ? [{kind:"deployment",id:input.deployment_id}] : [],
+  },
+  lightmoni_operations_resources_list: {
+    id: "operations.resources.list", outputSchema: data({resources:arrayOfRecords,total:count,offset:count,limit:count,returned:count,
+      next_offset:nullOr(count),model_truncated:flag},["resources","total","offset","limit","returned","next_offset","model_truncated"]),
+    risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [],
+  },
+  lightmoni_operations_resources_get: {
+    id: "operations.resources.get", outputSchema: data({resource:record},["resource"]), risk: "R0", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: input => input?.id ? [{kind:"operation_resource",id:input.id}] : [],
+  },
+  lightmoni_operations_runs_list: {
+    id: "operations.runs.list", outputSchema: pageOutput, risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none",
+    targetResolver: input => input?.resource_id ? [{kind:"operation_resource",id:input.resource_id}] : [],
+  },
+  lightmoni_operations_runs_get: {
+    id: "operations.runs.get", outputSchema: data({run:record},["run"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: input => input?.id ? [{kind:"operation_run",id:input.id}] : [],
+  },
+  lightmoni_operations_schedules_list: {
+    id: "operations.schedules.list", outputSchema: pageOutput, risk: "R1", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [],
+  },
+  lightmoni_operations_schedules_get: {
+    id: "operations.schedules.get", outputSchema: data({schedule:record,fires:arrayOfRecords},["schedule","fires"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: input => input?.id ? [{kind:"operation_schedule",id:input.id}] : [],
   },
 };
 

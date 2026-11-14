@@ -22,6 +22,9 @@ import { Logs } from "../src/domains/logs.js";
 import { LogReadService } from "../src/domains/log-read.js";
 import { TraceReadService } from "../src/domains/trace-read.js";
 import { registerServiceDeployments } from "../src/server/service-deployments.js";
+import { registerOperations } from "../src/server/operations.js";
+import { registerOperationSchedules } from "../src/server/operation-schedules.js";
+import { websiteDefinition } from "../src/operations/websites.js";
 async function fixture(wrap?:(d:CapabilityDispatcher)=>CapabilityDispatcherContract){
  const db=new DB(":memory:"),router=new Router(),user={id:"admin",name:"Admin",role:"admin"};accountSchema(db);
  db.run("INSERT INTO users(id,name,role,active,created_at) VALUES(?,?,?,1,?)",user.id,user.name,user.role,new Date().toISOString());
@@ -161,6 +164,25 @@ test("deployment capabilities expose native service and receipt views through th
   const deployment=await client.callTool({name:"lightmoni_deployments_get",arguments:{deployment_id:"deployment-one"}});assert.equal((deployment.structuredContent as any).data.deployment.status,"awaiting_approval");
   const events=await client.callTool({name:"lightmoni_deployments_events",arguments:{deployment_id:"deployment-one"}});assert.equal((events.structuredContent as any).data.events[0].id,"event-one");
  }finally{await client.close();await f.close();}
+});
+test("operation capabilities expose resources, runs and schedules through the official MCP client",async()=>{
+ let operations:any,schedules:any;
+ const f=await fixture(d=>{
+  operations=registerOperations(d.deps,{definitions:[websiteDefinition],credentials:{has:()=>true} as any,jobs:{onUpdate:()=>()=>{}} as any});schedules=registerOperationSchedules(d.deps,operations);
+  return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,operations,operationSchedules:schedules});
+ });
+ const client=new Client({name:"operation-read",version:"1"});
+ try{
+  const config=websiteDefinition.validate({domains:["example.test"],mode:"static",static_files:{"index.html":"private-body"}}),at=new Date().toISOString();
+  f.db.run("INSERT INTO ops_resources(id,kind,name,agent_id,revision,config_cipher,created_at,updated_at,created_by) VALUES('site-one','website','Site','agent-one',1,?,?,?,'admin')",f.deps.encrypt(JSON.stringify(config)),at,at);
+  const run=operations.plan("site-one","inspect",{},f.user.id),schedule=schedules.create({name:"Hourly",resource_id:"site-one",resource_revision:1,operation:"inspect",input:{},cron:"0 * * * *",timezone:"UTC",enabled:false},f.user.id);
+  const key=f.access.createToken(f.user,{name:"Operations",scopes:["operations.read"],host_ids:null});await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
+  const tools=await client.listTools();for(const name of ["lightmoni_operations_resources_list","lightmoni_operations_resources_get","lightmoni_operations_runs_list","lightmoni_operations_runs_get","lightmoni_operations_schedules_list","lightmoni_operations_schedules_get"])assert.ok(tools.tools.some(t=>t.name===name),name);
+  assert.equal(tools.tools.some(t=>/approve|delete|execute|trigger/.test(t.name)),false);
+  const resources=await client.callTool({name:"lightmoni_operations_resources_list",arguments:{kind:"website"}});assert.equal(JSON.stringify(resources).includes("private-body"),false);
+  const runRead=await client.callTool({name:"lightmoni_operations_runs_get",arguments:{id:run.id}});assert.equal((runRead.structuredContent as any).data.run.state,"awaiting_approval");
+  const scheduleRead=await client.callTool({name:"lightmoni_operations_schedules_get",arguments:{id:schedule.id}});assert.equal((scheduleRead.structuredContent as any).data.schedule.operation,"inspect");
+ }finally{await client.close();await schedules.close?.();await operations.close?.();await f.close();}
 });
 test("transport rejects wrong credentials, Origin, methods, versions, oversized and malformed messages",async()=>{
  const f=await fixture();try{

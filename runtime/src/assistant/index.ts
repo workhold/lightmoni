@@ -285,7 +285,7 @@ export function registerAssistant(
   const tools =
     options.tools ??
     [
-      ...(options.operations ? operationTools(options.operations) : []),
+      ...(options.operations ? operationTools(options.operations).filter(tool => !options.capabilities || !["list_operations_resources", "get_operations_run"].includes(tool.name)) : []),
       ...(options.capabilities ? options.capabilities.assistantTools() : taskProposals ? taskTools(taskProposals) : []),
       ...monitoringTools(deps, {
         ...(options.telemetry ? { telemetry: options.telemetry } : {}),

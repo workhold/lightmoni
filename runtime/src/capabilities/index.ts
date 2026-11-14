@@ -12,6 +12,8 @@ import type { AlertProposalService } from "../assistant/alert-proposals.js";
 import type { LogReadService } from "../domains/log-read.js";
 import type { TraceReadService } from "../domains/trace-read.js";
 import type { ServiceDeploymentStore } from "../server/service-deployments.js";
+import { OperationsReadService, type OperationScheduleReader } from "../operations/read.js";
+import type { OperationsStore } from "../operations/types.js";
 import type { CapabilityAuthority, CapabilityDispatcherContract, CapabilitySummary, InvocationContext, Principal, SessionAuthority } from "./types.js";
 import { defineCapability, validateCapabilityRegistry, type CapabilityDefinition, type CapabilityDefinitionSeed } from "./descriptor.js";
 import { capabilityErrorCategory, capabilityErrorDetail, capabilityErrorStatus } from "./errors.js";
@@ -58,7 +60,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   readonly definitions: CapabilityDefinition[];
   readonly installationID: string;
   private readonly limits = new Map<string,{start:number;count:number;active:number}>();
-  constructor(readonly deps: Dependencies, readonly authority: CapabilityAuthority, readonly options: {taskCenter: TaskRunStore; alerts?: AlertCapabilities; alertProposals?: AlertProposalService; telemetry?: TelemetryService; logs?: LogReadService; traces?: TraceReadService; deployments?: ServiceDeploymentStore}) {
+  constructor(readonly deps: Dependencies, readonly authority: CapabilityAuthority, readonly options: {taskCenter: TaskRunStore; alerts?: AlertCapabilities; alertProposals?: AlertProposalService; telemetry?: TelemetryService; logs?: LogReadService; traces?: TraceReadService; deployments?: ServiceDeploymentStore; operations?: OperationsStore; operationSchedules?: OperationScheduleReader}) {
     deps.db.exec(`CREATE TABLE IF NOT EXISTS capability_installation(id TEXT PRIMARY KEY);
       CREATE TABLE IF NOT EXISTS capability_invocations(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,credential_id TEXT NOT NULL,source TEXT NOT NULL,capability TEXT NOT NULL,input_hash TEXT NOT NULL,decision TEXT NOT NULL,code TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,finished_at TEXT NOT NULL DEFAULT '',proposal_id TEXT NOT NULL DEFAULT '');
       CREATE INDEX IF NOT EXISTS capability_invocations_owner ON capability_invocations(user_id,created_at);
@@ -169,6 +171,19 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         }},
         {name:"lightmoni_deployments_get",description:"Read one sanitized native deployment plan or receipt without inferring success.",scope:"deployments.read",allHosts:true,effect:"read",inputSchema:schema({deployment_id:string},["deployment_id"]),execute:async(_p,i)=>({deployment:store.assistantDeployment(i.deployment_id)})},
         {name:"lightmoni_deployments_events",description:"Read one deployment's sanitized append-only event timeline in native order.",scope:"deployments.read",allHosts:true,effect:"read",inputSchema:schema({deployment_id:string},["deployment_id"]),execute:async(_p,i)=>({deployment_id:i.deployment_id,events:store.assistantDeploymentEvents(i.deployment_id)})},
+      );
+    }
+    if(options.operations) {
+      const reads=new OperationsReadService(options.operations,options.operationSchedules);
+      definitions.push(
+        {name:"lightmoni_operations_resources_list",description:"List saved operations resources with safe configuration summaries and pagination. This is not live host discovery.",scope:"operations.read",allHosts:true,effect:"read",inputSchema:schema({kind:{...string,enum:["website","certificate","compose","backup","platform"]},offset:page.offset,limit:{type:"integer",minimum:1,maximum:50}}),execute:async(_p,i)=>reads.listResources(i)},
+        {name:"lightmoni_operations_resources_get",description:"Read one saved operations resource with website and Compose bodies omitted.",scope:"operations.read",allHosts:true,effect:"read",inputSchema:schema({id:string},["id"]),execute:async(_p,i)=>reads.getResource(i.id)},
+        {name:"lightmoni_operations_runs_list",description:"List native operation run metadata with optional resource filter and pagination. Queued/running/unknown are not success.",scope:"operations.read",allHosts:true,effect:"read",inputSchema:schema({resource_id:string,...page}),execute:async(_p,i)=>reads.listRuns(i.resource_id,i)},
+        {name:"lightmoni_operations_runs_get",description:"Read one native operation run with sensitive logs omitted and large receipts bounded.",scope:"operations.read",allHosts:true,effect:"read",inputSchema:schema({id:string},["id"]),execute:async(_p,i)=>reads.getRun(i.id)},
+      );
+      if(options.operationSchedules)definitions.push(
+        {name:"lightmoni_operations_schedules_list",description:"List native operation schedules, authorization state and disabled reasons.",scope:"operations.read",allHosts:true,effect:"read",inputSchema:schema(page),execute:async(_p,i)=>reads.listSchedules(i)},
+        {name:"lightmoni_operations_schedules_get",description:"Read one operation schedule and its real fire/run states.",scope:"operations.read",allHosts:true,effect:"read",inputSchema:schema({id:string},["id"]),execute:async(_p,i)=>reads.getSchedule(i.id)},
       );
     }
     this.definitions = definitions.map(defineCapability);
@@ -375,8 +390,18 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         const v=await this.invoke(p,target,input,{signal,session_id:scope?.session_id});return name==="get_service_deployment"?v.data.deployment:v.data;
       }};
     });
+    const operationMap:Record<string,string>={list_operations_resources:"lightmoni_operations_resources_list",get_operations_resource:"lightmoni_operations_resources_get",
+      list_operations_runs:"lightmoni_operations_runs_list",get_operations_run:"lightmoni_operations_runs_get",
+      list_operation_schedules:"lightmoni_operations_schedules_list",get_operation_schedule:"lightmoni_operations_schedules_get"};
+    const operationReads = Object.entries(operationMap).filter(([,target])=>this.definitions.some(x=>x.name===target)).map(([name,target])=>{
+      const d=this.definitions.find(x=>x.name===target)!;
+      return {name,description:d.description,schema:d.inputSchema,effect:"read" as const,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+        if(!user)fail(401,"login_required");const p=this.authority.sessionPrincipal(user as User,"assistant");
+        const v=await this.invoke(p,target,input,{signal,session_id:scope?.session_id});return v.data;
+      }};
+    });
     const old=taskTools(this.proposals).find(t=>t.name==="propose_task_action")!;
-    return [...shared,...telemetry,...alerts,...logTrace,...deployments,{...old,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+    return [...shared,...telemetry,...alerts,...logTrace,...deployments,...operationReads,{...old,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
       if(!["task.dispatch","run.cancel","run.retry"].includes(input?.operation))return old.execute(input,signal,user,scope);
       if(!user)fail(401,"login_required");
       const p=this.authority.sessionPrincipal(user as User,"assistant");
