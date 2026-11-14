@@ -128,11 +128,10 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       if(source.source!=="mcp")return;
       if(!options.executionGrants)fail(503,"authorization_unavailable");
       options.executionGrants.assert("instrumentation",planID,true);
-    });
+    }});
     options.alertProposals?.useProposalIndex({afterCreate:(actor,source,change,proposal)=>{
       this.proposalIndex.link({domain:"alert",nativeID:proposal.id,capability:"lightmoni_alerts_plan",ownerID:actor.id,source:source.source,
         operation:change.operation,status:"awaiting_approval",nativeState:proposal.status,reviewURL:`/api/v1/assistant/alert-proposals/${encodeURIComponent(proposal.id)}`,createdAt:proposal.created_at});
-    });
     }});
     options.executionGrants?.use(binding=>{
       if(!["deployment","operation","agent_installation","instrumentation"].includes(binding.domain))return;
