@@ -27,4 +27,4 @@
 
 真实 Codex/Claude OAuth、普通生产程序兼容矩阵和生产环境未执行。服务主体、持续授权、Agent 后续生命周期、服务回滚/核验和其他领域提案仍需独立处理。
 
-交付状态：实现与验证完成，等待 PR 评审；未获本轮合并授权，不自动合并。
+交付 PR：[workhold/lightmoni#216](https://github.com/workhold/lightmoni/pull/216)，目标为 main，依赖 #215；实现与验证完成，等待评审，未获本轮合并授权。
