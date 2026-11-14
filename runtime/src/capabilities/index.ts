@@ -150,6 +150,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       {name:"lightmoni_alert_incidents_list",description:"List alert incidents with safe response summaries, filters and pagination.",scope:"alerts.incidents.read",allHosts:true,effect:"read",inputSchema:schema({...page,state:string,group_id:string,priority:string}),execute:async(_p,i)=>alertReads!.listIncidents(i)},
       {name:"lightmoni_alert_incidents_get",description:"Read one real alert incident and its append-only response timeline.",scope:"alerts.incidents.read",allHosts:true,effect:"read",inputSchema:schema({id:string},["id"]),execute:async(_p,i)=>alertReads!.getIncident(i.id)},
       {name:"lightmoni_alert_deliveries_list",description:"List notification deliveries with safe state and resource references. Contacts, payloads and provider responses are omitted.",scope:"alerts.notifications.read",allHosts:true,effect:"read",inputSchema:schema({...page,rule_id:string,group_id:string,table_id:string,service:string,enabled:{type:"boolean"},status:string}),execute:async(_p,i,c)=>alertReads!.listDeliveries(i,c.signal)},
+      {name:"lightmoni_alert_response_statistics_get",description:"Read native alert response statistics with the existing time, group and priority filters. No records are modified.",scope:"alerts.statistics.read",allHosts:true,effect:"read",inputSchema:schema({from:{...string,maxLength:128},to:{...string,maxLength:128},group_id:string,priority:string}),execute:async(_p,i)=>alertReads!.responseStatistics(i)},
     );
     if(options.logs) {
       const parameter={type:"object",properties:{type:{...string,maxLength:128},value:{}},additionalProperties:false};
@@ -409,7 +410,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     const alertMap:Record<string,string>={list_alert_rules:"lightmoni_alert_rules_list",get_alert_rule:"lightmoni_alert_rules_get",
       list_alert_silences:"lightmoni_alert_silences_list",get_alert_silence:"lightmoni_alert_silences_get",
       list_alert_groups:"lightmoni_alert_groups_list",get_alert_proposal:"lightmoni_alert_proposals_get",
-      list_alert_incidents:"lightmoni_alert_incidents_list",get_alert_incident:"lightmoni_alert_incidents_get",list_alert_deliveries:"lightmoni_alert_deliveries_list"};
+      list_alert_incidents:"lightmoni_alert_incidents_list",get_alert_incident:"lightmoni_alert_incidents_get",list_alert_deliveries:"lightmoni_alert_deliveries_list",get_alert_response_statistics:"lightmoni_alert_response_statistics_get"};
     const alerts = Object.entries(alertMap).filter(([,target])=>this.definitions.some(x=>x.name===target)).map(([name,target])=>{
       const d=this.definitions.find(x=>x.name===target)!;
       return {name,description:d.description,schema:d.inputSchema,effect:"read" as const,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{

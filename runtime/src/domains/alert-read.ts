@@ -3,7 +3,7 @@ import type { User } from "../shared/types.js";
 import type { Alerts } from "./alerts.js";
 import { parseJSON } from "../shared/json.js";
 import { AlertCapabilityError, type AlertCapabilities } from "./alert-capabilities.js";
-import { encode } from "./common.js";
+import { encode, parseTime, stamp } from "./common.js";
 
 export type AlertActor = Pick<User, "id" | "role">;
 export interface AlertProposalReader { get(actor: AlertActor, id: string): any }
@@ -109,4 +109,50 @@ export class AlertReadService {
       updated_at:v.updated_at,error_present:!!v.error}));
     return page(items, input);
   }
+  responseStatistics(input: any) { return alertResponseStatistics(this.capabilities.alerts, input); }
+}
+
+export function alertResponseStatistics(m: Alerts, input: any) {
+  const from = Number.isFinite(parseTime(input.from)) ? new Date(input.from) : new Date(m.now().getTime() - 30 * 86400000),
+    to = Number.isFinite(parseTime(input.to)) ? new Date(input.to) : new Date(m.now().getTime() + 1000);
+  if (to <= from) throw new AlertCapabilityError(400, "统计结束时间必须晚于开始时间");
+  let where = "a.notified_at>=? AND a.notified_at<?";
+  const params: any[] = [stamp(from), stamp(to)];
+  if (input.group_id) { where += " AND i.group_id=?"; params.push(input.group_id); }
+  if (input.priority) { where += " AND a.priority=?"; params.push(input.priority); }
+  const rows = m.deps.db.all<any>(`SELECT a.response_id,a.user_id,a.user_name,a.stage,a.priority,a.notified_at,a.ack_at,a.ack_method,a.outcome,i.body FROM alert_assignments a JOIN alert_responses i ON i.id=a.response_id WHERE ${where} ORDER BY a.notified_at DESC LIMIT 20000`, ...params),
+    users = new Map<string, any>(), records: any[] = [];
+  const ensure = (uid: string, name: string) => {
+    if (!users.has(uid)) users.set(uid, {user_id:uid,user_name:name,notified:0,acknowledged:0,peer_claimed:0,recovered:0,cancelled:0,pending:0,
+      ack_rate:0,mean_ack_seconds:0,median_ack_seconds:0,p95_ack_seconds:0,methods:{},priorities:{},durations:[]});
+    return users.get(uid);
+  };
+  for (const row of rows) {
+    const incident = parseJSON(row.body), value = ensure(row.user_id, row.user_name);
+    value.notified++; value.priorities[row.priority] = (value.priorities[row.priority] || 0) + 1;
+    let seconds = 0;
+    if (row.ack_at) {
+      value.acknowledged++; value.methods[row.ack_method] = (value.methods[row.ack_method] || 0) + 1;
+      seconds = Math.max(0, (parseTime(row.ack_at) - parseTime(row.notified_at)) / 1000);
+      value.durations.push(seconds); value.mean_ack_seconds += seconds;
+    } else value[["peer_claimed","recovered","cancelled"].includes(row.outcome) ? row.outcome : "pending"]++;
+    const {body, ...record} = row;
+    records.push({...record,group_id:incident.group_id,group_name:incident.group_name,rule_id:incident.rule_id,
+      rule_name:incident.event.rule_name,source_priority:incident.original_priority,ack_seconds:seconds});
+  }
+  const zero = input.group_id ? (m.group(input.group_id)?.members ?? []).map((key:string) => m.member(key)).filter(Boolean)
+    : m.deps.db.all<any>("SELECT id,name FROM users WHERE active=1");
+  for (const user of zero) ensure(user.id, user.name);
+  const out = [...users.values()].map(value => {
+    if (value.notified) value.ack_rate = value.acknowledged * 100 / value.notified;
+    if (value.acknowledged) {
+      value.mean_ack_seconds /= value.acknowledged; value.durations.sort((a:number,b:number) => a-b);
+      const n=value.durations.length,mid=Math.floor(n/2);
+      value.median_ack_seconds = n%2 ? value.durations[mid] : (value.durations[mid-1]+value.durations[mid])/2;
+      value.p95_ack_seconds = value.durations[Math.max(0,Math.ceil(n*0.95)-1)];
+    }
+    delete value.durations; return value;
+  }).sort((a,b) => a.user_name.localeCompare(b.user_name));
+  return {from:stamp(from),to:stamp(to),users:out,records,truncated:records.length===20000,
+    definition:"接手率=本人接手告警数/实际通知本人的不同组告警数；多渠道与重试去重。接手时长从首次通知受理到接手。其他人接手与自动恢复单独列示。"};
 }

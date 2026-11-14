@@ -197,6 +197,8 @@ SDD 144 复用共享 InstrumentationService 开放中心受限工作区扫描和
 
 SDD 145 扩展 AlertReadService 和原 Alert API，共享事件与投递筛选，新增事件列表/详情时间线和通知安全摘要。alerts.incidents.read 与 alerts.notifications.read 分离高敏读取；投递联系人、payload、供应商响应和原始错误不进入模型。内部新增三个工具，接手、确认、分配、重试和通知测试未开放。告警模块启用时共 44 个工具。
 
+SDD 146 将响应统计迁到 AlertReadService，新增 alerts.statistics.read 和内外部统计工具，保留原窗口、筛选、接手率、时长和 20000 条上限。Slice 2 覆盖矩阵见 [coverage](../specs/146-alert-statistics-capability-read/coverage.md)；告警模块启用时共 45 个工具，仍不代表后续提案、执行、服务主体或全部 Goal 已完成。
+
 `runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手任务/遥测/告警事件与通知/日志/Trace/服务部署/运维/主机 Agent/大盘/插桩读取工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。表、遥测数据、日志、Trace、告警、服务部署、运维、大盘和中心工作区均没有主机级数据隔离，只允许全主机范围授权；告警修改/接手/重试、部署、运维、Agent、大盘和插桩写工具尚未开放。
 
 外部任务操作仅创建已有任务的派发、取消与重试提案。TaskProposalService 保存真实来源、凭据与稳定 grant，不伪造助手 session；既有 owner 和人工审批边界保留。审批前与 Agent 领取排队项前分别复验外部授权，撤销、过期、降权或主机范围缩小后不得开始新项。新脚本/任务定义、持续授权和服务主体不属于本期。短期 OAuth access token 到期不使已批准项失效，稳定 grant 到期/撤销才阻止尚未开始项。若 MCP 配置失效、Dispatcher 未创建或审批前/后的授权适配器缺少任一项，尚未完成的 MCP 来源提案拒绝应用，不能由助手 fallback 降级为内部操作。排队项和自动重试保留稳定授权，缺少领取前校验器时 fail closed；主干的计划、并发、队列及任务版本校验继续生效。

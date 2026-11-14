@@ -71,7 +71,7 @@ test("assistant legacy names use the dispatcher without duplicate registration a
       { id: "member", role: "member" }, { session_id: "member-session" });
     assert.equal(result.sample_limit, 1000);
     assert.equal(f.requests[0].source, "assistant");
-    assert.deepEqual(member.scopes, ["telemetry.catalog.read", "telemetry.query", "alerts.read", "alerts.detail.read", "logs.read", "traces.read", "dashboards.read", "dashboards.detail.read", "alerts.incidents.read", "alerts.notifications.read"]);
+    assert.deepEqual(member.scopes, ["telemetry.catalog.read", "telemetry.query", "alerts.read", "alerts.detail.read", "logs.read", "traces.read", "dashboards.read", "dashboards.detail.read", "alerts.incidents.read", "alerts.notifications.read", "alerts.statistics.read"]);
     assert.deepEqual(scopesForUser({ id: "member", name: "Member", role: "member" }), []);
     assert.equal(f.dispatcher.list(member).every(d => d.id.startsWith("telemetry.")), true);
     await assert.rejects(f.dispatcher.invoke(member, "lightmoni_tasks_list", {}, { signal: new AbortController().signal }), /capability_forbidden/);

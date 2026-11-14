@@ -12,6 +12,7 @@ export const CAPABILITY_SCOPES = [
   "dashboards.read", "dashboards.detail.read",
   "code.workspace.read", "code.workspace.detail.read",
   "alerts.incidents.read", "alerts.notifications.read",
+  "alerts.statistics.read",
 ] as const;
 export type CapabilityScope = typeof CAPABILITY_SCOPES[number];
 export interface Principal {
