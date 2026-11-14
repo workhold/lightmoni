@@ -16,7 +16,7 @@ export default function RegistryImagesPanel({registry,clusterName,onChange,machi
   const cid=selected??deployments[0]?.cluster_id;
   const [repositories,setRepositories]=useState<string[]>([]),[versions,setVersions]=useState<Version[]>([]),[next,setNext]=useState<string|null>(null),[cursors,setCursors]=useState<string[]>([]);
   const [pollRevision,setPollRevision]=useState(0),[executionOpen,setExecutionOpen]=useState(false),[usageComplete,setUsageComplete]=useState(true);
-  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[confirm,setConfirm]=useState(false),[cleanup,setCleanup]=useState<Run>(),[submitting,setSubmitting]=useState(false);
+  const [loading,setLoading]=useState(false),[error,setError]=useState(''),[hostTaskBlocked,setHostTaskBlocked]=useState(false),[confirm,setConfirm]=useState(false),[cleanup,setCleanup]=useState<Run>(),[submitting,setSubmitting]=useState(false);
   const generation=useRef(0),cleanupGeneration=useRef(0);
   const recovered=registry.cleanup_run as Run|null;
   const blocked=!!recovered || submitting || !!cleanup&&!terminal.has(cleanup.state);
@@ -32,8 +32,10 @@ export default function RegistryImagesPanel({registry,clusterName,onChange,machi
       registry_cleanup_in_progress:['已有清理任务，请等待完成；结果不确定时需先在执行记录中核查并解决。','A cleanup is pending. Wait for completion, or reconcile an unknown result in execution history.'],
       registry_scan_limit:['仓库超过本次扫描上限，未执行清理。','The registry exceeds the scan limit. No cleanup was performed.'],
       platform_revision_conflict:['仓库配置已变化，请刷新后重试。','Registry configuration changed. Refresh and retry.'],
+      privileged_execution_pending:['目标主机有待完成或核对的提权任务，仓库读取暂时受阻。','A pending or unresolved privileged task on this host is blocking registry reads.'],
     };
-    return copy[code]?t(...copy[code]):t('仓库操作失败：','Registry operation failed: ')+code;
+    const reason=code.split(':',1)[0];
+    return copy[reason]?t(...copy[reason]):t('仓库操作失败：','Registry operation failed: ')+code;
   },[t]);
   const waitRun=async(run:Run,valid:()=>boolean)=>{
     while(!terminal.has(run.state)){
@@ -46,14 +48,14 @@ export default function RegistryImagesPanel({registry,clusterName,onChange,machi
   const query=useCallback(async(repo?:string,after?:string)=>{
     if(!cid)return;
     const seq=++generation.current;
-    setLoading(true);setError('');setVersions([]);setNext(null);
+    setLoading(true);setError('');setHostTaskBlocked(false);setVersions([]);setNext(null);
     try{
       const queued=await post<Run>('/ops/private-registry/images/query',{cluster_id:cid,...(repo?{repository:repo,...(after?{after}:{})}:{})});
       const run=await waitRun(queued,()=>seq===generation.current);
       if(!run)return;
       if(run.state!=='succeeded')throw Error(run.result?.code??run.state);
       if(repo){setUsageComplete(run.result.usage_complete!==false);setVersions(run.result.versions??[]);setNext(run.result.next??null);}else setRepositories(run.result.repositories??[]);
-    }catch(e){if(seq===generation.current)setError(explain(errorText(e)));}
+    }catch(e){if(seq===generation.current){const code=errorText(e);setError(explain(code));setHostTaskBlocked(code.startsWith('privileged_execution_pending'));}}
     finally{if(seq===generation.current)setLoading(false);}
   },[cid,explain]);
   useEffect(()=>{setRepository(undefined);setRepositories([]);setCursors([]);if(!registry.cleanup_run)void query();return()=>{generation.current++;};},[query]);
@@ -71,7 +73,7 @@ export default function RegistryImagesPanel({registry,clusterName,onChange,machi
   },[recovered?.id,submitting,query,pollRevision]);
   const clean=async()=>{
     if(submitting||blocked)return;
-    const seq=++cleanupGeneration.current;setSubmitting(true);setError('');
+    const seq=++cleanupGeneration.current;setSubmitting(true);setError('');setHostTaskBlocked(false);
     try{
       const queued=await post<Run>('/ops/private-registry/images/cleanup',{cluster_id:cid,revision:registry.revision,confirmed:true});
       setCleanup(queued);setConfirm(false);onChange();
@@ -79,10 +81,11 @@ export default function RegistryImagesPanel({registry,clusterName,onChange,machi
       if(!run)return;
       setCleanup(run);onChange();
       if(run.state!=='unknown'){setCursors([]);void query(repository);}
-    }catch(e){if(seq===cleanupGeneration.current)setError(explain(errorText(e)));}
+    }catch(e){if(seq===cleanupGeneration.current){const code=errorText(e);setError(explain(code));setHostTaskBlocked(code.startsWith('privileged_execution_pending'));}}
     finally{if(seq===cleanupGeneration.current)setSubmitting(false);}
   };
   const result=cleanup?.result,unknown=recovered?.state==='unknown';
+  const blockedMachine=deployments.find((d:Spec)=>d.cluster_id===cid)?.machine_id;
   const cleanupDetail=[...new Set<string>((result?.failures??[]).map((f:Spec)=>explain(f.code))),...(result?.skipped?[t(`另有 ${result.skipped} 个摘要未处理。`,`Another ${result.skipped} digests were not processed.`)]:[])].join(' ');
   return <div className="lm-ops-panel lm-registry-images">
     <div className="lm-ops-subheading">
@@ -96,7 +99,7 @@ export default function RegistryImagesPanel({registry,clusterName,onChange,machi
       <label>{t('仓库部署','Registry deployment')}<Select aria-label={t('仓库部署','Registry deployment')} value={cid} disabled={blocked} onChange={value=>setSelected(value)} options={deployments.map((d:Spec)=>({value:d.cluster_id,label:clusterName(d.cluster_id)+' · '+d.address}))}/></label>
       <label>{t('镜像','Image')}<Select aria-label={t('镜像','Image')} showSearch allowClear optionFilterProp="label" value={repository} disabled={loading||blocked} placeholder={t('选择镜像查看版本','Select an image to view versions')} options={repositories.map(value=>({value,label:value}))} onChange={value=>{setRepository(value);setCursors([]);void query(value);}}/></label>
     </div>
-    {error&&<Alert type="error" showIcon title={error} action={<Button size="small" onClick={()=>{if(blocked){setPollRevision(v=>v+1);onChange();}else void query(repository,cursors.at(-1));}}>{t('重试','Retry')}</Button>}/>}
+    {error&&<Alert type="error" showIcon title={error} description={hostTaskBlocked&&blockedMachine?<Link to={'/machines?tab=tasks&task_view=runs&host='+encodeURIComponent(blockedMachine)}>{t('查看该主机的执行记录并核对未知结果','View this host’s execution history and reconcile unknown results')}</Link>:undefined} action={<Button size="small" onClick={()=>{if(blocked){setPollRevision(v=>v+1);onChange();}else void query(repository,cursors.at(-1));}}>{t('重试','Retry')}</Button>}/>}
     {blocked&&<Alert type={unknown?'warning':'info'} showIcon title={unknown?t('清理结果不确定，应用配置与发布保护仍在生效。','Cleanup outcome is unknown. Application changes and deployments remain locked.'):t('正在清理仓库，暂时暂停应用配置与发布。','Cleaning the registry. Application changes and deployments are temporarily paused.')} description={<Button type="link" onClick={()=>setExecutionOpen(true)}>{t('查看和核查执行记录','View and reconcile execution history')}</Button>}/>}
     {cleanup&&terminal.has(cleanup.state)&&cleanup.state!=='unknown'&&<Alert showIcon type={cleanup.state==='succeeded'?'success':'warning'} title={result?.scanned!==undefined?t(`已删除 ${result.deleted} 个摘要（${result.deleted_tags} 个标签），保留 ${result.retained} 个使用中摘要，失败 ${result.failed} 项。`,`Deleted ${result.deleted} digests (${result.deleted_tags} tags), retained ${result.retained} used digests, ${result.failed} failures.`):explain(result?.code??cleanup.state)} description={cleanupDetail||undefined}/>}
     {!usageComplete&&<Alert type="warning" showIcon title={t('部分应用引用无法解析；未匹配版本标记为待核查，清理前必须完成引用核验。','Some application references could not be resolved. Unmatched versions are unverified; cleanup requires complete reference verification.')}/>}

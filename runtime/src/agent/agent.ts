@@ -532,13 +532,17 @@ export class Agent {
     }
   }
   async forwardOnce(): Promise<number> {
+    this.queue.pruneExpired();
+    const expired = this.queue.takeExpiredCount();
+    if (expired) this.runtimeEvent("WARN", "queue_expired", `${expired} pending batches exceeded max_retention_seconds`);
     const batch = this.queue.next();
     if (!batch) return 250;
     if (
       nowNano() - parseNanoTime(batch.created_at) >
-      BigInt(this.config.max_age_seconds) * 1000000000n
+      BigInt(Math.min(this.config.max_age_seconds, this.config.max_retention_seconds)) * 1000000000n
     ) {
-      this.queue.quarantine(batch.id, "expired: maximum replay age exceeded");
+      this.queue.complete(batch.id);
+      this.runtimeEvent("WARN", "queue_expired", "1 pending batch exceeded max_retention_seconds");
       return 0;
     }
     const result = await this.send(batch);
@@ -547,7 +551,7 @@ export class Agent {
       this.queue.complete(batch.id);
       this.lastSuccess = formatNanoTime(nowNano());
       this.lastError = "";
-      return 0;
+      return this.config.replay_interval_ms;
     }
     if (result.permanent) {
       this.queue.quarantine(batch.id, result.message);

@@ -45,6 +45,8 @@ export interface Config {
   min_free_bytes: number;
   max_receipts: number;
   max_age_seconds: number;
+  max_retention_seconds: number;
+  replay_interval_ms: number;
   receipt_seconds: number;
   collect_interval_seconds: number;
   control_interval_seconds: number;
@@ -92,6 +94,8 @@ export function defaultConfig(): Config {
     min_free_bytes: 32 << 20,
     max_receipts: 100000,
     max_age_seconds: 86400,
+    max_retention_seconds: 3600,
+    replay_interval_ms: 1000,
     receipt_seconds: 172800,
     collect_interval_seconds: 15,
     control_interval_seconds: 30,
@@ -225,6 +229,8 @@ export function validateConfig(c: Config, options: ConfigValidation = {}): void 
     "max_queue_batches",
     "max_receipts",
     "max_age_seconds",
+    "max_retention_seconds",
+    "replay_interval_ms",
     "receipt_seconds",
     "collect_interval_seconds",
     "control_interval_seconds",
@@ -235,6 +241,7 @@ export function validateConfig(c: Config, options: ConfigValidation = {}): void 
     !Number.isSafeInteger(c.min_free_bytes) ||
     c.min_free_bytes < 0 ||
     c.max_queue_bytes < c.max_batch_bytes ||
+    c.replay_interval_ms > 60000 ||
     c.receipt_seconds < c.max_age_seconds
   )
     throw Error("invalid storage limits or intervals");
