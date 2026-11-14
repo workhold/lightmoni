@@ -1,0 +1,154 @@
+{
+  "date": "2026-11-14",
+  "base_commit": "eb1690bb42a47c8f5bc28df404c0d957aa9b391b",
+  "client": {
+    "name": "Codex CLI",
+    "version": "codex-cli 0.167.0-alpha.4.1",
+    "protocol": "2025-11-25",
+    "authentication": "PAT bearer; separate restricted PAT for denial",
+    "model_provider": "existing custom provider; no credentials recorded"
+  },
+  "environment": {
+    "isolated": true,
+    "clickhouse": "26.8.37.168",
+    "agent_os": "Debian 13 arm64",
+    "node": "22.23.4",
+    "agent_id": "88a81468c17ca93ce04d861c949b5ffb",
+    "executor_id": "ab6b1585-3c43-4c63-b520-dee8380e3214",
+    "ordinary_task_identity": {
+      "account": "lightmoni-agent",
+      "uid": 1001,
+      "gid": 1001
+    },
+    "setup_note": "Native enrollment/executor APIs only prepare the isolated environment; not an Agent installation acceptance."
+  },
+  "e2e1": {
+    "result": "passed",
+    "table_id": "log_app",
+    "service": "core-e2e-service",
+    "rows": 3,
+    "sample_body": "sample payment completed",
+    "calls": [
+      {
+        "tool": "lightmoni_telemetry_catalog",
+        "status": "completed",
+        "invocation_id": "70b3a170-c894-4e53-95a1-5f5fc0f5795f",
+        "kind": "read",
+        "status_envelope": "completed",
+        "error": null
+      },
+      {
+        "tool": "lightmoni_logs_search",
+        "status": "completed",
+        "invocation_id": "0cda4f4a-07f4-4ae5-a39a-e31a9d1ee850",
+        "kind": "read",
+        "status_envelope": "completed",
+        "rows": 3,
+        "error": null
+      }
+    ],
+    "denial": [
+      {
+        "tool": "lightmoni_hosts_get",
+        "status": "failed",
+        "error": {
+          "code": "not_found",
+          "detail_code": "resource_not_found",
+          "message": "调用未完成，请检查权限、参数或目标状态。",
+          "retryable": false
+        }
+      }
+    ]
+  },
+  "e2e2": {
+    "result": "passed",
+    "proposal_id": "e4cae603d10917f557a04e14bb94f72e",
+    "silence_id": "beaef3873e5a9d0df4de314c6c32768b",
+    "web_apply": "POST /api/v1/assistant/alert-proposals/:id/apply",
+    "approval_status": "completed",
+    "until": "2026-11-14T16:53:39.049Z",
+    "calls": [
+      {
+        "tool": "lightmoni_alerts_plan",
+        "status": "completed",
+        "invocation_id": "c2b04006-fff5-40db-b63c-cec17f79594d",
+        "kind": "proposal",
+        "status_envelope": "awaiting_approval",
+        "proposal_id": "e4cae603d10917f557a04e14bb94f72e",
+        "error": null
+      },
+      {
+        "tool": "lightmoni_alert_silences_get",
+        "status": "completed",
+        "invocation_id": "0c0b3ee8-b083-40ac-b6e4-0e7399bd4a22",
+        "kind": "read",
+        "status_envelope": "completed",
+        "error": null
+      },
+      {
+        "tool": "lightmoni_alert_silences_list",
+        "status": "completed",
+        "invocation_id": "8439c0b9-36b4-4c81-9193-1d62ba9ccd23",
+        "kind": "read",
+        "status_envelope": "completed",
+        "error": null
+      }
+    ]
+  },
+  "e2e3": {
+    "result": "passed",
+    "task_id": "ea2ff02bf3ef7b60340755c6bd2b878d",
+    "proposal_id": "9e37793e-d15c-4740-82cc-f63648700a48",
+    "run_id": "8ed83756-db0b-4850-93a7-17cbfaf5c68b",
+    "web_apply": "POST /api/v1/assistant/task-proposals/:id/apply",
+    "approval_status": "completed",
+    "native_run": {
+      "id": "8ed83756-db0b-4850-93a7-17cbfaf5c68b",
+      "state": "succeeded",
+      "code": "",
+      "exit_code": 0,
+      "started_at": "2026-11-14T14:55:47.340Z",
+      "finished_at": "2026-11-14T14:55:47.382Z",
+      "marker": "CORE_E2E_TASK_SUCCESS_9895735c"
+    },
+    "calls": [
+      {
+        "tool": "lightmoni_tasks_plan",
+        "status": "completed",
+        "invocation_id": "40e428f9-39e7-4f0a-b1d7-23ff493a6410",
+        "kind": "proposal",
+        "status_envelope": "awaiting_approval",
+        "proposal_id": "9e37793e-d15c-4740-82cc-f63648700a48",
+        "error": null
+      },
+      {
+        "tool": "lightmoni_tasks_plan",
+        "status": "completed",
+        "invocation_id": "93d8c27d-8965-4624-a57a-0f1c53ae0901",
+        "kind": "proposal",
+        "status_envelope": "awaiting_approval",
+        "idempotency_replayed": true,
+        "proposal_id": "9e37793e-d15c-4740-82cc-f63648700a48",
+        "error": null
+      },
+      {
+        "tool": "lightmoni_executions_get",
+        "status": "completed",
+        "invocation_id": "6b566033-2086-4ea6-b4b3-9cd5d4dcb54a",
+        "kind": "read",
+        "status_envelope": "completed",
+        "native_state": "succeeded",
+        "error": null
+      }
+    ]
+  },
+  "recovery": {
+    "result": "passed",
+    "kind": "client disconnect/new process idempotent replay",
+    "same_proposal_id": true,
+    "proposal_id": "9e37793e-d15c-4740-82cc-f63648700a48",
+    "replay_invocation": "93d8c27d-8965-4624-a57a-0f1c53ae0901"
+  },
+  "secret_scan": "passed; no known secret value appears in retained client JSONL or messages",
+  "raw_logs": "Temporary JSONL retained outside the repository during verification; summary and final messages below are sanitized."
+}
