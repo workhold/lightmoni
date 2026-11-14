@@ -49,25 +49,6 @@ const incident = (m: Alerts, c: Context): any => {
 };
 const canRespond = (m: Alerts, r: any, c: Context) =>
   c.user.role === "admin" || m.group(r.group_id)?.members?.includes(c.user.id);
-function resetPaging(v: any, m: Alerts): void {
-  Object.assign(v, {
-    state: "unclaimed",
-    owner_id: "",
-    owner_name: "",
-    ack_at: "",
-    ack_method: "",
-    handling_until: "",
-    exhausted: false,
-    round: 0,
-    stage_round: 0,
-    successful_rounds: 0,
-    counted_round: 0,
-    level_active_seconds: 0,
-    since_round_seconds: 0,
-    last_tick: stamp(m.now()),
-    generation: v.generation + 1,
-  });
-}
 export function registerAlertAPI(m: Alerts): void {
   const { router: r, db } = m.deps;
   const capabilities = new AlertCapabilities(m), reads = new AlertReadService(capabilities);
@@ -511,39 +492,14 @@ export function registerAlertAPI(m: Alerts): void {
     c.json(v);
   });
   r.post("/api/v1/alerts/incidents/:id/transfer", async (c) => {
-    const body = await c.body<any>(),
-      v = incident(m, c);
-    if (
-      ["resolved", "cancelled"].includes(v.state) ||
-      !(v.owner_id === c.user.id || c.user.role === "admin")
-    )
-      c.error(403, "当前接手人或管理员可以转交");
-    const g = m.group(v.group_id),
-      user = m.member(body.user_id);
-    if (!g?.members.includes(body.user_id) || !user)
-      c.error(400, "转交人必须为有效组成员");
-    resetPaging(v, m);
-    v.active_seconds = 0;
-    v.group.fallback = [body.user_id];
-    v.stage = "fallback";
-    db.transaction(() => {
-      m.saveResponse(v);
-      m.cancelQueue(v.id);
-      m.audit(
-        v,
-        "transfer",
-        c.user.id,
-        "web",
-        "转交给" + user.name + "，等待其接手",
-      );
-    });
-    c.json(v);
+    const body = await c.body<any>();
+    c.json(await guardedAsync(c, () => m.transfer(c.params.id, c.user, body.user_id), 400));
   });
   r.post("/api/v1/alerts/incidents/:id/escalate", (c) => {
     const v = incident(m, c);
     if (!canRespond(m, v, c) || ["resolved", "cancelled"].includes(v.state))
       c.error(403, "没有响应权限或事件已恢复");
-    resetPaging(v, m);
+    m.resetPaging(v);
     v.stage = v.stage === "primary" ? "backup" : "fallback";
     db.transaction(() => {
       m.saveResponse(v);
