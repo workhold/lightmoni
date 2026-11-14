@@ -1474,6 +1474,28 @@ export class Alerts implements Module {
     return this.commitTransfer(key, actor, targetUserID);
   }
 
+  prepareEscalate(key: string, actor: {id:string;role:string}): void {
+    const r = this.response(key);
+    if (!r) throw new HTTPError(404, "事件不存在");
+    const allowed = actor.role === "admin" || this.group(r.group_id)?.members?.includes(actor.id);
+    if (!allowed || ["resolved", "cancelled"].includes(r.state)) throw new HTTPError(403, "没有响应权限或事件已恢复");
+  }
+
+  commitEscalate(key: string, actor: {id:string;role:string}): any {
+    let r: any;
+    this.deps.db.transaction(() => {
+      this.prepareEscalate(key, actor);
+      r = this.response(key); this.resetPaging(r); r.stage = r.stage === "primary" ? "backup" : "fallback";
+      this.saveResponse(r); this.audit(r, "manual_escalation", actor.id, "web", "主动通知" + r.stage);
+    });
+    return r;
+  }
+
+  escalate(key: string, actor: {id:string;role:string}): any {
+    this.prepareEscalate(key, actor);
+    return this.commitEscalate(key, actor);
+  }
+
   updateDelivery(d: any): void {
     this.deps.db.run(
       `UPDATE alert_outbox SET status=CASE WHEN json_extract(body,'$.delivery_status')='answered' THEN 'confirmed' ELSE ? END,next_attempt=CASE WHEN json_extract(body,'$.delivery_status')='answered' THEN '' ELSE ? END,body=CASE WHEN json_extract(body,'$.delivery_status')='answered' THEN json_set(?,'$.status','confirmed','$.next_attempt','','$.delivery_status','answered','$.provider_id',json_extract(body,'$.provider_id')) ELSE ? END WHERE id=?`,

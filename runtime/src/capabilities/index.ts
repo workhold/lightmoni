@@ -177,7 +177,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       {name:"lightmoni_alert_response_statistics_get",description:"Read native alert response statistics with the existing time, group and priority filters. No records are modified.",scope:"alerts.statistics.read",allHosts:true,effect:"read",inputSchema:schema({from:{...string,maxLength:128},to:{...string,maxLength:128},group_id:string,priority:string}),execute:async(_p,i)=>alertReads!.responseStatistics(i)},
     );
     if(options.alerts&&options.alertProposals)definitions.push({name:"lightmoni_alerts_plan",description:"Create one reviewable alert rule or silence proposal. Requires alerts.propose and alerts.detail.read. Never approves or applies.",scope:"alerts.propose",allHosts:true,effect:"propose",inputSchema:schema({
-      operation:{...string,enum:["incident.transfer","incident.ack","rule.update","rule.silence","silence.create","silence.update","silence.end"]},target_id:string,user_id:string,
+      operation:{...string,enum:["incident.escalate","incident.transfer","incident.ack","rule.update","rule.silence","silence.create","silence.update","silence.end"]},target_id:string,user_id:string,
       patch:{type:"object",properties:{},additionalProperties:true},silence:{type:"object",properties:{},additionalProperties:true},until:{type:"string",minLength:0,maxLength:128},
       reason:{type:"string",minLength:1,maxLength:1000},idempotency_key:{type:"string",minLength:1,maxLength:128}},["operation","reason","idempotency_key"]),execute:(p,i,c)=>this.planAlert(p,i,c)});
     if(options.logs) {

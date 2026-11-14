@@ -92,7 +92,7 @@ callback_port = 1455
 | `lightmoni_alert_incidents_list/get` | `alerts.incidents.read` | 告警事件安全摘要，或真实事件与值班时间线 |
 | `lightmoni_alert_deliveries_list` | `alerts.notifications.read` | 通知投递安全状态和关联，省略联系人、payload、供应商响应与原始错误 |
 | `lightmoni_alert_response_statistics_get` | `alerts.statistics.read` | 原值班响应统计、接手率/时长和筛选；不修改记录 |
-| `lightmoni_alerts_plan` | `alerts.propose` + `alerts.detail.read`；`incident.*` 还需 `alerts.incidents.read` | 告警规则/静默及事件接手/转交提案；包含受保护 review_url，不提供 Apply/审批工具 |
+| `lightmoni_alerts_plan` | `alerts.propose` + `alerts.detail.read`；`incident.*` 还需 `alerts.incidents.read` | 告警规则/静默及事件接手/转交/升级提案；包含受保护 review_url，不提供 Apply/审批工具 |
 
 主机的 `name` 是用户配置的资产名称，`observed_hostname` 仅来自当前关联且未移除的 Agent；新 Agent 尚未上报时为空，不回退旧缓存。
 
@@ -114,7 +114,7 @@ callback_port = 1455
 
 Agent 首装提案使用 `lightmoni_agent_installations_plan`，必须提供现有主机、成功且新鲜的 `check_id`、固定版本和匹配架构。返回真实 `review_url` 后由管理员在原主机页面审阅；MCP 不执行预检、审批或安装。`running`/`unknown` 和人工结束均不能冒充安装成功。
 
-告警事件接手使用 `incident.ack`，转交使用 `incident.transfer` 并提供目标 `user_id`，均额外要求 `alerts.incidents.read`。预览中的 `acknowledged` 或 `unclaimed` 只是待审批结果；管理员通过返回的原生 `review_url` 确认后，原 `Alerts` 事务才会更新真实状态。转交目标必须是当前责任组有效成员，转交后仍需对方接手。事件证据、联系人、payload 和供应商响应不进入提案结果。
+告警事件接手使用 `incident.ack`，转交使用 `incident.transfer` 并提供目标 `user_id`，主动升级使用 `incident.escalate`，均额外要求 `alerts.incidents.read`。预览中的 `acknowledged` 或 `unclaimed` 只是待审批结果；管理员通过返回的原生 `review_url` 确认后，原 `Alerts` 事务才会更新真实状态。转交目标必须是当前责任组有效成员；升级按原 primary→backup、其他→fallback 规则变化。转交/升级后仍需对方接手，不代表通知已送达。事件证据、联系人、payload 和供应商响应不进入提案结果。
 
 ## 部署条件与当前边界
 
@@ -122,4 +122,4 @@ Agent 首装提案使用 `lightmoni_agent_installations_plan`，必须提供现�
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-任务、告警规则/静默/事件接手与转交、部署、运维和 Agent 首装计划由 AI/MCP 创建提案，管理员在原页面审批后由原领域服务执行真实写入或动作；AI/MCP 不能直接执行或自动批准。告警升级/续期/通知重试/测试、部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent SSH 预检/直接安装/升级/恢复/卸载工具、插桩生成/应用、code_task、服务主体或持续授权仍未开放。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。
+任务、告警规则/静默/事件接手、转交与升级、部署、运维和 Agent 首装计划由 AI/MCP 创建提案，管理员在原页面审批后由原领域服务执行真实写入或动作；AI/MCP 不能直接执行或自动批准。告警续期/通知重试/测试、部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent SSH 预检/直接安装/升级/恢复/卸载工具、插桩生成/应用、code_task、服务主体或持续授权仍未开放。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。
