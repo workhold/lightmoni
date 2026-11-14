@@ -51,7 +51,7 @@ export interface AlertProposalAuthorization {
 }
 const maxBytes = 48 << 10;
 const ttl = 15 * 60 * 1000;
-const operations: AlertOperation[] = ["incident.transfer", "incident.ack", "rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"];
+const operations: AlertOperation[] = ["incident.escalate", "incident.transfer", "incident.ack", "rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"];
 export { publicAlertValue } from "../domains/alert-read.js";
 function bounded(value: unknown): void {
   if (bytes(encode(value)) > maxBytes)
@@ -130,7 +130,7 @@ export class AlertProposalService {
     };
     const existing = replay(); if (existing) return existing;
     let input: any;
-    if (intent.operation === "incident.ack" || intent.operation === "incident.transfer") input = { id: intent.target_id, ...(intent.operation === "incident.transfer" ? { user_id: intent.user_id } : {}) };
+    if (["incident.ack", "incident.transfer", "incident.escalate"].includes(intent.operation)) input = { id: intent.target_id, ...(intent.operation === "incident.transfer" ? { user_id: intent.user_id } : {}) };
     else if (intent.operation.startsWith("rule.")) {
       const current = this.capabilities.getRule(actor, intent.target_id!);
       input = { id: current.id, revision: current.revision, ...(intent.operation === "rule.update" ? { patch: intent.patch } : { until: intent.until }) };

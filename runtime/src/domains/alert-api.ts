@@ -496,16 +496,7 @@ export function registerAlertAPI(m: Alerts): void {
     c.json(await guardedAsync(c, () => m.transfer(c.params.id, c.user, body.user_id), 400));
   });
   r.post("/api/v1/alerts/incidents/:id/escalate", (c) => {
-    const v = incident(m, c);
-    if (!canRespond(m, v, c) || ["resolved", "cancelled"].includes(v.state))
-      c.error(403, "没有响应权限或事件已恢复");
-    m.resetPaging(v);
-    v.stage = v.stage === "primary" ? "backup" : "fallback";
-    db.transaction(() => {
-      m.saveResponse(v);
-      m.audit(v, "manual_escalation", c.user.id, "web", "主动通知" + v.stage);
-    });
-    c.json(v);
+    c.json(guarded(c, () => m.escalate(c.params.id, c.user), 400));
   });
   r.post("/api/v1/alerts/incidents/:id/replan", (c) => {
     m.deps.auth.requireAdmin(c);

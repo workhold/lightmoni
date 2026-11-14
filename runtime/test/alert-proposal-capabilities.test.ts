@@ -80,6 +80,7 @@ test("incident proposals require incident scope and live grant, and reject chang
  const f=await fixture();try{
   const withoutIncidents={...structuredClone(f.principal),scopes:f.principal.scopes.filter(s=>s!=="alerts.incidents.read")};
   await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"incident.ack",target_id:"incident-one",reason:"x",idempotency_key:"scope"},withoutIncidents),/scope_required|capability_forbidden/);
+  await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"incident.escalate",target_id:"incident-one",reason:"x",idempotency_key:"scope-escalate"},withoutIncidents),/scope_required|capability_forbidden/);
   const ruleCompatible=await f.invoke("lightmoni_alerts_plan",{operation:"rule.update",target_id:f.rule.id,patch:{threshold:"2"},reason:"compatible",idempotency_key:"compatible"},withoutIncidents);assert.equal(ruleCompatible.data.proposal.status,"awaiting_approval");
   const hostScoped={...structuredClone(f.principal),host_ids:["one"]};await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"incident.ack",target_id:"incident-one",reason:"x",idempotency_key:"host"},hostScoped),/capability_forbidden/);
   const memberSession=f.access.sessionPrincipal(member,"assistant");await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"incident.ack",target_id:"incident-one",reason:"x",idempotency_key:"member"},memberSession),/capability_forbidden/);
@@ -124,5 +125,26 @@ test("internal incident transfer uses the same proposal and native transfer path
   const created=await f.dispatcher.assistantTools().find(t=>t.name==="propose_alert_change")!.execute({operation:"incident.transfer",target_id:"incident-one",user_id:"member",reason:"internal transfer"},new AbortController().signal,admin,{session_id:"session-one"});
   assert.equal(created.proposal.session_id,"session-one");assert.equal(alertsState(f),"firing");await f.proposals.apply(admin,created.proposal.id,new AbortController().signal);
   assert.equal(alertsState(f),"unclaimed");assert.deepEqual(f.alerts.response("incident-one").group.fallback,["member"]);
+ }finally{await f.close();}
+});
+
+test("incident escalation proposals preserve native stage and paging semantics",async()=>{
+ const f=await fixture();try{
+  const input={operation:"incident.escalate",target_id:"incident-one",reason:"escalate now",idempotency_key:"escalate-one"},created=await f.invoke("lightmoni_alerts_plan",input),proposal=created.data.proposal;
+  assert.equal(proposal.before.stage,"primary");assert.equal(proposal.after.stage,"backup");assert.equal(proposal.after.state,"unclaimed");assert.equal(alertsState(f),"firing");
+  assert.equal((await f.invoke("lightmoni_alerts_plan",input)).data.proposal.id,proposal.id);await assert.rejects(f.invoke("lightmoni_alerts_plan",{...input,reason:"changed"}),/idempotency_conflict/);
+  const applied=await f.proposals.apply(admin,proposal.id,new AbortController().signal),response=f.alerts.response("incident-one");
+  assert.equal(applied.result.stage,"backup");assert.equal(response.stage,"backup");assert.equal(response.state,"unclaimed");assert.equal(response.owner_id,"");assert.equal(response.generation,1);
+  assert.equal(JSON.stringify(applied).includes("private-evidence"),false);
+  f.db.run("UPDATE alert_responses SET state='resolved',body=json_set(body,'$.state','resolved') WHERE id='incident-one'");
+  await assert.rejects(f.invoke("lightmoni_alerts_plan",{...input,idempotency_key:"escalate-ended"}),/恢复/);
+ }finally{await f.close();}
+});
+
+test("internal incident escalation uses the same proposal and native commit path",async()=>{
+ const f=await fixture();try{
+  const created=await f.dispatcher.assistantTools().find(t=>t.name==="propose_alert_change")!.execute({operation:"incident.escalate",target_id:"incident-one",reason:"internal escalate"},new AbortController().signal,admin,{session_id:"session-one"});
+  assert.equal(created.proposal.session_id,"session-one");assert.equal(alertsState(f),"firing");await f.proposals.apply(admin,created.proposal.id,new AbortController().signal);
+  assert.equal(alertsState(f),"unclaimed");assert.equal(f.alerts.response("incident-one").stage,"backup");
  }finally{await f.close();}
 });

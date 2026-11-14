@@ -148,6 +148,7 @@ function measurement(rule: any): string {
 }
 
 export type AlertOperation =
+  | "incident.escalate"
   | "incident.transfer"
   | "incident.ack"
   | "rule.update"
@@ -424,21 +425,25 @@ export class AlertCapabilities {
     this.actor(actor);
     signal?.throwIfAborted();
     let before: any = null, after: any, target_id = "", impact: string[] = [], expectedVersion = "";
-    if (operation === "incident.ack" || operation === "incident.transfer") {
+    if (["incident.ack", "incident.transfer", "incident.escalate"].includes(operation)) {
       object(input, operation === "incident.transfer" ? ["id", "user_id"] : ["id"]);
       const response = this.alerts.response(input.id);
       if (!response) fail(404, "告警事件不存在", "resource_not_found");
       const owner = operation === "incident.transfer" ? this.alerts.member(input.user_id) : this.alerts.member(actor.id);
       if (operation === "incident.transfer") this.alerts.prepareTransfer(input.id, actor, input.user_id);
+      else if (operation === "incident.escalate") this.alerts.prepareEscalate(input.id, actor);
       else await this.alerts.prepareAcknowledge(input.id, actor.id);
       const rule = this.alerts.body("alert_rules", response.rule_id), group = this.alerts.group(response.group_id);
       before = incidentView(response); target_id = before.id;
-      after = operation === "incident.transfer"
+      after = operation === "incident.escalate"
+        ? { ...before, state: "unclaimed", owner_id: "", owner_name: "", ack_at: "", ack_method: "", handling_until: "", stage: before.stage === "primary" ? "backup" : "fallback", stage_round: 0, round: 0, exhausted: false,
+          generation: (before.generation ?? 0) + 1 }
+        : operation === "incident.transfer"
         ? { ...before, state: "unclaimed", owner_id: "", owner_name: "", ack_at: "", ack_method: "", handling_until: "", stage: "fallback", stage_round: 0, round: 0, exhausted: false,
           generation: (before.generation ?? 0) + 1, transfer_to: { id: owner.id, name: owner.name } }
         : { ...before, state: "acknowledged", owner_id: actor.id, owner_name: owner.name, ack_method: "web", generation: (before.generation ?? 0) + 1 };
       expectedVersion = incidentVersion(response, rule, group);
-      impact.push(operation === "incident.transfer" ? "审批后转交给指定有效组成员并等待其接手；预览不代表对方已经接手。" : "审批后由原告警服务接手事件、记录处理人并取消尚未发送的升级通知；预览不代表已经接手。");
+      impact.push(operation === "incident.transfer" ? "审批后转交给指定有效组成员并等待其接手；预览不代表对方已经接手。" : operation === "incident.escalate" ? "审批后按原值班规则主动升级并重置分页；预览不代表成员已接手或通知已送达。" : "审批后由原告警服务接手事件、记录处理人并取消尚未发送的升级通知；预览不代表已经接手。");
     } else if (operation === "rule.update" || operation === "rule.silence") {
       object(input, operation === "rule.update" ? ["id", "revision", "patch"] : ["id", "revision", "until"]);
       before = withoutVersion(this.getRule(actor, input.id));
@@ -486,7 +491,7 @@ export class AlertCapabilities {
     } else fail(400, "不支持的告警操作");
     signal?.throwIfAborted();
     const change: AlertChange = { operation, target_id, expected_version: expectedVersion || alertVersion(before), before, after,
-      summary: ({ "incident.transfer": "转交告警事件", "incident.ack": "接手告警事件", "rule.update": "修改告警规则", "rule.silence": "调整规则静默", "silence.create": "创建静默窗口", "silence.update": "修改静默窗口", "silence.end": "结束静默窗口" })[operation] + "：" + (after.name || after.reason || target_id), impact };
+      summary: ({ "incident.escalate": "主动升级告警事件", "incident.transfer": "转交告警事件", "incident.ack": "接手告警事件", "rule.update": "修改告警规则", "rule.silence": "调整规则静默", "silence.create": "创建静默窗口", "silence.update": "修改静默窗口", "silence.end": "结束静默窗口" })[operation] + "：" + (after.name || after.reason || target_id), impact };
     this.prepared.set(change, fingerprint(change));
     return change;
   }
@@ -494,7 +499,7 @@ export class AlertCapabilities {
     this.actor(actor);
     signal?.throwIfAborted();
     object(stored, ["operation", "target_id", "expected_version", "before", "after", "summary", "impact"]);
-    if (stored.operation === "incident.ack" || stored.operation === "incident.transfer") {
+    if (["incident.ack", "incident.transfer", "incident.escalate"].includes(stored.operation)) {
       const checked = await this.prepare(actor, stored.operation, { id: stored.target_id, ...(stored.operation === "incident.transfer" ? { user_id: stored.after.transfer_to?.id } : {}) }, signal);
       if (checked.expected_version !== stored.expected_version) fail(409, "事件、规则或责任组已更新，请重新生成提案", "revision_conflict");
       if (fingerprint(checked.before) !== fingerprint(stored.before) || fingerprint(checked.after) !== fingerprint(stored.after)) fail(409, "事件预览已变化，请重新生成提案", "revision_conflict");
@@ -541,13 +546,14 @@ export class AlertCapabilities {
   commit(actor: Actor, change: AlertChange): any {
     this.actor(actor);
     this.integrity(change);
-    if (change.operation === "incident.ack" || change.operation === "incident.transfer") {
+    if (["incident.ack", "incident.transfer", "incident.escalate"].includes(change.operation)) {
       const response = this.alerts.response(change.target_id), rule = response && this.alerts.body("alert_rules", response.rule_id), group = response && this.alerts.group(response.group_id);
       if (!response || incidentVersion(response, rule, group) !== change.expected_version) fail(409, "事件、规则或责任组已更新，请重新生成提案", "revision_conflict");
       if (change.operation === "incident.transfer") {
         const result = this.alerts.commitTransfer(change.target_id, actor, change.after.transfer_to.id);
         return { ...incidentView(result), transfer_to: change.after.transfer_to };
       }
+      if (change.operation === "incident.escalate") return incidentView(this.alerts.commitEscalate(change.target_id, actor));
       return incidentView(this.alerts.commitAcknowledge(change.target_id, actor.id, "web", this.alerts.now(), rule.revision));
     }
     const rule = change.operation.startsWith("rule.");
