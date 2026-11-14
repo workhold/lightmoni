@@ -21,9 +21,9 @@ LightMoni 是面向个人和小团队的一体化监控工作台。它把业务 
 
 ### 1.1 仓库设计维护
 
-本文以仓库中的 [`docs/system-design.md`](system-design.md) 为唯一持续维护的设计基线。任何影响组件职责、数据或控制路径、凭据边界、存储、协议、部署拓扑或 AI/工具边界的架构变更，都必须在同一个 SDD 和 Pull Request 中更新本文件。按用户于 2026-11-06 的要求，不再同步 Doca 或其他在线副本。
+本文以仓库中的 [`docs/system-design.md`](system-design.md) 和 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 为同步维护的设计基线。任何影响组件职责、数据或控制路径、凭据边界、存储、协议、部署拓扑或 AI/工具边界的架构变更，都必须在同一个 SDD 和 Pull Request 中更新两端，并回读目标章节或原生图块。
 
-Pull Request 记录架构影响判断、仓库文档章节和验证结果。历史在线文档及同步回读记录仅供追溯，不构成后续交付条件。不影响架构的改动填写“不适用”及理由即可；凭据不得写入仓库、日志、URL、Pull Request 或文档正文。
+Pull Request 记录架构影响判断、仓库文档章节、Doca 链接及最新版本回读结果。不影响架构的改动填写“不适用”及理由即可；凭据不得写入仓库、日志、URL、Pull Request 或文档正文。
 
 ## 2. 驱动目标
 
@@ -944,6 +944,8 @@ received → persisted → forwarding → acknowledged
 
 `persisted` 才能向 SDK ACK；`acknowledged` 才能回收队列 payload。队列 SQLite 保存 input hash、forward hash、身份、创建时间、attempts、next time、last error 和日志 cursor。容量不足返回可重试背压。
 
+pending payload 的有效保留窗口是 `min(max_age_seconds,max_retention_seconds)`，默认 1 小时；超窗批次在入队容量检查和发送前批量删除，receipt 继续独立保留用于去重，quarantine 仍由人工处理。成功 ACK 后按 `replay_interval_ms`（默认 1 秒）节流下一批，网络错误继续退避。Docker 日志游标不早于同一窗口起点，序号单调，事件时间不改写。队列最老年龄仅反映 pending，隔离数量独立计量。
+
 ### 18.3 告警响应状态
 
 ```text
@@ -1088,8 +1090,8 @@ docker compose up -d --no-build --wait
 - AI 告警、主机和终端：[SDD 009](../specs/009-assistant-alert-controls/spec.md)、[SDD 013](../specs/013-ai-alert-controls/spec.md)、[SDD 014](../specs/014-managed-machines-agent-bootstrap/spec.md)、[SDD 017](../specs/017-assistant-ssh-bootstrap/spec.md)、[SDD 018](../specs/018-machine-web-terminal/spec.md)
 - 设计基线 SDD：[SDD 019](../specs/019-system-design-baseline/spec.md)
 - AI SDK 插桩与业务部署：[SDD 021](../specs/021-ai-sdk-instrumentation-deployment/spec.md)
-- 历史在线设计副本（不再同步）：[Doca：LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)
-- 历史架构文档同步规则（已由当前本地维护规则替代）：[SDD 020](../specs/020-architecture-design-sync/spec.md)
+- 在线设计基线：[Doca：LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)
+- 架构文档同步规则：[SDD 020](../specs/020-architecture-design-sync/spec.md)
 - 镜像发布与管理员运维：[SDD 023](../specs/023-registry-admin-cli/spec.md)
 
 ## 26. 运维平台基础与备份恢复（SDD 026，网站/容器现行设计见第33章）
@@ -2847,6 +2849,31 @@ flowchart LR
 ### 131.3 静态资源升级
 
 中心对主 HTML 和 SPA 回退发送 `Cache-Control: no-store`；Vite 构建的 `/assets/` 内容哈希 URL 使用一年 `immutable`，每次构建由新 HTML 引用变更后的 URL。未版本化静态文件使用一小时有界缓存；缺失的构建资源返回 404，不回退为 HTML。API 的鉴权和缓存头沿用各自契约。规格、接口、任务与验收见 [SDD131](../specs/131-panel-responsive/spec.md)；本章与第 107 章在同一 PR 同步到 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 并回读原生图块。
+
+## 134. 应用状态、仓库阻塞与 Agent 有界补传（SDD134）
+
+### 134.1 应用状态证据
+
+应用列表沿用中心发布的部署修订、实例健康与服务地址可用性摘要。只有当前部署修订已应用，且每个现有实例有新鲜、成功的健康核对时才显示“运行中”。曾经成功但核对已过期的实例可按现有可用性策略保留服务地址，页面标记“待核实”；恢复作业被未知执行结果阻塞也标记“待核实”并展示原因。实例本身处于 unknown 时继续显示“结果未知”；正在排队或部署才显示“待处理”。保留地址不能作为当前健康证明。
+
+### 134.2 镜像仓库与主机围栏
+
+镜像版本读取仍通过受管主机作业访问仓库。当同机提权任务尚未完成或结果未知，`privileged_execution_pending` 继续阻止派发；仓库页面指出阻塞并链接到该主机的执行记录，供管理员按现有只读核对和人工结束流程处理。该页面不自动释放围栏，也不因仓库 GET 请求属只读而绕开作业准入。
+
+### 134.3 队列存储与发送
+
+Agent 本地 SQLite `batches` 增加按 pending 创建时间清理的索引；默认 `max_retention_seconds=3600` 与旧 `max_age_seconds=86400` 独立，旧配置加载时取得新默认值，有效窗口取两者较小值。过期待发送 payload 在容量判定前和转发前删除，过期数量写入有界运行事件；receipt 的身份、哈希和独立期限保持，quarantine 仍需人工处理。发送成功后按默认 1 秒间隔推进下一个批次，失败继续既有指数退避和 `Retry-After`；批次 ID、冻结 payload 与 OTLP 原始事件时间不变。Docker 日志游标前移到保留窗口起点时保留源序号，防止长期断链后重新采集大量旧日志。`agent.queue.oldest_age` 仅统计 pending；quarantine 另有计数。
+
+```mermaid
+flowchart LR
+  source["SDK / Agent 日志采集"] --> queue["Agent SQLite：pending 与 receipt"]
+  queue -->|超窗| expiry["删除 pending payload / 计数事件"]
+  queue -->|窗口内| pace["成功 ACK 后有界发送间隔"]
+  pace --> center["中心 OTLP / 幂等接收"]
+  queue -->|永久拒绝| quarantine["quarantine：人工核对"]
+```
+
+规格、契约、任务、验证与 Doca 最新版本回读见 [SDD134](../specs/134-app-state-registry-replay/spec.md)。
 
 ## 162. 应用总览状态与未知执行核对（SDD162）
 
