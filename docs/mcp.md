@@ -50,11 +50,12 @@ callback_port = 1455
 
 ## 首批工具
 
-告警模块启用时提供 31 个工具。默认任务通过任务目录读取，不另设模板目录。
+告警模块启用时提供 36 个工具。默认任务通过任务目录读取，不另设模板目录。
 
 | 工具 | scope | 行为 |
 | --- | --- | --- |
 | `lightmoni_hosts_list/get` | `hosts.read` | 已授权主机及观测到的 Agent 状态 |
+| `lightmoni_hosts_inventory` / `lightmoni_hosts_details_get` | `hosts.read` | assistant-safe 详细主机目录/单主机详情，不含 Host Key 或秘密 |
 | `lightmoni_tasks_list/get` | `tasks.read` | 平台默认与用户任务元数据，默认无源码/采集配置 |
 | `lightmoni_tasks_get` 的 `include_source` | 还需 `tasks.source.read` | 显式读取脚本源码 |
 | `lightmoni_tasks_plan` | `tasks.propose` | 已有任务派发、执行取消、重试的审阅提案 |
@@ -77,6 +78,9 @@ callback_port = 1455
 | `lightmoni_operations_resources_list/get` | `operations.read` | 运维资源安全配置摘要，网站/Compose 正文省略 |
 | `lightmoni_operations_runs_list/get` | `operations.read` | 原生运维 Run 元数据或有界详情，敏感日志省略 |
 | `lightmoni_operations_schedules_list/get` | `operations.read` | 计划任务、授权/禁用原因和真实 fire/run 状态 |
+| `lightmoni_agent_releases_list` | `agents.read` | 实际 Agent Release、架构、build 和 SHA256；安装级授权 |
+| `lightmoni_agent_installations_get` | `agents.read` | 按部署 ID 读取安全安装计划/回执，并复验结果主机 |
+| `lightmoni_agent_updates_get` | `agents.read` | 按主机和维护 ID 读取升级/回退回执；unknown/rolled_back 不等于成功 |
 
 主机的 `name` 是用户配置的资产名称，`observed_hostname` 仅来自当前关联且未移除的 Agent；新 Agent 尚未上报时为空，不回退旧缓存。
 
@@ -100,4 +104,4 @@ callback_port = 1455
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-目前没有外部任务创建/源码修改、告警修改、服务部署/运维写工具、自动批准、服务主体或持续授权。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md)，实现规格见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、核心解耦 [SDD 134](../specs/134-capability-core-decoupling/spec.md)、描述符 [SDD 135](../specs/135-capability-descriptor-contracts/spec.md) 与遥测只读 [SDD 136](../specs/136-telemetry-capability-read/spec.md)。
+目前没有外部任务创建/源码修改、告警修改、服务部署/运维写工具、Agent 预检/安装/升级/卸载写工具、自动批准、服务主体或持续授权。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。

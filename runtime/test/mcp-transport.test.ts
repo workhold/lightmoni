@@ -184,6 +184,22 @@ test("operation capabilities expose resources, runs and schedules through the of
   const scheduleRead=await client.callTool({name:"lightmoni_operations_schedules_get",arguments:{id:schedule.id}});assert.equal((scheduleRead.structuredContent as any).data.schedule.operation,"inspect");
  }finally{await client.close();await schedules.close?.();await operations.close?.();await f.close();}
 });
+test("host and Agent capabilities expose safe inventory and lifecycle receipts through the official MCP client",async()=>{
+ const f=await fixture(d=>{
+  const machines={assistantList:()=>[{id:"one",name:"Host one",host_key_fingerprint:""}],assistantGet:(id:string)=>({id,name:"Host "+id,host_key_fingerprint:"",ssh_credentials:[]}),
+   assistantDeployment:(id:string)=>({id,machine_id:"one",status:"unknown",receipt:{stages:[]}}),agentUpdates:{listReleases:()=>[{version:"1.2.3",sha256:"a".repeat(64)}],assistantGet:(machine_id:string,id:string)=>({id,machine_id,status:"rolled_back"})}} as any;
+  return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,machines});
+ });
+ const client=new Client({name:"host-agent-read",version:"1"});
+ try{
+  const key=f.access.createToken(f.user,{name:"Host Agent",scopes:["hosts.read","agents.read"],host_ids:null});await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
+  const tools=await client.listTools();for(const name of ["lightmoni_hosts_inventory","lightmoni_hosts_details_get","lightmoni_agent_releases_list","lightmoni_agent_installations_get","lightmoni_agent_updates_get"])assert.ok(tools.tools.some(t=>t.name===name),name);
+  assert.equal(tools.tools.some(t=>/propose|approve|apply|execute/.test(t.name)),false);
+  const inventory=await client.callTool({name:"lightmoni_hosts_inventory",arguments:{}});assert.equal((inventory.structuredContent as any).data.machines[0].id,"one");
+  const installation=await client.callTool({name:"lightmoni_agent_installations_get",arguments:{deployment_id:"install-one"}});assert.equal((installation.structuredContent as any).data.installation.status,"unknown");
+  const update=await client.callTool({name:"lightmoni_agent_updates_get",arguments:{machine_id:"one",update_id:"update-one"}});assert.equal((update.structuredContent as any).data.update.status,"rolled_back");
+ }finally{await client.close();await f.close();}
+});
 test("transport rejects wrong credentials, Origin, methods, versions, oversized and malformed messages",async()=>{
  const f=await fixture();try{
   const unauth=await fetch(f.endpoint,{headers:{cookie:"lm_session=browser-cookie"}});assert.equal(unauth.status,401);assert.match(unauth.headers.get("www-authenticate")!,/oauth-protected-resource/);
