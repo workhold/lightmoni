@@ -831,7 +831,9 @@ SDD 137 以 AlertReadService 迁移告警读取：规则筛选/分页、完整�
 
 SDD 138 将日志冻结检索抽为 Logs.searchRead，Web 与 LogReadService 共用真实 owner、会话和查询；模型投影裁剪只影响当前响应，后续游标可读取被裁剪行。TraceReadService 复用原 HTTP 的表、范围、span 和缺父节点语义。logs.read/traces.read 独立且仅安装级授权，新增内部 search_logs/get_trace 与外部 MCP/HTTP 能力，不开放保存检索或导出写入。
 
-完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134](../specs/134-capability-core-decoupling/spec.md)、[SDD 135](../specs/135-capability-descriptor-contracts/spec.md)、[SDD 136](../specs/136-telemetry-capability-read/spec.md)、[SDD 137](../specs/137-alert-capability-read/spec.md)、[SDD 138](../specs/138-log-trace-capability-read/spec.md) 和 [MCP 接入指南](mcp.md)。
+SDD 139 复用 ServiceDeploymentStore 开放服务、目标、Release、部署历史和事件只读能力。deployments.read 仅授予管理员安装级读取；内部旧工具由 Dispatcher 适配，新服务详情/部署历史可发现准确 ID。原生部署状态、审批、回滚、receipt、telemetry stale 和事件顺序不改写，部署及制品写操作仍未开放。
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134](../specs/134-capability-core-decoupling/spec.md)、[SDD 135](../specs/135-capability-descriptor-contracts/spec.md)、[SDD 136](../specs/136-telemetry-capability-read/spec.md)、[SDD 137](../specs/137-alert-capability-read/spec.md)、[SDD 138](../specs/138-log-trace-capability-read/spec.md)、[SDD 139](../specs/139-deployment-capability-read/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 
@@ -1024,6 +1026,7 @@ docker compose up -d --no-build --wait
 - 遥测只读能力垂直迁移：[SDD 136](../specs/136-telemetry-capability-read/spec.md)
 - 告警只读能力垂直迁移：[SDD 137](../specs/137-alert-capability-read/spec.md)
 - 日志与 Trace 只读能力：[SDD 138](../specs/138-log-trace-capability-read/spec.md)
+- 服务与部署只读能力：[SDD 139](../specs/139-deployment-capability-read/spec.md)
 - 模型发现和协议：[SDD 002](../specs/002-model-discovery/spec.md)、[SDD 003](../specs/003-multi-protocol-models/spec.md)、[SDD 005](../specs/005-model-management/spec.md)
 - Agent、迁移和凭据：[SDD 006](../specs/006-execution-nodes/spec.md)、[SDD 007](../specs/007-node-runtime-migration/spec.md)、[SDD 010](../specs/010-agent-deployment/spec.md)
 - SDK 数据与模式：[SDD 010 telemetry](../specs/010-telemetry-table-model/spec.md)、[SDD 011](../specs/011-aligned-metric-windows/spec.md)、[SDD 012](../specs/012-sdk-reporting-choice/spec.md)

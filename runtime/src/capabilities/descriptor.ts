@@ -2,7 +2,7 @@ import type { InvocationContext, Principal } from "./types.js";
 
 export type CapabilityRisk = "R0" | "R1" | "R2" | "R3";
 export type OperationKind = "center_read" | "telemetry_query" | "remote_probe" | "domain_change" | "long_running";
-export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence" | "log" | "trace"; id: string; revision?: string | number }
+export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence" | "log" | "trace" | "service" | "deployment"; id: string; revision?: string | number }
 export interface CapabilityLimits {
   timeoutMs: number;
   maxInputBytes: number;
@@ -174,6 +174,30 @@ const METADATA: Record<string, Metadata> = {
     risk: "R1", operationKind: "telemetry_query", approvalPolicy: "none", idempotencyPolicy: "none", roles: ["admin", "member"],
     limits: {ratePerMinute: 30, concurrency: 2},
     targetResolver: input => Array.isArray(input?.tables) ? input.tables.map((id:string) => ({kind:"trace" as const,id})) : [],
+  },
+  lightmoni_services_list: {
+    id: "services.list", outputSchema: data({services:arrayOfRecords},["services"]), risk: "R0", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [],
+  },
+  lightmoni_services_get: {
+    id: "services.get", outputSchema: data({service:record,targets:arrayOfRecords,releases:arrayOfRecords},["service","targets","releases"]),
+    risk: "R1", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none",
+    targetResolver: input => input?.service_id ? [{kind:"service",id:input.service_id}] : [],
+  },
+  lightmoni_deployments_list: {
+    id: "deployments.list", outputSchema: pageOutput, risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none",
+    targetResolver: input => input?.service_id ? [{kind:"service",id:input.service_id}] : [],
+  },
+  lightmoni_deployments_get: {
+    id: "deployments.get", outputSchema: data({deployment:record},["deployment"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none",
+    targetResolver: input => input?.deployment_id ? [{kind:"deployment",id:input.deployment_id}] : [],
+  },
+  lightmoni_deployments_events: {
+    id: "deployments.events", outputSchema: data({deployment_id:{type:"string"},events:arrayOfRecords},["deployment_id","events"]),
+    risk: "R1", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none",
+    targetResolver: input => input?.deployment_id ? [{kind:"deployment",id:input.deployment_id}] : [],
   },
 };
 

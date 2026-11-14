@@ -300,7 +300,7 @@ export function registerAssistant(
         ...(options.machines ? { machines: options.machines } : {}),
         ...(options.deployments ? { deployments: options.deployments } : {}),
         ...(instrumentation ? { instrumentation } : {}),
-      }).filter(tool => !options.capabilities || !["list_tables", "describe_table", "run_query"].includes(tool.name)),
+      }).filter(tool => !options.capabilities || !["list_tables", "describe_table", "run_query", "list_services", "get_service_deployment", "get_service_deployment_events"].includes(tool.name)),
       ...(options.alerts && alertProposals
         ? alertTools(options.alerts, alertProposals).filter(tool => !options.capabilities || !["list_alert_rules", "get_alert_rule", "list_alert_silences", "get_alert_silence", "list_alert_groups", "get_alert_proposal"].includes(tool.name))
         : []),

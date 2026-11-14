@@ -21,6 +21,7 @@ import { AlertProposalService } from "../src/assistant/alert-proposals.js";
 import { Logs } from "../src/domains/logs.js";
 import { LogReadService } from "../src/domains/log-read.js";
 import { TraceReadService } from "../src/domains/trace-read.js";
+import { registerServiceDeployments } from "../src/server/service-deployments.js";
 async function fixture(wrap?:(d:CapabilityDispatcher)=>CapabilityDispatcherContract){
  const db=new DB(":memory:"),router=new Router(),user={id:"admin",name:"Admin",role:"admin"};accountSchema(db);
  db.run("INSERT INTO users(id,name,role,active,created_at) VALUES(?,?,?,1,?)",user.id,user.name,user.role,new Date().toISOString());
@@ -141,6 +142,25 @@ test("log and trace capabilities share frozen reads through the official MCP cli
   const second=await client.callTool({name:"lightmoni_logs_search",arguments:{session_id:data.session_id,cursor:"1",limit:1}});assert.equal((second.structuredContent as any).data.frame.rows[0][0],"e1");
   const trace=await client.callTool({name:"lightmoni_traces_get",arguments:{trace_id:"trace-one",tables:["trace_app"],...range}});assert.equal((trace.structuredContent as any).data.spans.length,1);assert.equal((trace.structuredContent as any).data.incomplete,false);
  }finally{await client.close();logs.close();await f.close();}
+});
+test("deployment capabilities expose native service and receipt views through the official MCP client",async()=>{
+ const f=await fixture(d=>{const store=registerServiceDeployments(d.deps);return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,deployments:store});});
+ const client=new Client({name:"deployment-read",version:"1"});
+ try{
+  const at=new Date().toISOString(),serviceID="a".repeat(32);
+  f.db.run("INSERT INTO services(id,name,description,repository_url,created_at,updated_at,created_by) VALUES(?,'Checkout','Checkout API','',?,?,'admin')",serviceID,at,at);
+  f.db.run("INSERT INTO service_targets(id,service_id,machine_id,adapter,config_json,desired_release_id,status,created_at,updated_at) VALUES('target-one',?,'one','systemd','{}','release-one','ready',?,?)",serviceID,at,at);
+  f.db.run("INSERT INTO releases(id,service_id,version,source_type,source_ref,artifact_digest,artifact_size,manifest_json,status,created_at,created_by) VALUES('release-one',?,'2026.11.14','artifact','sha256:abc','sha256:abc',128,'{}','ready',?,'admin')",serviceID,at);
+  f.db.run("INSERT INTO deployments(id,service_id,target_id,release_id,adapter,status,plan_json,target_snapshot_json,receipt_json,phase,operation_id,created_at,created_by) VALUES('deployment-one',?,'target-one','release-one','systemd','awaiting_approval','{}','{}','{}','awaiting_approval','operation-one',?,'admin')",serviceID,at);
+  f.db.run("INSERT INTO deployment_events(id,deployment_id,phase,state,summary,actor,created_at) VALUES('event-one','deployment-one','awaiting_approval','awaiting_approval','计划已生成','admin',?)",at);
+  const key=f.access.createToken(f.user,{name:"Deployments",scopes:["deployments.read"],host_ids:null});
+  await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
+  const tools=await client.listTools();for(const name of ["lightmoni_services_list","lightmoni_services_get","lightmoni_deployments_list","lightmoni_deployments_get","lightmoni_deployments_events"])assert.ok(tools.tools.some(t=>t.name===name),name);
+  assert.equal(tools.tools.some(t=>/approve|rollback|upload/.test(t.name)),false);
+  const detail=await client.callTool({name:"lightmoni_services_get",arguments:{service_id:serviceID}});assert.equal((detail.structuredContent as any).data.targets[0].id,"target-one");assert.equal((detail.structuredContent as any).data.releases[0].id,"release-one");
+  const deployment=await client.callTool({name:"lightmoni_deployments_get",arguments:{deployment_id:"deployment-one"}});assert.equal((deployment.structuredContent as any).data.deployment.status,"awaiting_approval");
+  const events=await client.callTool({name:"lightmoni_deployments_events",arguments:{deployment_id:"deployment-one"}});assert.equal((events.structuredContent as any).data.events[0].id,"event-one");
+ }finally{await client.close();await f.close();}
 });
 test("transport rejects wrong credentials, Origin, methods, versions, oversized and malformed messages",async()=>{
  const f=await fixture();try{
