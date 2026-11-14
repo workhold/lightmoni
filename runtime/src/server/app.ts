@@ -58,6 +58,8 @@ import { AlertProposalService } from "../assistant/alert-proposals.js";
 import { LogReadService } from "../domains/log-read.js";
 import { TraceReadService } from "../domains/trace-read.js";
 import { DashboardReadService } from "../domains/dashboard-read.js";
+import { InstrumentationService } from "../assistant/instrumentation.js";
+import { Store as AssistantUsageStore } from "../assistant/usage.js";
 import { McpAccess, registerMcpAccess, isMcpExternalURL } from "../mcp/access.js";
 import { registerMcpTransport } from "../mcp/transport.js";
 export interface Config {
@@ -210,7 +212,13 @@ export async function createApp(cfg: Config) {
     }
     const capabilityAccess = new CapabilityAccess(deps, mcpAccess);
     const telemetry = new TelemetryService(deps);
-    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, alertProposals, telemetry, logs:logReads, traces:traceReads, deployments:serviceDeployments, operations, operationSchedules, machines:managedMachines, dashboards:dashboardReads});
+    const instrumentationRoot = process.env.LIGHTMONI_CODE_WORKSPACE;
+    const instrumentation = instrumentationRoot?.trim() ? new InstrumentationService(instrumentationRoot, {now: deps.now, store: (() => {
+      const store = new AssistantUsageStore(deps.db, deps.now);
+      return { get: <T>(key: string) => { const saved = store.get<string>(key); return saved ? JSON.parse(deps.decrypt(saved)) as T : undefined; },
+        put: (key, value) => store.put(key, deps.encrypt(JSON.stringify(value))) };
+    })() }) : undefined;
+    const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, alertProposals, telemetry, logs:logReads, traces:traceReads, deployments:serviceDeployments, operations, operationSchedules, machines:managedMachines, dashboards:dashboardReads, instrumentation});
     registerCapabilities(deps, capabilities, capabilityAccess);
     if (mcpAccess) modules.push(registerMcpTransport(deps, mcpAccess, capabilities));
     modules.push(
@@ -222,6 +230,7 @@ export async function createApp(cfg: Config) {
         operations,
         taskCenter,
         telemetry,
+        ...(instrumentation ? {instrumentationService: instrumentation} : {}),
         capabilities,
         taskProposals: capabilities.proposals,
       }),

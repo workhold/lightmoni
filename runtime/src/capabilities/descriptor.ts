@@ -2,7 +2,7 @@ import type { InvocationContext, Principal } from "./types.js";
 
 export type CapabilityRisk = "R0" | "R1" | "R2" | "R3";
 export type OperationKind = "center_read" | "telemetry_query" | "remote_probe" | "domain_change" | "long_running";
-export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence" | "log" | "trace" | "service" | "deployment" | "operation_resource" | "operation_run" | "operation_schedule" | "dashboard"; id: string; revision?: string | number }
+export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence" | "log" | "trace" | "service" | "deployment" | "operation_resource" | "operation_run" | "operation_schedule" | "dashboard" | "instrumentation_plan"; id: string; revision?: string | number }
 export interface CapabilityLimits {
   timeoutMs: number;
   maxInputBytes: number;
@@ -46,6 +46,7 @@ const data = (properties: Record<string, any>, required: string[] = []) => ({
   type: "object", properties, required, additionalProperties: false,
 });
 const arrayOfRecords = { type: "array", items: record, maxItems: 10000 };
+const stringArray = {type:"array",items:{type:"string",maxLength:512},maxItems:10000};
 const listOutput = (field: string, extra: Record<string, any> = {}) => data({
   [field]: arrayOfRecords, total: count, truncated: flag, next_offset: nullOr(count), ...extra,
 }, [field]);
@@ -256,6 +257,17 @@ const METADATA: Record<string, Metadata> = {
     id: "dashboards.versions", outputSchema: data({dashboard_id:{type:"string"},versions:arrayOfRecords},["dashboard_id","versions"]),
     risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", roles: ["admin", "member"],
     targetResolver: input => input?.id ? [{kind:"dashboard",id:input.id}] : [],
+  },
+  lightmoni_code_instrumentation_scan: {
+    id: "code.instrumentation.scan", outputSchema: data({plan_id:{type:"string"},workspace:{type:"string"},base_revision:{type:"string"},state:{type:"string"},
+      languages:stringArray,frameworks:stringArray,package_managers:stringArray,sdk:record,candidates:arrayOfRecords,warnings:stringArray,files_scanned:count},
+      ["plan_id","workspace","base_revision","state","languages","frameworks","package_managers","sdk","candidates","warnings","files_scanned"]),
+    risk: "R1", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [],
+  },
+  lightmoni_code_instrumentation_get: {
+    id: "code.instrumentation.get", outputSchema: data({plan:record,applied:nullOr(record)},["plan","applied"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none",
+    targetResolver: input => input?.plan_id ? [{kind:"instrumentation_plan",id:input.plan_id}] : [],
   },
 };
 

@@ -246,6 +246,12 @@ export class InstrumentationService {
     return this.loadPlan(planID)?.plan;
   }
 
+  read(planID: string): {plan: InstrumentationPlan; applied: InstrumentationApplyResult | null} | undefined {
+    const record = this.loadPlan(planID);
+    // Never expose encrypted before snapshots or unrelated stored fields.
+    return record ? {plan: structuredClone(record.plan), applied: structuredClone(record.applied)} : undefined;
+  }
+
   async scan(workspace = ".", signal?: AbortSignal): Promise<InstrumentationScan> {
     const absolute = await safeWorkspace(this.root, workspace), files: string[] = [];
     let total = 0;
