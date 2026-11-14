@@ -1,4 +1,5 @@
 import { parseJSON } from "../shared/json.js";
+import { fail } from "../shared/http.js";
 import type { Context, Dependencies, Module } from "../shared/types.js";
 import {
   bytes,
@@ -235,11 +236,27 @@ export class Dashboards implements Module {
     this.seed();
   }
   load(c: Context, id = c.params.id): any {
-    const r = this.deps.db.get<{
-      body: string;
-    }>("SELECT body FROM dashboards WHERE id=?", id);
-    if (!r) c.error(404, "大盘不存在");
-    return parseJSON(r!.body);
+    return this.get(id);
+  }
+  get(id: string): any {
+    const row = this.deps.db.get<{body:string}>("SELECT body FROM dashboards WHERE id=?", id);
+    if (!row) fail(404, "大盘不存在");
+    return parseJSON(row.body);
+  }
+  listCustom(): any[] {
+    return this.deps.db.all<{body:string}>("SELECT body FROM dashboards ORDER BY updated_at DESC,id")
+      .map(row => parseJSON(row.body)).filter(d => !this.builtin(d));
+  }
+  listSystem(): any[] {
+    return systemDashboards().flatMap(seed => {
+      const row = this.deps.db.get<{body:string}>("SELECT body FROM dashboards WHERE id=?", seed.id);
+      return row ? [parseJSON(row.body)] : [];
+    });
+  }
+  versions(id: string): any[] {
+    this.get(id);
+    return this.deps.db.all<any>("SELECT revision,updated_at,base_revision,overwritten FROM dashboard_versions WHERE dashboard_id=? ORDER BY revision DESC LIMIT 100", id)
+      .map(v => ({...v, overwritten: !!v.overwritten}));
   }
   insert(d: any): any {
     d = { ...d, id: uuid(), revision: 1, updated_at: stamp(this.deps.now()) };
@@ -319,38 +336,15 @@ export class Dashboards implements Module {
   register(): void {
     const { router: r, db } = this.deps;
     // Keep persisted content, versions and deletion markers. This is a separate directory.
-    r.get('/api/v1/system-monitoring', c => c.json(
-      systemDashboards().flatMap(seed => {
-        const row = db.get<{body:string}>('SELECT body FROM dashboards WHERE id=?',seed.id);
-        return row ? [parseJSON(row.body)] : [];
-      }),
-    ));
-    r.get("/api/v1/dashboards", (c) =>
-      c.json(
-        db
-          .all<{
-            body: string;
-          }>("SELECT body FROM dashboards ORDER BY updated_at DESC,id")
-          .map((x) => parseJSON(x.body)).filter(d => !this.builtin(d)),
-      ),
-    );
+    r.get('/api/v1/system-monitoring', c => c.json(this.listSystem()));
+    r.get("/api/v1/dashboards", (c) => c.json(this.listCustom()));
     r.post("/api/v1/dashboards", async (c) => {
       const input = await c.body<any>();
       c.json(this.insert(guarded(c, () => normalizeDashboard(input))), 201);
     });
     // The handlers below retain optimistic revisions and append durable version metadata.
     r.get("/api/v1/dashboards/:id", (c) => c.json(this.load(c)));
-    r.get("/api/v1/dashboards/:id/versions", (c) => {
-      this.load(c);
-      c.json(
-        db
-          .all<any>(
-            "SELECT revision,updated_at,base_revision,overwritten FROM dashboard_versions WHERE dashboard_id=? ORDER BY revision DESC LIMIT 100",
-            c.params.id,
-          )
-          .map((v) => ({ ...v, overwritten: !!v.overwritten })),
-      );
-    });
+    r.get("/api/v1/dashboards/:id/versions", (c) => c.json(this.versions(c.params.id)));
     r.put("/api/v1/dashboards/:id", async (c) => {
       const input = await c.body<any>();
       if (!Number.isInteger(input.revision) || input.revision < 1)

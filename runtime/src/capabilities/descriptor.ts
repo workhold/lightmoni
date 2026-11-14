@@ -2,7 +2,7 @@ import type { InvocationContext, Principal } from "./types.js";
 
 export type CapabilityRisk = "R0" | "R1" | "R2" | "R3";
 export type OperationKind = "center_read" | "telemetry_query" | "remote_probe" | "domain_change" | "long_running";
-export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence" | "log" | "trace" | "service" | "deployment" | "operation_resource" | "operation_run" | "operation_schedule"; id: string; revision?: string | number }
+export interface TargetRef { kind: "host" | "task" | "execution" | "proposal" | "table" | "alert_rule" | "alert_silence" | "log" | "trace" | "service" | "deployment" | "operation_resource" | "operation_run" | "operation_schedule" | "dashboard"; id: string; revision?: string | number }
 export interface CapabilityLimits {
   timeoutMs: number;
   maxInputBytes: number;
@@ -242,6 +242,20 @@ const METADATA: Record<string, Metadata> = {
   lightmoni_agent_updates_get: {
     id: "agents.updates.get", outputSchema: data({update:record},["update"]), risk: "R1", operationKind: "center_read",
     approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: input => input?.machine_id ? [{kind:"host",id:input.machine_id}] : [],
+  },
+  lightmoni_dashboards_list: {
+    id: "dashboards.list", outputSchema: pageOutput, risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none",
+    targetResolver: () => [], roles: ["admin", "member"],
+  },
+  lightmoni_dashboards_get: {
+    id: "dashboards.get", outputSchema: data({dashboard:record},["dashboard"]), risk: "R1", operationKind: "center_read",
+    approvalPolicy: "none", idempotencyPolicy: "none", roles: ["admin", "member"],
+    targetResolver: input => input?.id ? [{kind:"dashboard",id:input.id}] : [],
+  },
+  lightmoni_dashboards_versions: {
+    id: "dashboards.versions", outputSchema: data({dashboard_id:{type:"string"},versions:arrayOfRecords},["dashboard_id","versions"]),
+    risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", roles: ["admin", "member"],
+    targetResolver: input => input?.id ? [{kind:"dashboard",id:input.id}] : [],
   },
 };
 

@@ -50,7 +50,7 @@ callback_port = 1455
 
 ## 首批工具
 
-告警模块启用时提供 36 个工具。默认任务通过任务目录读取，不另设模板目录。
+告警模块启用时提供 39 个工具。默认任务通过任务目录读取，不另设模板目录。
 
 | 工具 | scope | 行为 |
 | --- | --- | --- |
@@ -81,6 +81,9 @@ callback_port = 1455
 | `lightmoni_agent_releases_list` | `agents.read` | 实际 Agent Release、架构、build 和 SHA256；安装级授权 |
 | `lightmoni_agent_installations_get` | `agents.read` | 按部署 ID 读取安全安装计划/回执，并复验结果主机 |
 | `lightmoni_agent_updates_get` | `agents.read` | 按主机和维护 ID 读取升级/回退回执；unknown/rolled_back 不等于成功 |
+| `lightmoni_dashboards_list` | `dashboards.read` | 自定义/系统大盘摘要、搜索和分页，无面板 SQL |
+| `lightmoni_dashboards_get` | `dashboards.detail.read` | 完整大盘面板、变量和 SQL；安装级高敏读取 |
+| `lightmoni_dashboards_versions` | `dashboards.read` | 大盘真实 revision 历史元数据 |
 
 主机的 `name` 是用户配置的资产名称，`observed_hostname` 仅来自当前关联且未移除的 Agent；新 Agent 尚未上报时为空，不回退旧缓存。
 
