@@ -27,4 +27,4 @@
 
 官方 MCP SDK 自动化不等于真实 Codex/Claude OAuth 或生产环境验收；本轮未执行这些验证。历史未索引记录不保证全部回填，OpenAPI/Bearer、Agent 后续生命周期、服务回滚/核验和真实客户端矩阵仍需独立处理。
 
-交付状态：实现与验证完成，等待 PR 评审；未获本轮合并授权，不自动合并。
+交付 PR：[workhold/lightmoni#215](https://github.com/workhold/lightmoni/pull/215)，目标为 main，依赖 #214；实现与验证完成，等待评审，未获本轮合并授权。
