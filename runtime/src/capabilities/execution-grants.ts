@@ -20,9 +20,9 @@ export class ExecutionGrantRegistry {
     const saved=this.deps.db.get<Binding>("SELECT * FROM capability_execution_grants WHERE domain=? AND native_id=?",domain,nativeID);
     if(!saved||saved.grant_id!==binding.grant_id||saved.user_id!==binding.user_id||saved.source!==binding.source||saved.reason!==binding.reason)fail(409,"execution_authorization_conflict");
   }
-  assert(domain:string,nativeID:string): void {
+  assert(domain:string,nativeID:string,required=false): void {
     const binding=this.deps.db.get<Binding>("SELECT * FROM capability_execution_grants WHERE domain=? AND native_id=?",domain,nativeID);
-    if(!binding)return;
+    if(!binding){if(required)fail(403,"authorization_revoked");return;}
     if(!this.validator)fail(503,"authorization_unavailable");
     try{this.validator(binding);}catch(error){if(error instanceof Error&&error.message==="authorization_unavailable")throw error;fail(403,"authorization_revoked");}
   }
