@@ -28,4 +28,4 @@
 
 官方 MCP SDK 隔离 E2E 不等于真实 Codex/Claude OAuth、自然语言或生产环境验收；本轮未执行这些验证，也未验证修改后的业务项目构建/遥测。Apply/code_task 不作为模型工具开放；Agent 后续生命周期、服务回滚/核验、告警值班提案和 Slice 4 仍需独立切片。
 
-交付状态：实现与验证完成，等待 PR 评审；未获本轮合并授权，不自动合并。
+交付 PR：[workhold/lightmoni#208](https://github.com/workhold/lightmoni/pull/208)，目标为 main；实现与验证完成，等待评审，未获本轮合并授权。
