@@ -226,18 +226,25 @@ test("operation capabilities expose resources, runs and schedules through the of
 });
 test("host and Agent capabilities expose safe inventory and lifecycle receipts through the official MCP client",async()=>{
  const f=await fixture(d=>{
+  let current={id:"install-one",machine_id:"one",status:"unknown",receipt:{stages:[]}};
   const machines={assistantList:()=>[{id:"one",name:"Host one",host_key_fingerprint:""}],assistantGet:(id:string)=>({id,name:"Host "+id,host_key_fingerprint:"",ssh_credentials:[]}),
-   assistantDeployment:(id:string)=>({id,machine_id:"one",status:"unknown",receipt:{stages:[]}}),agentUpdates:{listReleases:()=>[{version:"1.2.3",sha256:"a".repeat(64)}],assistantGet:(machine_id:string,id:string)=>({id,machine_id,status:"rolled_back"})}} as any;
-  return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,machines});
+   assistantDeployment:(id:string)=>(id===current.id?current:undefined),assistantPlan:(machine_id:string,input:any,actor:string)=>{
+    current={id:"install-one",machine_id,status:"awaiting_approval",version:input.version,arch:input.arch,plan:{check_id:input.check_id,runtime_mode:input.runtime_mode??"root"},receipt:{stages:[]},created_by:actor,review_url:`/machines?machine=${machine_id}&deployment=install-one`};return current;
+   },agentUpdates:{listReleases:()=>[{version:"1.2.3",sha256:"a".repeat(64)}],assistantGet:(machine_id:string,id:string)=>({id,machine_id,status:"rolled_back"})}} as any;
+  const grants=new ExecutionGrantRegistry(d.deps);return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,machines,executionGrants:grants});
  });
  const client=new Client({name:"host-agent-read",version:"1"});
  try{
-  const key=f.access.createToken(f.user,{name:"Host Agent",scopes:["hosts.read","agents.read"],host_ids:null});await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
-  const tools=await client.listTools();for(const name of ["lightmoni_hosts_inventory","lightmoni_hosts_details_get","lightmoni_agent_releases_list","lightmoni_agent_installations_get","lightmoni_agent_updates_get"])assert.ok(tools.tools.some(t=>t.name===name),name);
-  assert.equal(tools.tools.some(t=>/propose|approve|apply|execute/.test(t.name)),false);
+  const key=f.access.createToken(f.user,{name:"Host Agent",scopes:["hosts.read","agents.read","agents.maintain.propose"],host_ids:null});await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
+  const tools=await client.listTools();for(const name of ["lightmoni_hosts_inventory","lightmoni_hosts_details_get","lightmoni_agent_releases_list","lightmoni_agent_installations_get","lightmoni_agent_updates_get","lightmoni_agent_installations_plan"])assert.ok(tools.tools.some(t=>t.name===name),name);
+  assert.equal(tools.tools.some(t=>/approve|apply|execute/.test(t.name)),false);
   const inventory=await client.callTool({name:"lightmoni_hosts_inventory",arguments:{}});assert.equal((inventory.structuredContent as any).data.machines[0].id,"one");
   const installation=await client.callTool({name:"lightmoni_agent_installations_get",arguments:{deployment_id:"install-one"}});assert.equal((installation.structuredContent as any).data.installation.status,"unknown");
   const update=await client.callTool({name:"lightmoni_agent_updates_get",arguments:{machine_id:"one",update_id:"update-one"}});assert.equal((update.structuredContent as any).data.update.status,"rolled_back");
+  const planned=await client.callTool({name:"lightmoni_agent_installations_plan",arguments:{machine_id:"one",check_id:"check-one",version:"1.2.3",arch:"amd64",reason:"external review",idempotency_key:"agent-install-plan-one"}});assert.ok(!planned.isError,JSON.stringify(planned));
+  const plannedData=(planned.structuredContent as any).data;assert.equal(plannedData.proposal.status,"awaiting_approval");assert.ok(plannedData.proposal.review_url.includes("/machines?"));
+  assert.ok(f.db.get("SELECT 1 FROM capability_execution_grants WHERE domain='agent_installation' AND native_id='install-one'"));
+  const queued=await client.callTool({name:"lightmoni_agent_installations_get",arguments:{deployment_id:"install-one"}});assert.equal((queued.structuredContent as any).data.installation.status,"awaiting_approval");
  }finally{await client.close();await f.close();}
 });
 test("dashboard capabilities expose real catalog, details and versions through the official MCP client",async()=>{

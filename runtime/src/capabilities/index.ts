@@ -114,12 +114,16 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       this.authorize(current,"alerts.propose",true);this.authorize(current,"alerts.detail.read",true);
     }});
     options.executionGrants?.use(binding=>{
-      if(binding.domain!=="deployment"&&binding.domain!=="operation")return;
+      if(!["deployment","operation","agent_installation"].includes(binding.domain))return;
       const current=this.grant({source:"mcp",grant_id:binding.grant_id},binding.user_id);
       if(binding.domain==="deployment"){
         this.authorize(current,"deployments.propose",true);this.authorize(current,"deployments.read",true);
       }else if(binding.domain==="operation"){
         this.authorize(current,"operations.propose",true);this.authorize(current,"operations.read",true);
+      }else if(binding.domain==="agent_installation"){
+        this.authorize(current,"agents.maintain.propose");this.authorize(current,"agents.read");
+        const installation=deps.db.get<{machine_id:string}>("SELECT machine_id FROM machine_deployments WHERE id=?",binding.native_id);
+        if(!installation)fail(403,"capability_forbidden");this.host(current,installation.machine_id);
       }
     });
     const page = {limit:{type:"integer",minimum:1,maximum:100},offset:{type:"integer",minimum:0,maximum:100000}};
@@ -237,6 +241,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         {name:"lightmoni_agent_releases_list",description:"List actual Agent releases with architecture, build and immutable SHA256.",scope:"agents.read",allHosts:true,effect:"read",inputSchema:schema(),execute:async()=>({releases:machines.agentUpdates!.listReleases()})},
         {name:"lightmoni_agent_updates_get",description:"Read one sanitized Agent upgrade/rollback receipt. Rolled_back and unknown are not successful upgrades.",scope:"agents.read",effect:"read",inputSchema:schema({machine_id:string,update_id:string},["machine_id","update_id"]),execute:async(p,i)=>({update:(this.host(p,i.machine_id),machines.agentUpdates!.assistantGet(i.machine_id,i.update_id))})},
       );
+      if(options.executionGrants)definitions.push({name:"lightmoni_agent_installations_plan",description:"Create a reviewable Agent installation plan from a successful fresh check_id and matching architecture. Requires agents.maintain.propose and agents.read. Never runs SSH, approves or installs.",scope:"agents.maintain.propose",effect:"propose",inputSchema:schema({machine_id:string,check_id:string,version:string,arch:{...string,enum:["amd64","arm64"]},initial_label_id:{type:"string",maxLength:128},runtime_mode:{...string,enum:["root","user"]},reason:{type:"string",minLength:1,maxLength:1000},idempotency_key:{type:"string",minLength:1,maxLength:128}},["machine_id","check_id","version","arch","reason","idempotency_key"]),execute:(p,i)=>this.planAgentInstallation(p,i)});
     }
     if(options.dashboards) {
       const reads=options.dashboards;
@@ -386,6 +391,25 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       if(p.source==="mcp")this.options.executionGrants!.bind("operation",run.id,{grant_id:p.grant_id,user_id:p.user.id,source:p.source,reason:input.reason});
       this.deps.db.run("INSERT INTO capability_idempotency(installation_id,user_id,capability,key_hash,input_hash,proposal_id,created_at) VALUES(?,?,'lightmoni_operations_plan',?,?,?,?)",this.installationID,p.user.id,keyHash,inputHash,run.id,this.deps.now().toISOString());
       return this.operationProposal(run);
+    });
+  }
+  private agentInstallationProposal(plan:any):any {
+    const current=this.options.machines!.assistantDeployment(plan.id),path=`/machines?machine=${encodeURIComponent(current.machine_id)}&deployment=${encodeURIComponent(current.id)}`;
+    const currentPlan=plan.review_url&&plan.plan?plan:{id:current.id,machine_id:current.machine_id,status:current.status,version:current.version,arch:current.arch,
+      plan:current.plan,receipt:current.receipt,error:current.error,created_at:current.created_at,started_at:current.started_at,finished_at:current.finished_at,review_url:path};
+    return {proposal:{id:current.id,operation:"agent.install",status:current.status==="awaiting_approval"?"awaiting_approval":"completed",
+      native_status:current.status,review_url:this.review(path)},plan:currentPlan};
+  }
+  private planAgentInstallation(p:Principal,i:any):any {
+    const {idempotency_key,...raw}=i,input={...raw,runtime_mode:raw.runtime_mode??"root",initial_label_id:raw.initial_label_id??""},keyHash=digest(idempotency_key),inputHash=digest(input);
+    return this.deps.db.transaction(()=>{
+      const old=this.deps.db.get<{input_hash:string;proposal_id:string}>("SELECT input_hash,proposal_id FROM capability_idempotency WHERE installation_id=? AND user_id=? AND capability='lightmoni_agent_installations_plan' AND key_hash=?",this.installationID,p.user.id,keyHash);
+      if(old){if(old.input_hash!==inputHash)fail(409,"idempotency_conflict");return {...this.agentInstallationProposal({id:old.proposal_id}),idempotency_replayed:true};}
+      const plan=this.options.machines!.assistantPlan(input.machine_id,{check_id:input.check_id,version:input.version,arch:input.arch,
+        initial_label_id:input.initial_label_id,runtime_mode:input.runtime_mode},p.user.id);
+      if(p.source==="mcp")this.options.executionGrants!.bind("agent_installation",plan.id,{grant_id:p.grant_id,user_id:p.user.id,source:p.source,reason:input.reason});
+      this.deps.db.run("INSERT INTO capability_idempotency(installation_id,user_id,capability,key_hash,input_hash,proposal_id,created_at) VALUES(?,?,'lightmoni_agent_installations_plan',?,?,?,?)",this.installationID,p.user.id,keyHash,inputHash,plan.id,this.deps.now().toISOString());
+      return this.agentInstallationProposal(plan);
     });
   }
   private summary(d:CapabilityDefinition):CapabilitySummary {
@@ -563,6 +587,13 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         return v.data;
       }};
     });
+    const agentInstallationProposal = this.definitions.some(d=>d.name==="lightmoni_agent_installations_plan") ? (()=>{
+      const d=this.definitions.find(x=>x.name==="lightmoni_agent_installations_plan")!,properties=Object.fromEntries(Object.entries(d.inputSchema.properties).filter(([key])=>!["idempotency_key","reason"].includes(key)));
+      return[{name:"propose_agent_install",description:d.description,schema:{...d.inputSchema,properties,required:["machine_id","check_id","version","arch"]},effect:"draft" as const,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+        if(!user)fail(401,"login_required");const p=this.authority.sessionPrincipal(user as User,"assistant");
+        const v=await this.invoke(p,"lightmoni_agent_installations_plan",{...input,reason:"Internal assistant Agent installation proposal",idempotency_key:randomUUID()},{signal,session_id:scope?.session_id});return v.data.plan;
+      }}];
+    })() : [];
     const dashboardMap:Record<string,string>={list_dashboards:"lightmoni_dashboards_list",get_dashboard:"lightmoni_dashboards_get",get_dashboard_versions:"lightmoni_dashboards_versions"};
     const dashboardReads = Object.entries(dashboardMap).filter(([,target])=>this.definitions.some(x=>x.name===target)).map(([name,target])=>{
       const d=this.definitions.find(x=>x.name===target)!;
@@ -580,7 +611,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       }};
     });
     const old=taskTools(this.proposals).find(t=>t.name==="propose_task_action")!;
-    return [...shared,...telemetry,...alerts,...alertProposal,...logTrace,...deployments,...deploymentProposal,...operationReads,...operationProposal,...hostAgent,...dashboardReads,...instrumentation,{...old,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+    return [...shared,...telemetry,...alerts,...alertProposal,...logTrace,...deployments,...deploymentProposal,...operationReads,...operationProposal,...hostAgent,...agentInstallationProposal,...dashboardReads,...instrumentation,{...old,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
       if(!user)fail(401,"login_required");
       const p=this.authority.sessionPrincipal(user as User,"assistant");
       const result=await this.invoke(p,"lightmoni_tasks_plan",{...input,idempotency_key:randomUUID()},{signal,session_id:scope?.session_id});

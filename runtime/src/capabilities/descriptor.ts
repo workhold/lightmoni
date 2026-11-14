@@ -253,6 +253,11 @@ const METADATA: Record<string, Metadata> = {
     id: "agents.installations.get", outputSchema: data({installation:record},["installation"]), risk: "R1", operationKind: "center_read",
     approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [],
   },
+  lightmoni_agent_installations_plan: {
+    id: "agents.installations.plan", outputSchema: data({proposal:record,plan:record,idempotency_replayed:flag},["proposal","plan"]),
+    risk: "R2", operationKind: "domain_change", approvalPolicy: "domain_native", idempotencyPolicy: "required_external",
+    targetResolver: input => input?.machine_id ? [{kind:"host",id:input.machine_id}] : [], additionalScopes: ["agents.read"],
+  },
   lightmoni_agent_updates_get: {
     id: "agents.updates.get", outputSchema: data({update:record},["update"]), risk: "R1", operationKind: "center_read",
     approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: input => input?.machine_id ? [{kind:"host",id:input.machine_id}] : [],

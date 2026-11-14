@@ -144,13 +144,13 @@ export async function createApp(cfg: Config) {
     // deployment can enqueue its immutable pull-based job atomically with the
     // centre state transition. The job module itself never executes commands.
     const agentJobs = registerAgentJobs(deps, { agentCredentials });
-    const managedMachines = registerManagedMachines(deps, { agentCredentials, dataDir: cfg.dataDir, downloadsDir: cfg.downloadsDir ?? join(root, "downloads") });
+    const executionGrants = new ExecutionGrantRegistry(deps);
+    const managedMachines = registerManagedMachines(deps, { agentCredentials, dataDir: cfg.dataDir, downloadsDir: cfg.downloadsDir ?? join(root, "downloads"), executionGrants });
     modules.push(managedMachines);
     registerSettings(deps, agentCredentials);
     // Service delivery metadata is intentionally separate from Agent bootstrap
     // records: plans can be reviewed before an Agent executes them.
     const releaseArtifacts = new ReleaseArtifactStore(join(cfg.dataDir, "release-artifacts"));
-    const executionGrants = new ExecutionGrantRegistry(deps);
     const serviceDeployments = registerServiceDeployments(deps, { jobs: agentJobs, artifacts: releaseArtifacts, executionGrants });
     modules.push(serviceDeployments);
     const reconciliation = registerReconciliation(deps);
