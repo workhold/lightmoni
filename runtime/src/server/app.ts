@@ -221,7 +221,7 @@ export async function createApp(cfg: Config) {
         put: (key, value) => store.put(key, deps.encrypt(JSON.stringify(value))) };
     })() }) : undefined;
     const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, alertProposals, telemetry, logs:logReads, traces:traceReads, deployments:serviceDeployments, operations, operationSchedules, machines:managedMachines, dashboards:dashboardReads, instrumentation, executionGrants});
-    registerCapabilities(deps, capabilities, capabilityAccess);
+    registerCapabilities(deps, capabilities, capabilityAccess, mcpAccess);
     if (mcpAccess) modules.push(registerMcpTransport(deps, mcpAccess, capabilities));
     modules.push(
       registerAssistant(deps, {
