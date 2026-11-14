@@ -87,6 +87,29 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const requests=useRef(createHostRequestGuard()),allowed=useRef(admin),mounted=useRef(true);allowed.current=admin;
  const hostRevisions=useRef(new Map<string,number>()),refreshRequests=useRef(new Map<string,number>()),planOperation=useRef<HostRequestToken|null>(null);
  const current=(token:HostRequestToken|undefined)=>mounted.current&&allowed.current&&requests.current.current(token)&&!removedMachineIDs.current.has(token!.target);
+ const entryTokens=useRef(new Map<HostRequestScope,HostRequestToken>());
+ const [entryBusy,setEntryBusy]=useState<Partial<Record<HostRequestScope,string>>>({});
+ const [updateStarts,setUpdateStarts]=useState<Record<string,'starting'|'uncertain'>>({});
+ const onUpdateStartPendingChange=(machineID:string,pending:boolean,uncertain=false)=>{
+  setUpdateStarts(previous=>{const next={...previous};if(pending)next[machineID]='starting';else if(uncertain)next[machineID]='uncertain';else delete next[machineID];return next});
+ };
+ const beginEntry=(scope:HostRequestScope,target:string)=>{
+  const previous=entryTokens.current.get(scope);
+  if(previous?.target===target&&requests.current.current(previous))return undefined;
+  const token=requests.current.begin(scope,target);
+  entryTokens.current.set(scope,token);
+  setEntryBusy(value=>({...value,[scope]:target}));
+  return token;
+ };
+ const endEntry=(token:HostRequestToken)=>{
+  if(entryTokens.current.get(token.scope)!==token)return;
+  entryTokens.current.delete(token.scope);
+  if(mounted.current)setEntryBusy(value=>{const next={...value};delete next[token.scope];return next});
+ };
+ const clearEntry=(scope:HostRequestScope)=>{
+  entryTokens.current.delete(scope);
+  setEntryBusy(value=>{if(!value[scope])return value;const next={...value};delete next[scope];return next});
+ };
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;requests.current.clear()}},[]);
  const [searchParams,setSearchParams]=useSearchParams();
  const linkedMachine=searchParams.get('machine'),linkedDeployment=searchParams.get('deployment'),linkedUninstallation=searchParams.get('uninstallation'),linkedUpdate=searchParams.get('agent_update')||searchParams.get('update'),linkedRollout=searchParams.get('agent_rollout')||searchParams.get('rollout');
@@ -134,7 +157,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const [updateDetail,setUpdateDetail]=useState<Detail>(),[updateRecord,setUpdateRecord]=useState<AgentUpdate>(),[updateAction,setUpdateAction]=useState<'upgrade'|'rollback'>('upgrade'),[updateDirect,setUpdateDirect]=useState(false);
  const [rollout,setRollout]=useState<{targets?:AgentRolloutTarget[];existingID?:string}>();
  useEffect(()=>{if(!admin){setUpdateDetail(undefined);setUpdateRecord(undefined);setRollout(undefined)}},[admin]);
- const [detail,setDetail]=useState<Detail>(),[detailBusy,setDetailBusy]=useState(false),[detailError,setDetailError]=useState('');
+ const [detail,setDetail]=useState<Detail>(),[detailError,setDetailError]=useState('');
  const [detailTab,setDetailTab]=useState('overview');
  const removedMachineIDs=useRef(new Set<string>());
  const [planMachine,setPlanMachine]=useState<Pick<Machine,'id'|'name'>>(),[planDetail,setPlanDetail]=useState<Detail>(),[planBusy,setPlanBusy]=useState(false),[planError,setPlanError]=useState(''),[planResult,setPlanResultState]=useState<any>();
@@ -187,15 +210,16 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const invalidateRefresh=(machineID:string)=>{hostRevisions.current.set(machineID,(hostRevisions.current.get(machineID)??0)+1);cancelLoads()};
  const invalidateHost=(machineID:string)=>{
   invalidateRefresh(machineID);requests.current.invalidateHost(machineID);
+  for(const [scope,token] of entryTokens.current)if(token.target===machineID)clearEntry(scope);
   if(requests.current.capture('check')?.target===machineID){checkController.current?.abort();checkController.current=null;setCheckBusy(false);setCheckResult(undefined);setCheckError('')}
   if(requests.current.capture('plan')?.target===machineID){planOperation.current=null;setPlanBusy(false);setPlanCheck(undefined)}
  };
- const closeDetail=()=>{requests.current.close('detail');setDetail(undefined);setDetailBusy(false)};
- const closeTerminal=()=>{requests.current.close('terminal');setTerminalDetail(undefined)};
- const closeUninstall=()=>{requests.current.close('uninstall');setUninstallDetail(undefined);setUninstallRecord(undefined)};
- const closeUpdate=()=>{requests.current.close('update');setUpdateDetail(undefined);setUpdateRecord(undefined)};
- const closePlan=()=>{planReadVersion.current++;setPlanPollError('');requests.current.close('plan');setPlanMachine(undefined);setPlanDetail(undefined);setPlanResult(undefined);setPlanCheck(undefined);setPlanAccountRecovery(undefined);setPlanError('');setPlanBusy(false);setPlanRefreshNeeded(false);setPlanApplyAttempted(false);setPlanResolutionReason('');planRecovery.current=undefined};
- const closeCheck=()=>{requests.current.close('check');checkController.current?.abort();checkController.current=null;setCheckBusy(false);setCheckDetail(undefined);setCheckResult(undefined);setCheckError('')};
+ const closeDetail=()=>{requests.current.close('detail');clearEntry('detail');setDetail(undefined)};
+ const closeTerminal=()=>{requests.current.close('terminal');clearEntry('terminal');setTerminalDetail(undefined)};
+ const closeUninstall=()=>{requests.current.close('uninstall');clearEntry('uninstall');setUninstallDetail(undefined);setUninstallRecord(undefined)};
+ const closeUpdate=()=>{requests.current.close('update');clearEntry('update');setUpdateDetail(undefined);setUpdateRecord(undefined)};
+ const closePlan=()=>{planReadVersion.current++;setPlanPollError('');requests.current.close('plan');clearEntry('plan');setPlanMachine(undefined);setPlanDetail(undefined);setPlanResult(undefined);setPlanCheck(undefined);setPlanAccountRecovery(undefined);setPlanError('');setPlanBusy(false);setPlanRefreshNeeded(false);setPlanApplyAttempted(false);setPlanResolutionReason('');planRecovery.current=undefined};
+ const closeCheck=()=>{requests.current.close('check');clearEntry('check');checkController.current?.abort();checkController.current=null;setCheckBusy(false);setCheckDetail(undefined);setCheckResult(undefined);setCheckError('')};
  useEffect(()=>{
   if(!admin){requests.current.clear();checkController.current?.abort();checkController.current=null;setCheckBusy(false);setCheckDetail(undefined);setCheckResult(undefined);setTerminalDetail(undefined);setUninstallDetail(undefined);setUninstallRecord(undefined);setDetail(undefined);setEditMachine(undefined);setPlanMachine(undefined);setPlanDetail(undefined);setPlanResult(undefined);setPlanCheck(undefined);setPlanBusy(false)}
  },[admin]);
@@ -221,6 +245,12 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   if(refreshList&&!controller.signal.aborted&&mounted.current&&allowed.current&&!removedMachineIDs.current.has(machineID)&&revision===(hostRevisions.current.get(machineID)??0))await load(true);
  },[load]);
  const hostSaved=async(machineID:string)=>{invalidateHost(machineID);await refreshMachine(machineID)};
+ const refreshUpdatedHost=async(machineID:string)=>{
+  await refreshMachine(machineID);
+  const fresh=await api<Detail>(`/machines/${encodeURIComponent(machineID)}`);
+  if(fresh.machine.id!==machineID)throw Error(t('主机详情与原升级目标不匹配，请刷新后重试','The host details do not match the original upgrade target. Refresh and retry.'));
+  if(mounted.current&&allowed.current&&!removedMachineIDs.current.has(machineID))setMachines(previous=>previous.map(machine=>machine.id===machineID?fresh.machine:machine));
+ };
  const hasRunningAgentOperation=admin&&machines.some(machine=>agentOperationRunning(machine.agent_operation));
  useEffect(()=>{
   const refresh=()=>{void load(true,true,hasRunningAgentOperation?6000:15_000);if(admin)for(const id of new Set([detail?.machine.id,checkDetail?.machine.id,planMachine?.id,uninstallDetail?.machine.id,updateDetail?.machine.id].filter((id):id is string=>!!id)))void refreshMachine(id,false,true)};
@@ -259,15 +289,29 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   return()=>{if(requests.current.current(token))requests.current.close('update')};
  },[admin,linkedMachine,linkedUpdate]);
  useEffect(()=>{if(admin&&linkedRollout)setRollout({existingID:linkedRollout})},[admin,linkedRollout]);
- const openUpdate=async(machine:Machine,action:'upgrade'|'rollback'='upgrade',existing?:AgentUpdate)=>{
-  const token=requests.current.begin('update',machine.id);
-  try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(!current(token)||host.machine.id!==machine.id)return;
-   const record=existing?await api<AgentUpdate>(`/machines/${encodeURIComponent(machine.id)}/agent-updates/${encodeURIComponent(existing.id)}`):undefined;
-   if(current(token)&&(!record||record.machine_id===machine.id)){setUpdateRecord(record);setUpdateAction(record?.action??action);setUpdateDirect(!record&&action==='upgrade');setUpdateDetail(host)}
-  }catch(e){if(current(token))void message.error(errorText(e))}
+ const openUpdate=async(machine:Machine,action:'upgrade'|'rollback'='upgrade',existing?:AgentUpdate,resume=false)=>{
+  const token=beginEntry('update',machine.id);if(!token)return;
+  try{
+   const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);
+   if(!current(token))return;
+   if(host.machine.id!==machine.id)throw Error(t('主机详情与所选目标不匹配，请刷新后重试','The host details do not match the selected target. Refresh and retry.'));
+   const fresh=host.machine;
+   const updatePending=['update_pending','update_unknown','agent_update_pending','agent_update_unknown'].includes(fresh.capabilities?.update_agent?.reason||'')||fresh.agent_update?.state==='in_progress';
+   if(resume&&!updatePending)throw Error(t('主机升级状态已变化，请刷新主机列表','The host update state changed. Refresh the host list.'));
+   let operationID=existing?.id||(resume?fresh.agent_update?.last_operation_id:undefined);
+   if(resume&&!operationID){
+    const history=await api<AgentUpdate[]>(`/machines/${encodeURIComponent(machine.id)}/agent-updates`);
+    operationID=history.find(item=>item.machine_id===machine.id&&['awaiting_approval','running','verifying','unknown'].includes(item.status))?.id;
+   }
+   if(resume&&!operationID)throw Error(t('未找到进行中的 Agent 更新，请刷新主机状态','No active Agent update was found. Refresh the host status.'));
+   const record=operationID?await api<AgentUpdate>(`/machines/${encodeURIComponent(machine.id)}/agent-updates/${encodeURIComponent(operationID)}`):undefined;
+   if(!current(token))return;
+   if(record&&(record.machine_id!==machine.id||record.id!==operationID))throw Error(t('更新记录与目标主机或原操作不匹配，请刷新后重试','The update record does not match this host or operation. Refresh and retry.'));
+   setUpdateRecord(record);setUpdateAction(record?.action??action);setUpdateDirect(!record&&!resume&&action==='upgrade');setUpdateDetail(host);
+  }catch(e){if(current(token))void message.error(errorText(e))}finally{endEntry(token)}
  };
  const openUninstall=async(machine:Machine,existing?:AgentUninstallation,mode:'standard'|'recovery'='standard',resume=false)=>{
-  const token=requests.current.begin('uninstall',machine.id);
+  const token=beginEntry('uninstall',machine.id);if(!token)return;
   try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(!current(token)||host.machine.id!==machine.id)return;
    const history=host.uninstallations??[];
    const selected=existing??(resume?history.find(record=>['awaiting_approval','running','unknown'].includes(record.status))??history[0]:undefined);
@@ -277,11 +321,13 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    if(!current(token))return;
    if(record&&(record.machine_id!==machine.id||record.id!==selected?.id||record.plan?.machine.id&&record.plan.machine.id!==machine.id))throw Error(t('卸载记录与目标主机或原计划不匹配','The uninstall record does not match this host or original plan.'));
    setUninstallMode(record?.plan?.mode??mode);setUninstallRecord(record);setUninstallDetail(host);
-  }catch(e){if(current(token))void message.error(errorText(e))}
+  }catch(e){if(current(token))void message.error(errorText(e))}finally{endEntry(token)}
  };
  const openCheck=async(machine:Pick<Machine,'id'>)=>{
-  closeCheck();const token=requests.current.begin('check',machine.id);
-  try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(current(token)&&host.machine.id===machine.id)setCheckDetail(host)}catch(e){if(current(token))void message.error(errorText(e))}
+  const opening=entryTokens.current.get('check');
+  if(opening?.target===machine.id&&requests.current.current(opening))return;
+  closeCheck();const token=beginEntry('check',machine.id);if(!token)return;
+  try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(current(token)&&host.machine.id===machine.id)setCheckDetail(host)}catch(e){if(current(token))void message.error(errorText(e))}finally{endEntry(token)}
  };
  const runCheck=async(values:any)=>{
   const token=requests.current.capture('check'),machineID=checkDetail?.machine.id;if(!machineID||!current(token)||token?.target!==machineID||checkController.current)return;
@@ -291,15 +337,17 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   finally{if(current(token)&&checkController.current===controller){setCheckBusy(false);checkController.current=null;await refreshMachine(machineID)}}
  };
  const openTerminal=async(machine:Machine)=>{
-  const token=requests.current.begin('terminal',machine.id);
-  try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(current(token)&&host.machine.id===machine.id)setTerminalDetail(host)}catch(e){if(current(token))void message.error(errorText(e))}
+  const token=beginEntry('terminal',machine.id);if(!token)return;
+  try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(current(token)&&host.machine.id===machine.id)setTerminalDetail(host)}catch(e){if(current(token))void message.error(errorText(e))}finally{endEntry(token)}
  };
  const openDetail=async(machine:Machine,tab='overview')=>{
-  const token=requests.current.begin('detail',machine.id);setDetailError('');setDetailBusy(true);
-  try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(current(token)&&host.machine.id===machine.id){setDetailTab(tab);setDetail(host)}}catch(e){if(current(token))void message.error(errorText(e))}finally{if(current(token))setDetailBusy(false)}
+  const token=beginEntry('detail',machine.id);if(!token)return;setDetailError('');
+  try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(current(token)&&host.machine.id===machine.id){setDetailTab(tab);setDetail(host)}}catch(e){if(current(token))void message.error(errorText(e))}finally{endEntry(token)}
  };
  const forgetMachine=(machineID:string)=>{
   invalidateHost(machineID);requests.current.forget(machineID);
+  for(const [scope,token] of entryTokens.current)if(token.target===machineID)clearEntry(scope);
+  setUpdateStarts(previous=>{if(!previous[machineID])return previous;const next={...previous};delete next[machineID];return next});
   removedMachineIDs.current.add(machineID);setMachines(previous=>previous.filter(machine=>machine.id!==machineID));
   setDetail(previous=>previous?.machine.id===machineID?undefined:previous);
   setEditMachine(previous=>previous?.id===machineID?undefined:previous);
@@ -318,12 +366,13 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  };
  const cancelDeployment=async(machineID:string,deploymentID:string)=>{const token=requests.current.capture('detail');try{await api(`/machines/${encodeURIComponent(machineID)}/deployments/${encodeURIComponent(deploymentID)}/cancel`,{method:'POST',body:'{}'});if(!mounted.current||!allowed.current||removedMachineIDs.current.has(machineID))return;await hostSaved(machineID);void message.success(t("部署计划已取消","Deployment plan cancelled"))}catch(e){if(current(token)){const error=lifecycleErrorText(e);setDetailError(error);void message.error(error)}}};
  const openDeployment=async(machineID:string,deploymentID:string)=>{
-  planReadVersion.current++;setPlanPollError('');closeDetail();const token=requests.current.begin('plan',machineID);setPlanDetail(undefined);setPlanResult(undefined);setPlanCheck(undefined);setPlanAccountRecovery(undefined);setPlanError('');setPlanRefreshNeeded(false);setPlanApplyAttempted(false);setPlanResolutionReason('');planRecovery.current=undefined;
-  try{const [host,saved]=await Promise.all([api<Detail>(`/machines/${encodeURIComponent(machineID)}`),api<Deployment>(`/machines/${encodeURIComponent(machineID)}/deployments/${encodeURIComponent(deploymentID)}`)]);if(current(token)&&host.machine.id===machineID&&saved.machine_id===machineID&&saved.id===deploymentID){setPlanMachine({id:machineID,name:host.machine.name});setPlanDetail(host);setPlanResult(saved)}}catch(e){if(current(token))void message.error(errorText(e))}
+  planReadVersion.current++;setPlanPollError('');closeDetail();const token=beginEntry('plan',machineID);if(!token)return;setPlanDetail(undefined);setPlanResult(undefined);setPlanCheck(undefined);setPlanAccountRecovery(undefined);setPlanError('');setPlanRefreshNeeded(false);setPlanApplyAttempted(false);setPlanResolutionReason('');planRecovery.current=undefined;
+  try{const [host,saved]=await Promise.all([api<Detail>(`/machines/${encodeURIComponent(machineID)}`),api<Deployment>(`/machines/${encodeURIComponent(machineID)}/deployments/${encodeURIComponent(deploymentID)}`)]);if(current(token)&&host.machine.id===machineID&&saved.machine_id===machineID&&saved.id===deploymentID){setPlanMachine({id:machineID,name:host.machine.name});setPlanDetail(host);setPlanResult(saved)}}catch(e){if(current(token))void message.error(errorText(e))}finally{endEntry(token)}
  };
  const openPlan=async(machine:Pick<Machine,'id'|'name'>)=>{
-  planReadVersion.current++;setPlanPollError('');const token=requests.current.begin('plan',machine.id);setPlanMachine(machine);setPlanDetail(undefined);setPlanResult(undefined);setPlanCheck(undefined);setPlanAccountRecovery(undefined);setPlanError('');setPlanBusy(false);setPlanRefreshNeeded(false);setPlanApplyAttempted(false);setPlanResolutionReason('');planRecovery.current=undefined;
-  try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(current(token)&&host.machine.id===machine.id)setPlanDetail(host)}catch(e){if(current(token))setPlanError(errorText(e))}
+  const token=beginEntry('plan',machine.id);if(!token)return;
+  planReadVersion.current++;setPlanPollError('');setPlanMachine(machine);setPlanDetail(undefined);setPlanResult(undefined);setPlanCheck(undefined);setPlanAccountRecovery(undefined);setPlanError('');setPlanBusy(false);setPlanRefreshNeeded(false);setPlanApplyAttempted(false);setPlanResolutionReason('');planRecovery.current=undefined;
+  try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(current(token)&&host.machine.id===machine.id)setPlanDetail(host)}catch(e){if(current(token))setPlanError(errorText(e))}finally{endEntry(token)}
  };
  const recoverDeployment=async(machineID:string)=>{
   const recovery=planRecovery.current;if(!recovery)throw Error(t('无法确认原部署记录，请先在主机历史中核对','The original deployment record could not be confirmed. Check host history first.'));
@@ -446,11 +495,13 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   const installPending=!!operation&&operation.kind==='install'&&!operation.resolved_at&&['awaiting_approval','running','unknown','failed'].includes(operation.status);
   const uninstallPending=Object.values(cap).some(value=>['uninstallation_pending','uninstallation_unknown'].includes(value?.reason||''))||['awaiting_approval','running','unknown'].includes(m.last_uninstallation_status||'');
   const updatePending=['update_pending','update_unknown','agent_update_pending','agent_update_unknown'].includes(cap.update_agent?.reason||'')||m.agent_update?.state==='in_progress';
+  const localUpdateStart=updateStarts[m.id];
+  const updateLabel=m.agent_update?.last_status==='unknown'?t('核对升级结果','Verify upgrade outcome'):m.agent_update?.last_status==='awaiting_approval'?t('审阅 Agent 更新','Review Agent update'):['running','verifying'].includes(m.agent_update?.last_status||'')?t('查看升级进度','View upgrade progress'):t('查看 Agent 更新','View Agent update');
   const linked=!!m.agent_id&&!removedAgent(m);
   const maintenance=[
    {key:'deploy',label:t('部署 Agent','Deploy Agent'),disabled:!cap.deploy_agent?.available&&!accountRepairable(cap.deploy_agent),onClick:()=>void openPlan(m)},
    {key:'permission',label:t('运行模式与权限','Runtime mode & permissions'),disabled:!linked,onClick:()=>void openDetail(m,'execution')},
-   {key:'upgrade',label:updatePending?t('查看 Agent 升级','View Agent update'):t('升级 Agent','Upgrade Agent'),disabled:!cap.update_agent?.available&&!updatePending,onClick:()=>{if(updatePending){void api<AgentUpdate[]>(`/machines/${encodeURIComponent(m.id)}/agent-updates`).then(records=>{const record=records.find(item=>['awaiting_approval','running','verifying','unknown'].includes(item.status));if(record)void openUpdate(m,record.action,record);else void openUpdate(m)}).catch(e=>void message.error(errorText(e)))}else void openUpdate(m)}},
+   {key:'upgrade',label:updatePending?updateLabel:localUpdateStart==='starting'?t('正在启动 Agent 升级','Starting Agent upgrade'):localUpdateStart==='uncertain'?t('核对升级请求','Verify upgrade request'):t('升级 Agent','Upgrade Agent'),disabled:localUpdateStart==='starting'||!cap.update_agent?.available&&!updatePending&&localUpdateStart!=='uncertain',onClick:()=>localUpdateStart==='uncertain'&&!updatePending?void openDetail(m,'history'):void openUpdate(m,'upgrade',undefined,updatePending)},
    {key:'rollback',label:t('回退 Agent','Roll back Agent'),disabled:!cap.rollback_agent?.available,onClick:()=>void openUpdate(m,'rollback')},
    {type:'divider' as const},
    {key:'uninstall',label:t('卸载 Agent','Uninstall Agent'),danger:true,disabled:!cap.uninstall_agent?.available&&!accountRepairable(cap.uninstall_agent),onClick:()=>void openUninstall(m)},
@@ -480,14 +531,16 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
     <IconAction label={t('主机监控','Host monitoring')} icon={<LineChartOutlined aria-hidden/>} size="small" onClick={()=>navigate('/machines/'+encodeURIComponent(m.id)+'/monitoring')}/>
     <IconAction label={t('全部容器','All containers')} icon={<ContainerOutlined aria-hidden/>} size="small" onClick={()=>setHostContainers(m)}/>
     <IconAction label={t('文件管理','Files')} icon={<FolderOpenOutlined aria-hidden/>} size="small" onClick={()=>setHostFiles(m)}/>
-    <IconAction hint={!cap.terminal?.available?t('登录终端','Open terminal')+' · '+capabilityReason(cap.terminal?.reason||''):undefined} label={t('登录终端','Open terminal')} icon={<CodeOutlined aria-hidden/>} size="small" disabled={!cap.terminal?.available} onClick={()=>void openTerminal(m)}/>
+    <IconAction hint={!cap.terminal?.available?t('登录终端','Open terminal')+' · '+capabilityReason(cap.terminal?.reason||''):undefined} label={t('登录终端','Open terminal')} icon={<CodeOutlined aria-hidden/>} size="small" loading={entryBusy.terminal===m.id} disabled={!cap.terminal?.available} onClick={()=>void openTerminal(m)}/>
     <IconAction label={t('主机任务','Host tasks')} icon={<ProfileOutlined aria-hidden/>} size="small" onClick={()=>setTaskHost({id:m.id,name:m.name,label_ids:m.label_ids??[],agent_id:m.agent_id})}/>
-    {!linked&&!installPending?<div className="lm-host-deploy-split"><IconAction label={t('部署 Agent','Deploy Agent')} icon={<CloudDownloadOutlined aria-hidden/>} size="small" type="primary" disabled={!cap.deploy_agent?.available&&!accountRepairable(cap.deploy_agent)} onClick={()=>void openPlan(m)}/><HostActionMenu trigger={['click']} menu={{items:menuItems}}><IconAction label={t(`Agent 管理 · ${m.name}`,`Agent management · ${m.name}`)} icon={<ApiOutlined aria-hidden/>}/></HostActionMenu></div>:<HostActionMenu trigger={['click']} menu={{items:menuItems}}><IconAction label={t(`Agent 管理 · ${m.name}`,`Agent management · ${m.name}`)} icon={<ApiOutlined aria-hidden/>}/></HostActionMenu>}
-    <HostActionMenu trigger={['click']} menu={{items:settings}}><IconAction label={t(`更多操作 · ${m.name}`,`More actions · ${m.name}`)} icon={<MoreOutlined aria-hidden/>}/></HostActionMenu>
+    {!linked&&!installPending?<div className="lm-host-deploy-split"><IconAction label={t('部署 Agent','Deploy Agent')} icon={<CloudDownloadOutlined aria-hidden/>} size="small" type="primary" loading={entryBusy.plan===m.id} disabled={!cap.deploy_agent?.available&&!accountRepairable(cap.deploy_agent)} onClick={()=>void openPlan(m)}/><HostActionMenu trigger={['click']} menu={{items:menuItems}}><IconAction label={t(`Agent 管理 · ${m.name}`,`Agent management · ${m.name}`)} icon={<ApiOutlined aria-hidden/>} loading={localUpdateStart==='starting'||['plan','update','uninstall'].some(scope=>entryBusy[scope as HostRequestScope]===m.id)}/></HostActionMenu></div>:<HostActionMenu trigger={['click']} menu={{items:menuItems}}><IconAction label={t(`Agent 管理 · ${m.name}`,`Agent management · ${m.name}`)} icon={<ApiOutlined aria-hidden/>} loading={localUpdateStart==='starting'||['plan','update','uninstall'].some(scope=>entryBusy[scope as HostRequestScope]===m.id)}/></HostActionMenu>}
+    <HostActionMenu trigger={['click']} menu={{items:settings}}><IconAction label={t(`更多操作 · ${m.name}`,`More actions · ${m.name}`)} icon={<MoreOutlined aria-hidden/>} loading={entryBusy.detail===m.id||entryBusy.check===m.id}/></HostActionMenu>
    </div>
-   {installPending&&<IconAction icon={<FileTextOutlined aria-hidden/>} type={operation.status==='unknown'?'default':'primary'} onClick={()=>void openDeployment(m.id,operation.id)} label={operation.status==='unknown'?t('核对安装结果','Verify installation outcome'):operation.status==='awaiting_approval'?t('审阅安装计划','Review installation plan'):operation.status==='running'?t('查看安装进度','View installation progress'):t('查看安装记录','View installation record')}/>}
-   {uninstallPending&&<IconAction icon={<FileTextOutlined aria-hidden/>} onClick={()=>void openUninstall(m,undefined,'standard',true)} label={m.last_uninstallation_status==='unknown'||cap.uninstall_agent?.reason==='uninstallation_unknown'?t('核对卸载结果','Verify uninstall outcome'):m.last_uninstallation_status==='running'?t('查看卸载进展','View uninstall progress'):t('继续卸载 / 取消计划','Continue uninstall / cancel plan')}/>}
-   {updatePending&&<IconAction label={t('核对 Agent 更新','Verify Agent update')} icon={<HistoryOutlined aria-hidden/>} size="small" onClick={()=>void openDetail(m,'history')}/>}
+   {installPending&&<IconAction icon={<FileTextOutlined aria-hidden/>} type={operation.status==='unknown'?'default':'primary'} loading={entryBusy.plan===m.id} onClick={()=>void openDeployment(m.id,operation.id)} label={operation.status==='unknown'?t('核对安装结果','Verify installation outcome'):operation.status==='awaiting_approval'?t('审阅安装计划','Review installation plan'):operation.status==='running'?t('查看安装进度','View installation progress'):t('查看安装记录','View installation record')}/>}
+   {uninstallPending&&<IconAction icon={<FileTextOutlined aria-hidden/>} loading={entryBusy.uninstall===m.id} onClick={()=>void openUninstall(m,undefined,'standard',true)} label={m.last_uninstallation_status==='unknown'||cap.uninstall_agent?.reason==='uninstallation_unknown'?t('核对卸载结果','Verify uninstall outcome'):m.last_uninstallation_status==='running'?t('查看卸载进展','View uninstall progress'):t('继续卸载 / 取消计划','Continue uninstall / cancel plan')}/>}
+   {updatePending&&<IconAction label={updateLabel} icon={<HistoryOutlined aria-hidden/>} size="small" loading={localUpdateStart==='starting'||entryBusy.update===m.id} disabled={localUpdateStart==='starting'} onClick={()=>void openUpdate(m,'upgrade',undefined,true)}/>}
+   {!updatePending&&localUpdateStart==='starting'&&<IconAction label={t('正在启动 Agent 升级','Starting Agent upgrade')} icon={<HistoryOutlined aria-hidden/>} size="small" loading disabled/>}
+   {!updatePending&&localUpdateStart==='uncertain'&&<IconAction label={t('核对升级请求','Verify upgrade request')} icon={<HistoryOutlined aria-hidden/>} size="small" loading={entryBusy.detail===m.id} onClick={()=>void openDetail(m,'history')}/>}
    {!installPending&&!uninstallPending&&!updatePending&&!!reasons.length&&<details className="lm-host-unavailable"><summary>{t('部分操作暂不可用','Some actions unavailable')}</summary>{reasons.map(reason=><p key={reason}>{updateCapabilityReason(reason)}</p>)}</details>}
   </div>;
  };
@@ -507,14 +560,14 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    <Typography.Text type="secondary">{t('按所选主机逐台处理，安装和卸载先审阅计划。每批最多 50 台。','Process selected hosts in sequence; review installation and removal plans first. Up to 50 hosts per batch.')}</Typography.Text>
   </div>}
   <div className="lm-surface lm-host-list"><Table<FleetRow> rowKey="id" dataSource={rows} loading={loading||hostsRole.current!==admin} rowSelection={admin?{selectedRowKeys:selectedIDs,preserveSelectedRowKeys:true,columnWidth:44,onChange:keys=>{if(keys.length>50){void message.warning(t('每批最多选择 50 项','Select up to 50 targets per batch'));return}setSelectedIDs(keys.map(String))},getCheckboxProps:row=>({'aria-label':t(`选择 ${row.name}`,`Select ${row.name}`),disabled:!!batch||!!rollout})}:undefined} scroll={{x:1024}} pagination={{pageSize:10,hideOnSinglePage:true}} locale={{emptyText:<Empty description={hostQuery||group?t('没有匹配的主机','No matching hosts'):t('尚无主机','No hosts yet')}/>}} columns={[
-   {title:t('主机','Host'),width:240,render:(_:unknown,m:FleetRow)=><div className="lm-host-overview">{admin?<Button type="link" className="lm-host-name" onClick={()=>void openDetail(m)}>{m.name}</Button>:<strong>{m.name}</strong>}<Typography.Text className="lm-host-ssh-copy" type="secondary" copyable={admin&&m.address?{text:sshEndpoint(m.address,m.port)}:false}>{admin?(m.address?sshEndpoint(m.address,m.port):t('SSH 未配置','SSH not configured')):t('主机 ID：','Host ID: ')+m.id}</Typography.Text><HostNetworkOverview network={m.network}/></div>},
+   {title:t('主机','Host'),width:240,render:(_:unknown,m:FleetRow)=><div className="lm-host-overview">{admin?<Button type="link" className="lm-host-name" loading={entryBusy.detail===m.id} onClick={()=>void openDetail(m)}>{m.name}</Button>:<strong>{m.name}</strong>}<Typography.Text className="lm-host-ssh-copy" type="secondary" copyable={admin&&m.address?{text:sshEndpoint(m.address,m.port)}:false}>{admin?(m.address?sshEndpoint(m.address,m.port):t('SSH 未配置','SSH not configured')):t('主机 ID：','Host ID: ')+m.id}</Typography.Text><HostNetworkOverview network={m.network}/></div>},
    {title:t('CPU / 内存','CPU / memory'),width:150,render:(_:unknown,m:FleetRow)=><div><div>{m.capacity?.cpu_count?t(`${m.capacity.cpu_count} 逻辑核`,`${m.capacity.cpu_count} logical CPUs`):t('CPU 未知','CPU unknown')}</div><div>{m.capacity?.memory_total_mb?`${(m.capacity.memory_total_mb/1024).toFixed(1)} GiB`:t('内存未知','Memory unknown')}</div>{m.capacity?.observed_at&&<Tooltip title={time(m.capacity.observed_at)}><Typography.Text type="secondary">{m.capacity.stale?t('观测已过期','Observation stale'):t('最近心跳','Latest heartbeat')}</Typography.Text></Tooltip>}</div>},
    {title:t('管理状态','Management status'),width:220,render:(_:unknown,m:FleetRow)=>renderChannels(m)},
    {title:'Agent',width:190,render:(_:unknown,m:FleetRow)=>renderRelease(m)},
    {title:t('主机标签','Host labels'),width:110,render:(_:unknown,m:FleetRow)=><Space wrap>{(m.label_ids??m.node?.label_ids??[]).map(id=><Tag key={id}>{labels.find(label=>label.id===id)?.name||id}</Tag>)}{!(m.label_ids??m.node?.label_ids??[]).length&&<Typography.Text type="secondary">{t('暂无标签','No labels')}</Typography.Text>}</Space>},
    {title:t('操作','Actions'),width:220,render:(_:unknown,m:FleetRow)=>renderActions(m)},
   ]}/></div>
-  {admin&&updateDetail&&<MachineAgentUpdateDialog key={`${updateDetail.machine.id}:${updateRecord?.id||updateAction}`} machine={updateDetail.machine} credentials={updateDetail.credentials} existing={updateRecord} initialAction={updateAction} directUpgrade={updateDirect} onRefresh={()=>refreshMachine(updateDetail.machine.id)} onClose={closeUpdate}/>}
+  {admin&&updateDetail&&<MachineAgentUpdateDialog key={`${updateDetail.machine.id}:${updateRecord?.id||updateAction}`} machine={updateDetail.machine} credentials={updateDetail.credentials} existing={updateRecord} initialAction={updateAction} directUpgrade={updateDirect} onRefresh={()=>refreshUpdatedHost(updateDetail.machine.id)} onStartPendingChange={onUpdateStartPendingChange} onClose={closeUpdate}/>}
   {admin&&rollout&&<MachineAgentRolloutDialog key={rollout.existingID||rollout.targets?.map(target=>target.id).join(',')||'history'} targets={rollout.targets} existingID={rollout.existingID} onClose={()=>{setRollout(undefined);setSelectedIDs([])}} onRefresh={()=>load(true)}/>}
   {admin&&batch&&<MachineBatchDialog key={batch.action+':'+batch.targets.map(target=>target.id).join(',')} action={batch.action} targets={batch.targets} onClose={()=>{setBatch(undefined);setSelectedIDs([])}} onRefresh={()=>load(true)} onSuccess={batchSuccess}/>}
   {admin&&nodeLabels&&<NodeLabelsDialog key={nodeLabels.id} host={nodeLabels} labels={labels} onClose={()=>setNodeLabels(undefined)} onSaved={()=>load(true)}/>}
@@ -552,6 +605,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    ]}/>}
   </Modal>
   <Modal className="lm-agent-install-dialog" title={t(`部署 LightMoni Agent · ${planMachine?.name??''}`,`Deploy LightMoni Agent · ${planMachine?.name??''}`)} open={admin&&!!planMachine} onCancel={()=>{if(!planBusy)closePlan()}} footer={null} width={760} destroyOnHidden>
+   {planMachine&&!planDetail&&!planResult&&!planError&&<div role="status" aria-live="polite" className="lm-host-dialog-loading"><Spin size="small"/> {t('正在读取主机和部署条件…','Loading the host and deployment requirements…')}</div>}
    {planResult&&<AgentOperationProgress kind='install' machineID={planMachine?.id||''} record={planResult} submitting={planBusy&&planApplyAttempted} refreshError={planPollError}/>}
    {!planResult&&planDetail&&!planRefreshNeeded&&(()=>{const keys=planDetail.credentials.filter(reusableCredential);return <Form key={planDetail.machine.id} clearOnDestroy form={planForm} layout="vertical" onFinish={makePlan} disabled={planBusy} initialValues={{version:'0.1.0',arch:'auto',runtime_mode:'root',auto_account:true,credential_id:defaultMachineCredential(keys,planDetail.machine,reusableCredential)}}><Typography.Paragraph strong>{t('1. 检查账号 → 2. 确认安装 → 3. 查看进度','1. Check account → 2. Confirm installation → 3. Track progress')}</Typography.Paragraph>{(!keys.length||planAccountRecovery||planCheck?.installation_recovery)&&<InstallationAccountRecovery recovery={planAccountRecovery||planCheck?.installation_recovery||missingInstallationAccount(planDetail.credentials)} busy={planBusy} onAddAccount={()=>manageSSHAccounts(planDetail.machine,undefined,'add')} onManageAccounts={()=>manageSSHAccounts(planDetail.machine)} onRetry={keys.length?()=>planForm.submit():undefined}/>}<Form.Item name="auto_account" valuePropName="checked"><Checkbox>{t('自动选择合适账户安装','Automatically choose a suitable installation account')}</Checkbox></Form.Item><Form.Item noStyle shouldUpdate={(before,after)=>before.auto_account!==after.auto_account}>{({getFieldValue})=>getFieldValue('auto_account')!==false?<Typography.Paragraph type="secondary">{t('只读检查优先使用已登记 root 账户，其次已验证高权限账户；连接、认证或权限不足时可检查其他已登记账户。选中的账户会固定在部署计划中，不会修改默认账户。','Read-only checks prioritize registered root accounts, then verified privileged accounts. Connection, authentication or privilege failure can try another registered account. The selected identity is fixed in the plan without changing defaults.')}</Typography.Paragraph>:<Form.Item label={t('连接凭据','Connection credentials')} name="credential_id" rules={[{required:true,message:t('请选择可复用的 SSH 凭据','Select a reusable SSH credential')}]}><Select options={keys.map(c=>({value:c.id,label:credentialName(c)+' · '+(c.secret_fingerprint||c.id)+' · '+credentialExpiry(c)}))}/></Form.Item>}</Form.Item><Space.Compact block><Form.Item label={t("Agent 版本","Agent version")} name="version" rules={[{required:true}]} style={{width:'50%'}}><Input/></Form.Item><Form.Item label={t("架构","Architecture")} name="arch" rules={[{required:true}]} style={{width:'50%'}}><Select options={[{value:'auto',label:t('自动检查识别','Detect with SSH preflight')},{value:'amd64',label:'amd64'},{value:'arm64',label:'arm64'}]}/></Form.Item></Space.Compact><Form.Item name="runtime_mode" getValueProps={value=>({checked:value==='root'})} getValueFromEvent={event=>event.target.checked?'root':'user'}><Checkbox>{t('启用完整主机管理（安装 root 管理组件）','Enable full host management (install the root management component)')}</Checkbox></Form.Item><Typography.Paragraph type="secondary">{t('Agent 和普通任务统一使用 lightmoni-agent 账号。完整管理提供按授权使用的 root 能力，安装、升级和卸载统一处理。','Agent and ordinary tasks share the lightmoni-agent account. Full management adds authorized root operations, with one installation, upgrade, and uninstall workflow.')}</Typography.Paragraph><details className="lm-agent-identity-details"><summary>{t('运行身份与权限说明','Execution identity and permissions')}</summary><Typography.Paragraph type="secondary">{t('Agent 常驻服务始终以 lightmoni-agent 非 root 账户运行。完整管理模式额外安装同版本的 root 管理组件，作为单独受管服务运行；它将普通脚本降权至同一个 lightmoni-agent 账号执行，并提供已授权的主机管理能力。普通脚本属于受信任的运维代码，可访问此账号的 Agent 凭据与状态。选择仅监控模式时不安装该组件，也不接受自定义脚本。Agent 与管理组件统一升级和卸载，任务仍需授权并留审计。','The resident Agent service always runs as the unprivileged lightmoni-agent account. Full management adds a version-matched root management component as a separately managed service; it runs ordinary scripts as the same lightmoni-agent account and provides authorized host operations. Ordinary scripts are trusted operations code and can access this account’s Agent credentials and state. Monitoring-only mode does not install this component or accept custom scripts. The Agent and management component share one upgrade and uninstall lifecycle; tasks remain authorized and audited.')}</Typography.Paragraph></details><Form.Item label={t("初始任务标签","Initial task label")} name="initial_label_id"><Input placeholder={t("可留空，接入后在主机的任务标签中设置","Optional. Configure later in the host’s task labels")}/></Form.Item>{planError&&<Alert type="error" showIcon title={planError} className="lm-machine-form-notice"/>}{keys.length>0&&!planAccountRecovery&&!planCheck?.installation_recovery&&<Space wrap className="lm-machine-form-notice"><Button disabled={planBusy} onClick={()=>manageSSHAccounts(planDetail.machine)}>{t("管理账号与凭据","Manage accounts and credentials")}</Button></Space>}<Button type="primary" htmlType="submit" loading={planBusy} disabled={!keys.length} block>{t("检查并生成部署计划","Check and create deployment plan")}</Button></Form>})()}
    {planRefreshNeeded&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('无法确认原部署记录，请先只读刷新；不要重复创建或执行。','The original deployment record could not be confirmed. Refresh it read-only; do not create or execute it again.')}/>}
