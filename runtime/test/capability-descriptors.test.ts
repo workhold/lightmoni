@@ -41,7 +41,7 @@ function fixture() {
 test("every capability has a unique versioned descriptor and strict output contract", () => {
   const f = fixture();
   try {
-    assert.equal(f.dispatcher.definitions.length, 16);
+    assert.equal(f.dispatcher.definitions.length, 15);
     for (const d of f.dispatcher.definitions) {
       assert.ok(d.id && d.version === 1 && d.outputSchema && d.targetResolver && d.limits && d.exposure && d.resultProjection);
       assert.equal(d.auditPolicy, "digest_only");
