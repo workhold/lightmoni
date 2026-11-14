@@ -201,6 +201,8 @@ SDD 146 将响应统计迁到 AlertReadService，新增 alerts.statistics.read �
 
 SDD 147 开启 Slice 3：现有 lightmoni_tasks_plan 增加 task.create/task.update，内部 propose_task_action 五操作统一 Dispatcher。有限 Host 仅允许显式静态 host_ids，创建和审批前复验修改前后目标，禁止 target_all/标签扩展。任务创建/修改仍使用原 TaskProposalService、revision、owner 和人工审批，不新增 apply/execute，不改变既有 45 个工具总数。
 
+SDD 148 新增 alerts.propose 与 lightmoni_alerts_plan，告警规则/静默变更使用 AlertProposalService 的真实来源、owner、事务内幂等和审批前稳定 grant 复验。alerts.detail.read 与 propose 同时必需，外部不伪造助手 session；内部 propose_alert_change 改走 Dispatcher。审批仍由原管理员 HTTP 完成，无 apply/approve 工具。告警模块启用时共 46 个工具。
+
 `runtime/src/capabilities/` 已实现 Principal、描述符、严格输入校验、role/scope/主机范围、调用审计、安全投影与任务提案幂等。MCP、HTTP 能力接口及内置助手任务/遥测/告警事件与通知/日志/Trace/服务部署/运维/主机 Agent/大盘/插桩读取工具共用 Dispatcher；助手其余工具保持原领域实现且不自动对外开放。表、遥测数据、日志、Trace、告警、服务部署、运维、大盘和中心工作区均没有主机级数据隔离，只允许全主机范围授权；告警修改/接手/重试、部署、运维、Agent、大盘和插桩写工具尚未开放。
 
 外部任务操作仅创建已有任务的派发、取消与重试提案。TaskProposalService 保存真实来源、凭据与稳定 grant，不伪造助手 session；既有 owner 和人工审批边界保留。审批前与 Agent 领取排队项前分别复验外部授权，撤销、过期、降权或主机范围缩小后不得开始新项。新脚本/任务定义、持续授权和服务主体不属于本期。短期 OAuth access token 到期不使已批准项失效，稳定 grant 到期/撤销才阻止尚未开始项。若 MCP 配置失效、Dispatcher 未创建或审批前/后的授权适配器缺少任一项，尚未完成的 MCP 来源提案拒绝应用，不能由助手 fallback 降级为内部操作。排队项和自动重试保留稳定授权，缺少领取前校验器时 fail closed；主干的计划、并发、队列及任务版本校验继续生效。

@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { Dependencies, User } from "../shared/types.js";
 import { fail, HTTPError } from "../shared/http.js";
 import { TaskProposalService, runMetadata, taskMetadata, taskTools, taskDraftSchema, type ProposalSource } from "../assistant/task-tools.js";
@@ -17,15 +17,14 @@ import type { OperationsStore } from "../operations/types.js";
 import type { ManagedMachineStore } from "../server/managed-machines.js";
 import type { DashboardReadService } from "../domains/dashboard-read.js";
 import type { InstrumentationService } from "../assistant/instrumentation.js";
+import { capabilityDigest } from "./idempotency.js";
 import type { CapabilityAuthority, CapabilityDispatcherContract, CapabilitySummary, InvocationContext, Principal, SessionAuthority } from "./types.js";
 import { defineCapability, validateCapabilityRegistry, type CapabilityDefinition, type CapabilityDefinitionSeed } from "./descriptor.js";
 import { capabilityErrorCategory, capabilityErrorDetail, capabilityErrorStatus } from "./errors.js";
 
 const string = { type: "string", minLength: 1, maxLength: 128 };
 const schema = (properties: Record<string, any> = {}, required: string[] = []) => ({ type: "object", properties, required, additionalProperties: false });
-const canonical = (v: any): any => Array.isArray(v) ? v.map(canonical) : v && typeof v === "object"
-  ? Object.fromEntries(Object.keys(v).sort().map(k => [k, canonical(v[k])])) : v;
-const digest = (v: unknown) => createHash("sha256").update(JSON.stringify(canonical(v))).digest("hex");
+const digest = capabilityDigest;
 function validate(value: any, s: any, depth = 0): void {
   if (depth > 12) fail(400, "invalid_input");
   if (s.anyOf) {
@@ -108,6 +107,11 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     const nodes = options.taskCenter.nodes;
     const telemetry = options.telemetry ?? new TelemetryService(deps);
     const alertReads = options.alerts ? new AlertReadService(options.alerts, options.alertProposals) : undefined;
+    options.alertProposals?.useAuthorization({beforeApply:(actor,source)=>{
+      if(source.source!=="mcp")return;
+      const current=this.grant(source,actor.id);
+      this.authorize(current,"alerts.propose",true);this.authorize(current,"alerts.detail.read",true);
+    }});
     const page = {limit:{type:"integer",minimum:1,maximum:100},offset:{type:"integer",minimum:0,maximum:100000}};
     const definitions: CapabilityDefinitionSeed[] = [
       {name:"lightmoni_hosts_list",description:"List authorized registered hosts and observed Agent state. No SSH secrets or raw output.",scope:"hosts.read",effect:"read",inputSchema:schema({limit:{type:"integer",minimum:1,maximum:100},offset:{type:"integer",minimum:0,maximum:10000}}),execute:(p,i)=>{
@@ -157,6 +161,10 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       {name:"lightmoni_alert_deliveries_list",description:"List notification deliveries with safe state and resource references. Contacts, payloads and provider responses are omitted.",scope:"alerts.notifications.read",allHosts:true,effect:"read",inputSchema:schema({...page,rule_id:string,group_id:string,table_id:string,service:string,enabled:{type:"boolean"},status:string}),execute:async(_p,i,c)=>alertReads!.listDeliveries(i,c.signal)},
       {name:"lightmoni_alert_response_statistics_get",description:"Read native alert response statistics with the existing time, group and priority filters. No records are modified.",scope:"alerts.statistics.read",allHosts:true,effect:"read",inputSchema:schema({from:{...string,maxLength:128},to:{...string,maxLength:128},group_id:string,priority:string}),execute:async(_p,i)=>alertReads!.responseStatistics(i)},
     );
+    if(options.alerts&&options.alertProposals)definitions.push({name:"lightmoni_alerts_plan",description:"Create one reviewable alert rule or silence proposal. Requires alerts.propose and alerts.detail.read. Never approves or applies.",scope:"alerts.propose",allHosts:true,effect:"propose",inputSchema:schema({
+      operation:{...string,enum:["rule.update","rule.silence","silence.create","silence.update","silence.end"]},target_id:string,
+      patch:{type:"object",properties:{},additionalProperties:true},silence:{type:"object",properties:{},additionalProperties:true},until:{type:"string",minLength:0,maxLength:128},
+      reason:{type:"string",minLength:1,maxLength:1000},idempotency_key:{type:"string",minLength:1,maxLength:128}},["operation","reason","idempotency_key"]),execute:(p,i,c)=>this.planAlert(p,i,c)});
     if(options.logs) {
       const parameter={type:"object",properties:{type:{...string,maxLength:128},value:{}},additionalProperties:false};
       const logSpec=schema({table_id:string,range:schema({from:{...string,maxLength:128},to:{...string,maxLength:128}},["from","to"]),
@@ -326,6 +334,13 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       return this.proposalView(p,v.id);
     });
   }
+  private async planAlert(p:Principal,i:any,c:InvocationContext):Promise<any> {
+    const {idempotency_key,...intent}=i,service=this.options.alertProposals!;
+    const proposal=await service.createFrom(p.user,{source:p.source,grant_id:p.grant_id,credential_id:p.credential_id,...(c.session_id?{session_id:c.session_id}:{})},intent,c.signal,
+      {installationID:this.installationID,capability:"lightmoni_alerts_plan",key:idempotency_key});
+    const {idempotency_replayed,...value}=proposal;
+    return {proposal:value,...(idempotency_replayed?{idempotency_replayed:true}:{})};
+  }
   private summary(d:CapabilityDefinition):CapabilitySummary {
     return {id:d.id,version:d.version,name:d.name,description:d.description,inputSchema:d.inputSchema,outputSchema:d.outputSchema,
       effect:d.effect,risk:d.risk,operationKind:d.operationKind,idempotencyPolicy:d.idempotencyPolicy};
@@ -334,6 +349,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     this.authority.validate(principal);
     const channel=principal.source==="mcp"?"mcp":principal.source==="assistant"?"assistant":"http";
     return this.definitions.filter(d=>d.exposure[channel]&&d.roles.includes(principal.user.role as "admin"|"member")&&principal.scopes.includes(d.scope)
+      &&(!d.additionalScopes||d.additionalScopes.every(scope=>principal.scopes.includes(scope)))
       &&(!d.allHosts||principal.host_ids===null)).map(d=>this.summary(d));
   }
   listPage(principal:Principal,cursor?:string,pageSize=50):{tools:CapabilitySummary[];nextCursor?:string} {
@@ -383,6 +399,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       const channel=principal.source==="mcp"?"mcp":principal.source==="assistant"?"assistant":"http";
       if(!d.exposure[channel])fail(404,"capability_not_found");
       this.authorize(principal,d.scope,d.allHosts,d.roles);
+      for(const scope of d.additionalScopes??[])if(!principal.scopes.includes(scope))fail(403,"scope_required");
       if(Buffer.byteLength(JSON.stringify(input)??"")>d.limits.maxInputBytes)fail(413,"input_too_large");
       validate(input,d.inputSchema);
       for(const target of d.targetResolver(input))if(target.kind==="host")this.host(principal,target.id);
@@ -436,6 +453,14 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         const v=await this.invoke(p,target,input,{signal,session_id:scope?.session_id});return v.data;
       }};
     });
+    const alertProposal = this.definitions.some(d=>d.name==="lightmoni_alerts_plan") ? (()=>{
+      const d=this.definitions.find(x=>x.name==="lightmoni_alerts_plan")!;
+      const schema={...d.inputSchema,properties:Object.fromEntries(Object.entries(d.inputSchema.properties).filter(([key])=>key!=="idempotency_key")),required:(d.inputSchema.required as string[]).filter(key=>key!=="idempotency_key")};
+      return [{name:"propose_alert_change",description:d.description,schema,effect:"draft" as const,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+        if(!user)fail(401,"login_required");const p=this.authority.sessionPrincipal(user as User,"assistant");
+        const v=await this.invoke(p,"lightmoni_alerts_plan",{...input,idempotency_key:randomUUID()},{signal,session_id:scope?.session_id});return v.data;
+      }}];
+    })() : [];
     const logTraceMap:Record<string,string>={search_logs:"lightmoni_logs_search",get_trace:"lightmoni_traces_get"};
     const logTrace = Object.entries(logTraceMap).filter(([,target])=>this.definitions.some(x=>x.name===target)).map(([name,target])=>{
       const d=this.definitions.find(x=>x.name===target)!;
@@ -494,7 +519,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       }};
     });
     const old=taskTools(this.proposals).find(t=>t.name==="propose_task_action")!;
-    return [...shared,...telemetry,...alerts,...logTrace,...deployments,...operationReads,...hostAgent,...dashboardReads,...instrumentation,{...old,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+    return [...shared,...telemetry,...alerts,...alertProposal,...logTrace,...deployments,...operationReads,...hostAgent,...dashboardReads,...instrumentation,{...old,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
       if(!user)fail(401,"login_required");
       const p=this.authority.sessionPrincipal(user as User,"assistant");
       const result=await this.invoke(p,"lightmoni_tasks_plan",{...input,idempotency_key:randomUUID()},{signal,session_id:scope?.session_id});

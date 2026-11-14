@@ -20,6 +20,7 @@ export interface CapabilityDefinition {
   inputSchema: Record<string, any>;
   outputSchema: Record<string, any>;
   scope: string;
+  additionalScopes?: string[];
   roles: ("admin" | "member")[];
   allHosts?: boolean;
   effect: "read" | "propose";
@@ -69,6 +70,7 @@ interface Metadata {
   targetResolver(input: any): TargetRef[];
   roles?: ("admin" | "member")[];
   limits?: Partial<CapabilityLimits>;
+  additionalScopes?: string[];
 }
 const METADATA: Record<string, Metadata> = {
   lightmoni_hosts_list: {
@@ -287,6 +289,12 @@ const METADATA: Record<string, Metadata> = {
     id: "alerts.statistics.get", outputSchema: data({from:{type:"string"},to:{type:"string"},users:arrayOfRecords,records:arrayOfRecords,truncated:flag,definition:{type:"string"}},
       ["from","to","users","records","truncated","definition"]), risk: "R1", operationKind: "center_read",
     approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
+  },
+  lightmoni_alerts_plan: {
+    id: "alerts.plan", outputSchema: data({proposal:record,idempotency_replayed:flag},["proposal"]),
+    risk: "R2", operationKind: "domain_change", approvalPolicy: "domain_native", idempotencyPolicy: "required_external",
+    targetResolver: input => input?.target_id ? [{kind:input.operation?.startsWith("silence.")?"alert_silence":"alert_rule",id:input.target_id}] : [],
+    additionalScopes: ["alerts.detail.read"],
   },
 };
 

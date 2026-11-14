@@ -47,7 +47,7 @@ async function fixture() {
 test("alert reads preserve filters, pagination, safe groups and owner-bound proposals", async () => {
   const f = await fixture();
   try {
-    assert.equal(f.dispatcher.definitions.length, 22);
+    assert.equal(f.dispatcher.definitions.length, 23);
     const rules = await f.invoke("lightmoni_alert_rules_list", { search: "api", service: "api", enabled: true, limit: 1 });
     assert.equal(rules.data.total, 1); assert.equal(rules.data.items[0].id, f.rule.id);
     assert.equal(Object.hasOwn(rules.data.items[0], "sql"), false);

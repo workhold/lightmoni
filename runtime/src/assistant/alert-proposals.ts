@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { publicAlertValue } from "../domains/alert-read.js";
+import { capabilityDigest, type CapabilityIdempotencyPolicy } from "../capabilities/idempotency.js";
 import type { DB } from "../shared/sqlite.js";
 import type { AlertCapabilities, AlertChange, AlertOperation } from "../domains/alert-capabilities.js";
 import { clone, encode, parseTime } from "../domains/common.js";
@@ -30,11 +31,22 @@ export interface AlertProposal {
   expires_at: string;
   applied_at?: string;
   result?: any;
+  idempotency_replayed?: boolean;
 }
 interface StoredProposal {
   owner_id: string;
   change: AlertChange;
   proposal: AlertProposal;
+  source?: AlertProposalSource;
+}
+export interface AlertProposalSource {
+  source: "assistant" | "mcp" | "web";
+  session_id?: string;
+  grant_id?: string;
+  credential_id?: string;
+}
+export interface AlertProposalAuthorization {
+  beforeApply(actor: Actor, source: AlertProposalSource, change: AlertChange): void;
 }
 const maxBytes = 48 << 10;
 const ttl = 15 * 60 * 1000;
@@ -66,6 +78,7 @@ export function validateAlertIntent(value: any): asserts value is AlertIntent {
 
 /** Host-owned durable proposals. The model can create a proposal, never apply one. */
 export class AlertProposalService {
+  private authorization?: AlertProposalAuthorization;
   constructor(
     private db: DB,
     private capabilities: AlertCapabilities,
@@ -76,6 +89,7 @@ export class AlertProposalService {
     db.exec(`CREATE TABLE IF NOT EXISTS assistant_alert_proposals(id TEXT PRIMARY KEY,owner_id TEXT NOT NULL,session_id TEXT NOT NULL,body TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS assistant_alert_audit(proposal_id TEXT PRIMARY KEY,actor_id TEXT NOT NULL,session_id TEXT NOT NULL,operation TEXT NOT NULL,target_id TEXT NOT NULL,applied_at TEXT NOT NULL,receipt TEXT NOT NULL);`);
   }
+  useAuthorization(authorization: AlertProposalAuthorization): void { this.authorization = authorization; }
   private load(actor: Actor, id: string): StoredProposal {
     const row = this.db.get<{ body: string }>("SELECT body FROM assistant_alert_proposals WHERE id=? AND owner_id=?", id, actor.id);
     if (!row) throw new AssistantError(404, "告警变更提案不存在", "alert_proposal_not_found");
@@ -97,8 +111,21 @@ export class AlertProposalService {
     });
   }
   async create(actor: Actor, sessionId: string, intent: AlertIntent, signal: AbortSignal): Promise<AlertProposal> {
-    if (!actor?.id || !sessionId) throw new AssistantError(401, "需要有效的用户与会话");
+    return this.createFrom(actor, {source:"assistant",session_id:sessionId}, intent, signal);
+  }
+  async createFrom(actor: Actor, source: AlertProposalSource, intent: AlertIntent, signal: AbortSignal, idempotency?: CapabilityIdempotencyPolicy): Promise<AlertProposal> {
+    if (!actor?.id || source.source === "assistant" && !source.session_id) throw new AssistantError(401, "需要有效的用户与会话");
+    if (source.source === "mcp" && !source.grant_id) throw new AssistantError(403, "缺少外部授权");
     validateAlertIntent(intent);
+    const inputHash = idempotency ? capabilityDigest(intent) : "", keyHash = idempotency ? capabilityDigest(idempotency.key) : "";
+    const replay = () => {
+      if (!idempotency) return undefined;
+      const old = this.db.get<{input_hash:string;proposal_id:string}>("SELECT input_hash,proposal_id FROM capability_idempotency WHERE installation_id=? AND user_id=? AND capability=? AND key_hash=?", idempotency.installationID, actor.id, idempotency.capability, keyHash);
+      if (!old) return undefined;
+      if (old.input_hash !== inputHash) throw new AssistantError(409, "idempotency_conflict", "idempotency_conflict");
+      return {...this.get(actor, old.proposal_id), idempotency_replayed: true};
+    };
+    const existing = replay(); if (existing) return existing;
     let input: any;
     if (intent.operation.startsWith("rule.")) {
       const current = this.capabilities.getRule(actor, intent.target_id!);
@@ -112,7 +139,7 @@ export class AlertProposalService {
     signal.throwIfAborted();
     const at = this.now();
     const proposal: AlertProposal = {
-      id: randomBytes(16).toString("hex"), session_id: sessionId,
+      id: randomBytes(16).toString("hex"), session_id: source.session_id ?? "",
       operation: change.operation, target_id: change.target_id,
       status: "awaiting_approval", before: publicAlertValue(change.before), after: publicAlertValue(change.after),
       summary: change.summary, impact: clone(change.impact), reason: intent.reason.trim(),
@@ -121,9 +148,13 @@ export class AlertProposalService {
     bounded(proposal);
     // Reserve space for the completed readback before accepting an approvable preview.
     bounded({ ...proposal, status: "completed", applied_at: at.toISOString(), result: { ...publicAlertValue(change.after), version: "0".repeat(128) } });
-    const stored: StoredProposal = { owner_id: actor.id, change, proposal };
-    this.db.run("INSERT INTO assistant_alert_proposals(id,owner_id,session_id,body) VALUES(?,?,?,?)", proposal.id, actor.id, sessionId, this.encrypt(encode(stored)));
-    return clone(proposal);
+    const stored: StoredProposal = { owner_id: actor.id, change, proposal, source: clone(source) };
+    return this.db.transaction(() => {
+      const existing = replay(); if (existing) return existing;
+      this.db.run("INSERT INTO assistant_alert_proposals(id,owner_id,session_id,body) VALUES(?,?,?,?)", proposal.id, actor.id, proposal.session_id, this.encrypt(encode(stored)));
+      if (idempotency) this.db.run("INSERT INTO capability_idempotency(installation_id,user_id,capability,key_hash,input_hash,proposal_id,created_at) VALUES(?,?,?,?,?,?,?)", idempotency.installationID, actor.id, idempotency.capability, keyHash, inputHash, proposal.id, this.now().toISOString());
+      return clone(proposal);
+    });
   }
   private live(value: StoredProposal): void {
     if (parseTime(value.proposal.expires_at) <= this.now().getTime())
@@ -132,6 +163,8 @@ export class AlertProposalService {
   async apply(actor: Actor, id: string, signal: AbortSignal): Promise<AlertProposal> {
     const stored = this.load(actor, id);
     if (stored.proposal.status === "completed") return clone(stored.proposal);
+    if (stored.source?.source === "mcp" && !this.authorization) throw new AssistantError(503, "外部授权校验不可用", "authorization_unavailable");
+    if (stored.source) this.authorization?.beforeApply(actor, stored.source, stored.change);
     this.live(stored);
     let checked: AlertChange;
     try {
@@ -148,6 +181,7 @@ export class AlertProposalService {
     return this.db.transaction(() => {
       const latest = this.load(actor, id);
       if (latest.proposal.status === "completed") return clone(latest.proposal);
+      if (latest.source) this.authorization?.beforeApply(actor, latest.source, latest.change);
       this.live(latest);
       const result = this.capabilities.commit(actor, checked);
       const proposal: AlertProposal = { ...latest.proposal, status: "completed", applied_at: this.now().toISOString(), result: publicAlertValue(result) };
