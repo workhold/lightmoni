@@ -68,11 +68,15 @@ callback_port = 1455
 
 `host_ids: null` 表示管理员明确授权全部已登记主机，数组是封闭范围，省略该字段不会获得隐式全主机权限。规则中的对象字段和值必须匹配，数组和标量整体相等；未固定字段仍须通过工具 Schema、Scope、Host、目标和输出安全投影，不能传入 SQL、脚本或模板。
 
-首版仅允许描述符标记为 `read + center_read`、风险 `R0/R1` 且同时向 MCP/HTTP 曝光的能力。`propose`、直接执行、远程探测、审批、凭据管理、任意 SQL/Shell 和持续写授权均不允许。服务策略不可编辑，需要变化时撤销并新建。
+SDD 162 首版允许描述符标记为 `read + center_read`、风险 `R0/R1` 且同时向 MCP/HTTP 曝光的能力。SDD 163 仅追加 `lightmoni_tasks_plan@1` 的 `task.dispatch`、`run.cancel`、`run.retry`，且每条规则必须显式固定一种 `input.operation`；不能创建/修改任务或周期计划。其他 `propose`、直接执行、远程探测、审批、凭据管理、任意 SQL/Shell 和持续写授权均不允许。服务策略不可编辑，需要变化时撤销并新建。
 
 创建响应仅一次返回独立服务 Bearer，保存到受保护凭据存储后可用于相同 MCP 地址或普通 Capability HTTP。服务 ID 不是个人用户 ID，审计和限流均按服务主体隔离；Owner 必须持续保持有效管理员。撤销、到期、Owner 降权/停用、版本漂移、越界输入或 Host 都会失败关闭。
 
 总调用预算在 Schema、Host 和限流检查后、领域执行前原子扣减。工具发现和拒绝请求不扣减；扣减后的失败、取消或中断不退款，预算耗尽返回 `detail_code=automation_budget_exhausted`。预算计数只是已接纳调用次数，不代表业务成功。
+
+服务任务提案只保存 `awaiting_approval` 的原生提案，不代表已执行。业务 owner 是独立服务 ID，只有其 Owner 管理员可以通过原任务审阅地址读取并明确审批；其他管理员不能读取，服务自身不能自批。审批人、任务 `requested_by` 和审批审计 actor 均为人类 Owner。
+
+提交时校验并扣减一次预算；Owner 审批、Agent/helper 领取及自动重试入队/领取时，使用提案加密保存的原始能力输入复验同一 capability/version、固定输入、稳定 grant、Owner、Scope 和 Host，不重复扣减预算。`capability_run_authorizations.proposal_id` 把执行关联到原提案，自动重试保留该关联。策略漂移、撤销、到期或 Owner 降权会阻止审批或尚未开始的执行；已运行任务仍按原生回执结束。`queued/running/unknown` 不是成功，`unknown` 不自动重试。
 
 ## 首批工具
 
@@ -165,4 +169,4 @@ SDK 插桩提案使用 `lightmoni_code_instrumentation_plan`，返回 Diff 摘�
 
 固定官方 TypeScript SDK 1.32.2，2025-11-25 为测试基线；2026 协议尚未实现。默认每请求 128 KiB、结构深度16、工具输入16 KiB/输出64 KiB、15秒期限；每主体120请求/分钟、4并发，直接连接来源300请求/分钟。MCP拒绝批量JSON-RPC与URL查询参数。Origin若存在必须精确匹配配置origin；原生客户端可省略，仍需Bearer。
 
-任务、告警规则/静默/事件值班与通知重试、部署、运维、Agent 首装和 SDK 插桩计划由 AI/MCP 创建提案，管理员在原页面审批后由原领域服务执行真实写入或动作；AI/MCP 不能直接执行或自动批准。通知测试、部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent SSH 预检/直接安装/升级/恢复/卸载工具、插桩 Apply/code_task，以及服务主体的提案、直接执行或其他持续写授权仍未开放。固定只读服务主体不增加工具数量，也不改变上述审批边界。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。
+任务、告警规则/静默/事件值班与通知重试、部署、运维、Agent 首装和 SDK 插桩计划由 AI/MCP 创建提案，管理员在原页面审批后由原领域服务执行真实写入或动作；AI/MCP 不能直接执行或自动批准。服务主体仅限上述固定三种现有任务提案，其他服务提案、任务创建/修改、直接执行或持续写授权仍未开放。通知测试、部署回滚/取消/上传、运维资源写入/审批/取消/触发/Schedule 写入、Agent SSH 预检/直接安装/升级/恢复/卸载工具、插桩 Apply/code_task 仍未开放。服务主体授权不增加工具数量，也不改变上述审批边界。遥测查询只复用既有只读 Query，不开放不受约束的任意 SQL 或主机级数据隔离。原有内置 AI 其他工具继续按原权限工作。完整设计见 [平台 MCP 架构](platform-mcp.md) 和 SDD 046 及后续实施记录。

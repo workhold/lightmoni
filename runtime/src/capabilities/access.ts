@@ -60,4 +60,9 @@ export class CapabilityAccess extends SessionAccess implements CapabilityAuthori
     if (principal.subject_type === "service" && !this.external?.authorizeInvocation) fail(503, "外部授权校验不可用");
     this.external?.authorizeInvocation?.(principal, definition, input);
   }
+
+  authorizeContinuation(principal: Principal, definition: CapabilityDefinition, input: unknown): void {
+    if (principal.subject_type === "service" && !this.external?.authorizeContinuation) fail(503, "外部授权校验不可用");
+    this.external?.authorizeContinuation?.(principal, definition, input);
+  }
 }

@@ -40,6 +40,7 @@ export interface ExternalAuthority {
   validate(principal: Principal): void;
   validateGrant?(grantID: string, userID?: string): Principal;
   allowsCapability?(principal: Principal, definition: CapabilityDefinition): boolean;
+  authorizeContinuation?(principal: Principal, definition: CapabilityDefinition, input: unknown): void;
   authorizeInvocation?(principal: Principal, definition: CapabilityDefinition, input: unknown): void;
 }
 export interface CapabilityAuthority extends SessionAuthority, ExternalAuthority {}

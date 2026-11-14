@@ -73,16 +73,25 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       CREATE TABLE IF NOT EXISTS capability_invocations(id TEXT PRIMARY KEY,user_id TEXT NOT NULL,credential_id TEXT NOT NULL,source TEXT NOT NULL,capability TEXT NOT NULL,input_hash TEXT NOT NULL,decision TEXT NOT NULL,code TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,finished_at TEXT NOT NULL DEFAULT '',proposal_id TEXT NOT NULL DEFAULT '',subject_type TEXT NOT NULL DEFAULT 'user');
       CREATE INDEX IF NOT EXISTS capability_invocations_owner ON capability_invocations(user_id,created_at);
       CREATE TABLE IF NOT EXISTS capability_idempotency(installation_id TEXT NOT NULL,user_id TEXT NOT NULL,capability TEXT NOT NULL,key_hash TEXT NOT NULL,input_hash TEXT NOT NULL,proposal_id TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(installation_id,user_id,capability,key_hash));
-      CREATE TABLE IF NOT EXISTS capability_run_authorizations(run_id TEXT PRIMARY KEY,grant_id TEXT NOT NULL,user_id TEXT NOT NULL,host_id TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS capability_run_authorizations(run_id TEXT PRIMARY KEY,grant_id TEXT NOT NULL,user_id TEXT NOT NULL,host_id TEXT NOT NULL,proposal_id TEXT NOT NULL DEFAULT '');
       CREATE TABLE IF NOT EXISTS execution_index(id TEXT PRIMARY KEY,domain TEXT NOT NULL,native_id TEXT NOT NULL,host_id TEXT NOT NULL,state TEXT NOT NULL,updated_at TEXT NOT NULL,UNIQUE(domain,native_id));`);
     if(!deps.db.all<{name:string}>("PRAGMA table_info(capability_invocations)").some(column=>column.name==="subject_type"))
       deps.db.exec("ALTER TABLE capability_invocations ADD COLUMN subject_type TEXT NOT NULL DEFAULT 'user'");
+    if(!deps.db.all<{name:string}>("PRAGMA table_info(capability_run_authorizations)").some(column=>column.name==="proposal_id"))
+      deps.db.exec("ALTER TABLE capability_run_authorizations ADD COLUMN proposal_id TEXT NOT NULL DEFAULT ''");
     const existing = deps.db.get<{id:string}>("SELECT id FROM capability_installation LIMIT 1");
     this.installationID = existing?.id ?? randomUUID();
     if (!existing) deps.db.run("INSERT INTO capability_installation(id) VALUES(?)", this.installationID);
     this.proposalIndex = new ProposalIndex(deps);
     this.executionIndex = new ExecutionIndex(deps);
     this.proposals = new TaskProposalService(deps, options.taskCenter, {
+      beforeCreate: (_actor, source, intent) => {
+        if(source.subject_type!=="service")return;
+        const current=this.grant(source,_actor.id);this.authorize(current,"tasks.propose");
+        if(intent.operation==="task.dispatch")for(const id of intent.host_ids??[])this.host(current,id);
+        else this.host(current,options.taskCenter.get(intent.run_id!).host_id);
+        this.authorizeAutomation(current,source);
+      },
       afterCreate: (_actor, source, intent, proposal) => {
         const ids = intent.host_ids ?? (intent.task as any)?.host_ids;
         this.proposalIndex.link({ domain: "task", nativeID: proposal.id, capability: "lightmoni_tasks_plan", ownerID: _actor.id, source: source.source,
@@ -101,23 +110,30 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
           this.assertStaticTaskTargets(current, intent.task);
         }
         else fail(403, "unsupported_external_proposal");
+        this.authorizeAutomation(current,source);
       },
       afterApply: (actor, source, _intent, proposal) => {
         if (source.source !== "mcp") return;
         const result = proposal.result as any;
         const runs = result?.runs ?? (result?.host_id ? [result] : []);
         for (const run of runs) {
-          deps.db.run("INSERT OR IGNORE INTO capability_run_authorizations(run_id,grant_id,user_id,host_id) VALUES(?,?,?,?)", run.id, source.grant_id, actor.id, run.host_id);
+          deps.db.run("INSERT OR IGNORE INTO capability_run_authorizations(run_id,grant_id,user_id,host_id,proposal_id) VALUES(?,?,?,?,?)", run.id, source.grant_id, source.subject_id??actor.id, run.host_id, proposal.id);
           this.index(run);
         }
       },
     });
     options.taskCenter.beforeStart = run => {
-      const binding = deps.db.get<{grant_id:string;user_id:string;host_id:string}>("SELECT * FROM capability_run_authorizations WHERE run_id=?", run.id);
+      const binding = deps.db.get<{grant_id:string;user_id:string;host_id:string;proposal_id:string}>("SELECT * FROM capability_run_authorizations WHERE run_id=?", run.id);
       if (!binding) return true;
       try {
         const p = this.grant({source:"mcp",grant_id:binding.grant_id}, binding.user_id);
-        this.authorize(p,"tasks.propose"); this.host(p,binding.host_id); return true;
+        this.authorize(p,"tasks.propose"); this.host(p,binding.host_id);
+        if(p.subject_type==="service"){
+          if(!binding.proposal_id)fail(403,"authorization_revoked");
+          const source=this.proposals.source(p.user,binding.proposal_id);if(!source)fail(403,"authorization_revoked");
+          this.authorizeAutomation(p,source);
+        }
+        return true;
       } catch { return false; }
     };
     const nodes = options.taskCenter.nodes;
@@ -298,7 +314,16 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
   }
   private grant(source:ProposalSource,userID:string):Principal {
     if(!source.grant_id||!this.authority.validateGrant)fail(403,"authorization_unavailable");
-    return this.authority.validateGrant(source.grant_id,userID);
+    return this.authority.validateGrant(source.grant_id,source.subject_id??userID);
+  }
+  private authorizeAutomation(p:Principal,source:ProposalSource):void {
+    if(p.subject_type!=="service")return;
+    const capability=source.capability;
+    if(!capability||capability.id!=="tasks.plan"||capability.name!=="lightmoni_tasks_plan"||capability.version!==1)fail(403,"automation_capability_forbidden");
+    const definition=this.definitions.find(d=>d.id===capability.id&&d.name===capability.name&&d.version===capability.version);
+    if(!definition)fail(403,"automation_capability_forbidden");
+    if(!this.authority.authorizeContinuation)fail(503,"authorization_unavailable");
+    this.authority.authorizeContinuation(p,definition,capability.input);
   }
   private authorize(p:Principal,scope:string,allHosts=false,roles:("admin"|"member")[]=["admin"]) {
     if(!roles.includes(p.user.role as "admin"|"member")||!p.scopes.includes(scope)||allHosts&&p.host_ids!==null)fail(403,"capability_forbidden");
@@ -452,7 +477,9 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     return this.deps.db.transaction(()=>{
       const old=this.deps.db.get<{input_hash:string;proposal_id:string}>("SELECT input_hash,proposal_id FROM capability_idempotency WHERE installation_id=? AND user_id=? AND capability='lightmoni_tasks_plan' AND key_hash=?",this.installationID,p.user.id,keyHash);
       if(old){if(old.input_hash!==inputHash)fail(409,"idempotency_conflict");return {...this.proposalView(p,old.proposal_id),idempotency_replayed:true};}
-      const source:ProposalSource={source:p.source,grant_id:p.grant_id,credential_id:p.credential_id,...(c.session_id?{session_id:c.session_id}:{})};
+      const source:ProposalSource={source:p.source,grant_id:p.grant_id,credential_id:p.credential_id,...(c.session_id?{session_id:c.session_id}:{}),
+        ...(p.subject_type==="service"?{subject_type:"service" as const,subject_id:p.user.id,owner_user_id:p.owner_user_id,
+          capability:{id:"tasks.plan",name:"lightmoni_tasks_plan",version:1,input:structuredClone(i)}}:{})};
       if(p.source==="assistant"&&!source.session_id)fail(400,"assistant_session_required");
       const v=this.proposals.createFrom(p.user,source,intent);
       this.deps.db.run("INSERT INTO capability_idempotency(installation_id,user_id,capability,key_hash,input_hash,proposal_id,created_at) VALUES(?,?,'lightmoni_tasks_plan',?,?,?,?)",this.installationID,p.user.id,keyHash,inputHash,v.id,this.deps.now().toISOString());
