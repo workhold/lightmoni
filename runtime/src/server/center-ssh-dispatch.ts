@@ -4,6 +4,8 @@ import type {AgentJobStore} from './agent-jobs.js';
 import type {PrivilegedExecutorStore} from './privileged-executors.js';
 import type {TaskRunStore} from './task-center.js';
 import {defaultSSHRunner,SSHError,type SSHRunner} from './machine-ssh.js';
+import {HTTPError} from '../shared/http.js';
+import type {ExecutionGrantRegistry} from '../capabilities/execution-grants.js';
 
 type Candidate={id:string;machine_id:string;kind:'privileged'|'ordinary'|'task'};
 const JOB_ID=/^[a-f0-9-]{32,36}$/;
@@ -11,7 +13,7 @@ const JOB_ID=/^[a-f0-9-]{32,36}$/;
 /** Only the centre initiates approved host work. The installed worker is run
  * once through the pinned SSH channel; resident Agent loops never claim it. */
 export function registerCenterSSHDispatch(deps:Dependencies,access:MachineTerminalAccess,jobs:AgentJobStore,executors:PrivilegedExecutorStore,
-  runner:SSHRunner=defaultSSHRunner,intervalMs=1000,taskRuns?:TaskRunStore):Module&{tick():void} {
+  runner:SSHRunner=defaultSSHRunner,intervalMs=1000,taskRuns?:TaskRunStore,executionGrants?:ExecutionGrantRegistry):Module&{tick():void} {
   const {db}=deps,active=new Map<string,{controller:AbortController;promise:Promise<void>}>();
   let timer:ReturnType<typeof setInterval>|undefined,closed=false;
   jobs.setSSHOnly?.();executors.setSSHOnly();if(taskRuns){taskRuns.sshOnceReady=machineID=>executors.supportsSSHOnce(machineID,'task-once');taskRuns.setSSHOnly();}
@@ -27,6 +29,10 @@ export function registerCenterSSHDispatch(deps:Dependencies,access:MachineTermin
     let lease:ReturnType<MachineTerminalAccess['acquireTerminal']>|undefined;
     try{
       if(!pending(job))return;
+      if(job.kind==='ordinary'&&executionGrants){
+        const linked=db.get<{deployment_id:string}>('SELECT deployment_id FROM agent_jobs WHERE id=?',job.id);
+        if(linked?.deployment_id)executionGrants?.assert('deployment',linked.deployment_id);
+      }
       const supported=job.kind==='ordinary'?jobs.supportsSSHOnce(db.get<{agent_id:string}>('SELECT agent_id FROM managed_machines WHERE id=?',job.machine_id)?.agent_id??'')
         :executors.supportsSSHOnce(job.machine_id,job.kind==='task'?'task-once':'managed-once');
       if(!supported){failQueued(job,'agent_upgrade_required');return;}
@@ -43,7 +49,8 @@ export function registerCenterSSHDispatch(deps:Dependencies,access:MachineTermin
       lease.markUsed();
     }catch(error){
       if(closed)return;
-      const code=controller.signal.aborted||error instanceof Error&&error.message==='ssh_binding_changed'?'ssh_binding_changed'
+      const code=error instanceof HTTPError&&['authorization_revoked','authorization_unavailable'].includes(error.message)?error.message
+        :controller.signal.aborted||error instanceof Error&&error.message==='ssh_binding_changed'?'ssh_binding_changed'
         :error instanceof SSHError&&error.code==='host_key_mismatch'?'host_key_mismatch'
         :error instanceof SSHError&&error.code==='timed_out'?'ssh_timeout':'ssh_dispatch_failed';
       // A running job may already have changed the host. Its lease and

@@ -203,6 +203,11 @@ const METADATA: Record<string, Metadata> = {
     risk: "R1", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none",
     targetResolver: input => input?.deployment_id ? [{kind:"deployment",id:input.deployment_id}] : [],
   },
+  lightmoni_deployments_plan: {
+    id: "deployments.plan", outputSchema: data({proposal:record,plan:record,idempotency_replayed:flag},["proposal","plan"]),
+    risk: "R2", operationKind: "domain_change", approvalPolicy: "domain_native", idempotencyPolicy: "required_external",
+    targetResolver: input => input?.service_id ? [{kind:"service",id:input.service_id}] : [], additionalScopes: ["deployments.read"],
+  },
   lightmoni_operations_resources_list: {
     id: "operations.resources.list", outputSchema: data({resources:arrayOfRecords,total:count,offset:count,limit:count,returned:count,
       next_offset:nullOr(count),model_truncated:flag},["resources","total","offset","limit","returned","next_offset","model_truncated"]),

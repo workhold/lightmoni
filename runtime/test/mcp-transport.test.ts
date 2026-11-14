@@ -27,6 +27,7 @@ import { registerOperationSchedules } from "../src/server/operation-schedules.js
 import { websiteDefinition } from "../src/operations/websites.js";
 import { Dashboards, normalizeDashboard } from "../src/domains/dashboards.js";
 import { DashboardReadService } from "../src/domains/dashboard-read.js";
+import { ExecutionGrantRegistry } from "../src/capabilities/execution-grants.js";
 import { InstrumentationService } from "../src/assistant/instrumentation.js";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -177,7 +178,7 @@ test("log and trace capabilities share frozen reads through the official MCP cli
  }finally{await client.close();logs.close();await f.close();}
 });
 test("deployment capabilities expose native service and receipt views through the official MCP client",async()=>{
- const f=await fixture(d=>{const store=registerServiceDeployments(d.deps);return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,deployments:store});});
+ const f=await fixture(d=>{const grants=new ExecutionGrantRegistry(d.deps),store=registerServiceDeployments(d.deps,{executionGrants:grants});return new CapabilityDispatcher(d.deps,d.authority,{taskCenter:d.options.taskCenter,deployments:store,executionGrants:grants});});
  const client=new Client({name:"deployment-read",version:"1"});
  try{
   const at=new Date().toISOString(),serviceID="a".repeat(32);
@@ -186,13 +187,15 @@ test("deployment capabilities expose native service and receipt views through th
   f.db.run("INSERT INTO releases(id,service_id,version,source_type,source_ref,artifact_digest,artifact_size,manifest_json,status,created_at,created_by) VALUES('release-one',?,'2026.11.14','artifact','sha256:abc','sha256:abc',128,'{}','ready',?,'admin')",serviceID,at);
   f.db.run("INSERT INTO deployments(id,service_id,target_id,release_id,adapter,status,plan_json,target_snapshot_json,receipt_json,phase,operation_id,created_at,created_by) VALUES('deployment-one',?,'target-one','release-one','systemd','awaiting_approval','{}','{}','{}','awaiting_approval','operation-one',?,'admin')",serviceID,at);
   f.db.run("INSERT INTO deployment_events(id,deployment_id,phase,state,summary,actor,created_at) VALUES('event-one','deployment-one','awaiting_approval','awaiting_approval','计划已生成','admin',?)",at);
-  const key=f.access.createToken(f.user,{name:"Deployments",scopes:["deployments.read"],host_ids:null});
+  const key=f.access.createToken(f.user,{name:"Deployments",scopes:["deployments.read","deployments.propose"],host_ids:null});
   await client.connect(new StreamableHTTPClientTransport(new URL(f.endpoint),{requestInit:{headers:{authorization:"Bearer "+key.token}}}));
-  const tools=await client.listTools();for(const name of ["lightmoni_services_list","lightmoni_services_get","lightmoni_deployments_list","lightmoni_deployments_get","lightmoni_deployments_events"])assert.ok(tools.tools.some(t=>t.name===name),name);
+  const tools=await client.listTools();for(const name of ["lightmoni_services_list","lightmoni_services_get","lightmoni_deployments_list","lightmoni_deployments_get","lightmoni_deployments_events","lightmoni_deployments_plan"])assert.ok(tools.tools.some(t=>t.name===name),name);
   assert.equal(tools.tools.some(t=>/approve|rollback|upload/.test(t.name)),false);
   const detail=await client.callTool({name:"lightmoni_services_get",arguments:{service_id:serviceID}});assert.equal((detail.structuredContent as any).data.targets[0].id,"target-one");assert.equal((detail.structuredContent as any).data.releases[0].id,"release-one");
   const deployment=await client.callTool({name:"lightmoni_deployments_get",arguments:{deployment_id:"deployment-one"}});assert.equal((deployment.structuredContent as any).data.deployment.status,"awaiting_approval");
   const events=await client.callTool({name:"lightmoni_deployments_events",arguments:{deployment_id:"deployment-one"}});assert.equal((events.structuredContent as any).data.events[0].id,"event-one");
+  const planned=await client.callTool({name:"lightmoni_deployments_plan",arguments:{service_id:serviceID,target_id:"target-one",release_id:"release-one",reason:"external review",idempotency_key:"deployment-plan-one"}}),plannedData=(planned.structuredContent as any).data;
+  assert.equal(plannedData.proposal.status,"awaiting_approval");assert.equal(plannedData.proposal.native_status,"awaiting_approval");assert.ok(f.db.get("SELECT 1 FROM capability_execution_grants WHERE domain='deployment' AND native_id=?",plannedData.proposal.id));
  }finally{await client.close();await f.close();}
 });
 test("operation capabilities expose resources, runs and schedules through the official MCP client",async()=>{
