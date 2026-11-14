@@ -21,7 +21,7 @@ async function fixture() {
     cat:{list:async()=>[{id:"log_app",name:"log_app",logical_name:"app",kind:"log",columns:[],services:["api"],system:false,retention_days:null,effective_retention_days:7}]},
     referencedTables:async()=>["log_app"],query:async()=>({request_id:"",results:[]}),logger:{info(){},warn(){},error(){}}} as unknown as Dependencies;
   const alerts=new Alerts(deps),capabilities=new AlertCapabilities(alerts),proposals=new AlertProposalService(db,capabilities,deps.now,deps.encrypt,deps.decrypt);
-  db.run("INSERT INTO alert_groups VALUES('group-one','Ops',?)",encode({id:"group-one",name:"Ops",enabled:true,members:["admin"],policies:{},targets:[]}));
+  db.run("INSERT INTO alert_groups VALUES('group-one','Ops',?)",encode({id:"group-one",name:"Ops",enabled:true,members:["admin","member"],policies:{},targets:[]}));
   const prepared=await capabilities.prepareRuleSave(admin,{name:"API errors",enabled:true,kind:"sql",severity:"P2",sql:"SELECT count() AS value FROM log_app",value_field:"value",source_table_ids:["log_app"],group_ids:["group-one"],threshold:"1",operator:"gt",interval_seconds:10,window_seconds:60,evidence_profile:{}});
   const rule=db.transaction(()=>capabilities.commitRuleSave(admin,prepared)),runs=new TaskRunStore(deps),principal:Principal={user:admin,scopes:[...CAPABILITY_SCOPES],host_ids:null,credential_id:"token",grant_id:"grant",source:"mcp"};let revoked=false,grantPrincipal=structuredClone(principal);
   db.run("INSERT INTO alert_responses(id,episode,group_id,state,created_at,body) VALUES('incident-one','episode-one','group-one','firing',?,?)",deps.now().toISOString(),encode({id:"incident-one",episode:"episode-one",group_id:"group-one",group_name:"Ops",rule_id:rule.id,state:"firing",priority:"P1",original_priority:"P1",generation:0,stage:"primary",created_at:deps.now().toISOString(),last_tick:deps.now().toISOString(),owner_id:"",owner_name:"",group:{id:"group-one",name:"Ops",members:["admin"],policies:{},targets:[]},evidence:{logs:"private-evidence"}}));
@@ -103,5 +103,26 @@ test("internal incident acknowledgement uses the same native proposal and apply 
   const created=await tool.execute({operation:"incident.ack",target_id:"incident-one",reason:"internal"},new AbortController().signal,admin,{session_id:"session-one"});
   assert.equal(created.proposal.session_id,"session-one");assert.equal(alertsState(f),"firing");await f.proposals.apply(admin,created.proposal.id,new AbortController().signal);assert.equal(alertsState(f),"acknowledged");
   assert.ok(f.db.get("SELECT 1 FROM capability_invocations WHERE source='assistant' AND capability='lightmoni_alerts_plan'"));
+ }finally{await f.close();}
+});
+
+test("incident transfer proposals assign a valid group member only after native approval",async()=>{
+ const f=await fixture();try{
+  const input={operation:"incident.transfer",target_id:"incident-one",user_id:"member",reason:"transfer ownership",idempotency_key:"transfer-one"};
+  const created=await f.invoke("lightmoni_alerts_plan",input),proposal=created.data.proposal;
+  assert.equal(proposal.status,"awaiting_approval");assert.equal(proposal.after.state,"unclaimed");assert.equal(proposal.after.transfer_to.id,"member");assert.equal(alertsState(f),"firing");
+  assert.equal((await f.invoke("lightmoni_alerts_plan",input)).data.proposal.id,proposal.id);await assert.rejects(f.invoke("lightmoni_alerts_plan",{...input,user_id:"admin"}),/idempotency_conflict/);
+  const applied=await f.proposals.apply(admin,proposal.id,new AbortController().signal),response=f.alerts.response("incident-one");
+  assert.equal(applied.status,"completed");assert.equal(applied.result.transfer_to.id,"member");assert.equal(response.state,"unclaimed");assert.equal(response.owner_id,"");assert.deepEqual(response.group.fallback,["member"]);assert.equal(response.stage,"fallback");
+  assert.equal(JSON.stringify(applied).includes("private-evidence"),false);
+  await assert.rejects(f.invoke("lightmoni_alerts_plan",{operation:"incident.transfer",target_id:"incident-one",user_id:"missing",reason:"invalid",idempotency_key:"invalid-member"}),/有效组成员/);
+ }finally{await f.close();}
+});
+
+test("internal incident transfer uses the same proposal and native transfer path",async()=>{
+ const f=await fixture();try{
+  const created=await f.dispatcher.assistantTools().find(t=>t.name==="propose_alert_change")!.execute({operation:"incident.transfer",target_id:"incident-one",user_id:"member",reason:"internal transfer"},new AbortController().signal,admin,{session_id:"session-one"});
+  assert.equal(created.proposal.session_id,"session-one");assert.equal(alertsState(f),"firing");await f.proposals.apply(admin,created.proposal.id,new AbortController().signal);
+  assert.equal(alertsState(f),"unclaimed");assert.deepEqual(f.alerts.response("incident-one").group.fallback,["member"]);
  }finally{await f.close();}
 });

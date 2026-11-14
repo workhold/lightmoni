@@ -313,7 +313,7 @@ const METADATA: Record<string, Metadata> = {
   lightmoni_alerts_plan: {
     id: "alerts.plan", outputSchema: data({proposal:record,idempotency_replayed:flag},["proposal"]),
     risk: "R2", operationKind: "domain_change", approvalPolicy: "domain_native", idempotencyPolicy: "required_external",
-    targetResolver: input => input?.target_id ? [{kind:input.operation==="incident.ack"?"alert_incident":input.operation?.startsWith("silence.")?"alert_silence":"alert_rule",id:input.target_id}] : [],
+    targetResolver: input => input?.target_id ? [{kind:input.operation?.startsWith("incident.")?"alert_incident":input.operation?.startsWith("silence.")?"alert_silence":"alert_rule",id:input.target_id}] : [],
     additionalScopes: ["alerts.detail.read"],
   },
 };

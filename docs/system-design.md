@@ -863,7 +863,11 @@ SDD 153 将中心受限工作区的 SDK 插桩计划接入统一能力层：code
 
 SDD 154 将告警事件接手纳入既有 AlertProposalService：incident.ack 额外要求 alerts.incidents.read，预览/结果只包含安全事件字段。原 Alerts.acknowledge 拆分为异步只读预检与同步 commitAcknowledge，保留规则 revision、责任组成员、响应 generation 和通知取消语义；提案审批后通过原 SQLite 事务更新真实事件，不复制状态机。外部提案返回受保护 review_url，转交、升级、续期和通知重试/测试仍不开放。
 
-完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 153](../specs/153-instrumentation-proposal-capability-write/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md) 和 [MCP 接入指南](mcp.md)。
+SDD 155 将告警事件转交纳入同一提案路径：Alert API 的转交和分页重置提取为 Alerts.prepareTransfer/commitTransfer/resetPaging，保持原错误状态、有效组成员和通知取消语义。incident.transfer 额外要求 incidents.read，目标为当前有效组成员；审批后事件 unclaimed、owner 清空、stage=fallback 并等待目标成员接手，不把转交预览或完成当成对方已接手。升级、续期和通知重试/测试仍不开放。
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md) 和 [MCP 接入指南](mcp.md)。
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 153](../specs/153-instrumentation-proposal-capability-write/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 

@@ -1,4 +1,5 @@
 import { parseJSON } from "../shared/json.js";
+import { HTTPError } from "../shared/http.js";
 import { isLosslessNumber } from "lossless-json";
 import type { Dependencies, Module } from "../shared/types.js";
 import {
@@ -1439,6 +1440,38 @@ export class Alerts implements Module {
   async acknowledge(key: string, userID: string, method: string, now = this.now()): Promise<any> {
     const ruleRevision = await this.prepareAcknowledge(key, userID);
     return this.commitAcknowledge(key, userID, method, now, ruleRevision);
+  }
+
+  resetPaging(r: any): void {
+    Object.assign(r, { state: "unclaimed", owner_id: "", owner_name: "", ack_at: "", ack_method: "", handling_until: "",
+      exhausted: false, round: 0, stage_round: 0, successful_rounds: 0, counted_round: 0, level_active_seconds: 0,
+      since_round_seconds: 0, last_tick: stamp(this.now()), generation: r.generation + 1 });
+  }
+
+  prepareTransfer(key: string, actor: {id:string;role:string}, targetUserID: string): void {
+    const r = this.response(key);
+    if (!r) throw new HTTPError(404, "事件不存在");
+    if (["resolved", "cancelled"].includes(r.state) || !(r.owner_id === actor.id || actor.role === "admin"))
+      throw new HTTPError(403, "当前接手人或管理员可以转交");
+    const g = this.group(r.group_id), user = this.member(targetUserID);
+    if (!g?.members.includes(targetUserID) || !user) throw new HTTPError(400, "转交人必须为有效组成员");
+  }
+
+  commitTransfer(key: string, actor: {id:string;role:string}, targetUserID: string): any {
+    let r: any;
+    this.deps.db.transaction(() => {
+      this.prepareTransfer(key, actor, targetUserID);
+      r = this.response(key); const user = this.member(targetUserID);
+      this.resetPaging(r); r.active_seconds = 0; r.group.fallback = [targetUserID]; r.stage = "fallback";
+      this.saveResponse(r); this.cancelQueue(r.id);
+      this.audit(r, "transfer", actor.id, "web", "转交给" + user.name + "，等待其接手");
+    });
+    return r;
+  }
+
+  async transfer(key: string, actor: {id:string;role:string}, targetUserID: string): Promise<any> {
+    this.prepareTransfer(key, actor, targetUserID);
+    return this.commitTransfer(key, actor, targetUserID);
   }
 
   updateDelivery(d: any): void {

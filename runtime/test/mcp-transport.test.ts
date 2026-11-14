@@ -133,7 +133,8 @@ test("alert read capabilities separate SQL details and proposals through the off
  });
  let client:Client|undefined,ordinaryClient:Client|undefined;
  try{
-  f.db.run("INSERT INTO alert_groups VALUES('group-one','Ops',?)",JSON.stringify({id:"group-one",name:"Ops",enabled:true,members:["admin"],policies:{},targets:[]}));
+  f.db.run("INSERT INTO users(id,name,role,active,created_at) VALUES('member','Member','member',1,'2026-11-14')");
+  f.db.run("INSERT INTO alert_groups VALUES('group-one','Ops',?)",JSON.stringify({id:"group-one",name:"Ops",enabled:true,members:["admin","member"],policies:{},targets:[]}));
   const prepared=await caps.prepareRuleSave(f.user,{name:"API errors",enabled:true,kind:"sql",severity:"P2",sql:"SELECT count() AS value FROM log_app",value_field:"value",source_table_ids:["log_app"],group_ids:["group-one"],threshold:"1",operator:"gt",interval_seconds:10,window_seconds:60,evidence_profile:{}});
   const rule=f.db.transaction(()=>caps.commitRuleSave(f.user,prepared));
   const proposal=await proposals.create(f.user,"session-one",{operation:"rule.update",target_id:rule.id,patch:{threshold:"2"},reason:"review"},new AbortController().signal);
@@ -156,6 +157,10 @@ test("alert read capabilities separate SQL details and proposals through the off
   const ackData=(acknowledged.structuredContent as any).data;assert.equal(ackData.proposal.status,"awaiting_approval");assert.equal(ackData.proposal.before.state,"firing");assert.ok(ackData.proposal.review_url.includes("/api/v1/assistant/alert-proposals/"));assert.equal(JSON.stringify(ackData).includes("private-evidence"),false);
   const ackApplied=await fetch(f.externalURL+`/api/v1/assistant/alert-proposals/${ackData.proposal.id}/apply`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});assert.equal(ackApplied.status,200,await ackApplied.text());
   const ackRead=await client.callTool({name:"lightmoni_alert_incidents_get",arguments:{id:"incident-one"}});assert.equal((ackRead.structuredContent as any).data.incident.state,"acknowledged");assert.equal((ackRead.structuredContent as any).data.incident.owner_id,"admin");
+  const transferred=await client.callTool({name:"lightmoni_alerts_plan",arguments:{operation:"incident.transfer",target_id:"incident-one",user_id:"member",reason:"transfer ownership",idempotency_key:"incident-transfer-one"}});assert.ok(!transferred.isError,JSON.stringify(transferred));
+  const transferData=(transferred.structuredContent as any).data;assert.equal(transferData.proposal.after.state,"unclaimed");assert.equal(transferData.proposal.after.transfer_to.id,"member");assert.equal(JSON.stringify(transferData).includes("private-evidence"),false);
+  const transferApplied=await fetch(f.externalURL+`/api/v1/assistant/alert-proposals/${transferData.proposal.id}/apply`,{method:"POST",headers:{"content-type":"application/json"},body:"{}"});assert.equal(transferApplied.status,200,await transferApplied.text());
+  const transferRead=await client.callTool({name:"lightmoni_alert_incidents_get",arguments:{id:"incident-one"}});assert.equal((transferRead.structuredContent as any).data.incident.state,"unclaimed");assert.equal((transferRead.structuredContent as any).data.incident.owner_id,"");
   const changed=await client.callTool({name:"lightmoni_alerts_plan",arguments:{operation:"rule.update",target_id:rule.id,patch:{threshold:"2"},reason:"external review",idempotency_key:"alert-rule-one"}}),changedProposal=(changed.structuredContent as any).data.proposal;
   assert.equal(changedProposal.status,"awaiting_approval");assert.equal(changedProposal.session_id,"");assert.equal(caps.getRule(f.user,rule.id).threshold,"1");
   await proposals.apply(f.user,changedProposal.id,new AbortController().signal);assert.equal(caps.getRule(f.user,rule.id).threshold,"2");

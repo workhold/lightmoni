@@ -14,6 +14,7 @@ export interface AlertIntent {
   patch?: Record<string, any>;
   silence?: Record<string, any>;
   until?: string;
+  user_id?: string;
   reason: string;
 }
 export interface AlertProposal {
@@ -50,25 +51,27 @@ export interface AlertProposalAuthorization {
 }
 const maxBytes = 48 << 10;
 const ttl = 15 * 60 * 1000;
-const operations: AlertOperation[] = ["incident.ack", "rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"];
+const operations: AlertOperation[] = ["incident.transfer", "incident.ack", "rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"];
 export { publicAlertValue } from "../domains/alert-read.js";
 function bounded(value: unknown): void {
   if (bytes(encode(value)) > maxBytes)
     throw new AssistantError(400, "告警配置过大，请缩小变更范围", "alert_change_too_large");
 }
 export function validateAlertIntent(value: any): asserts value is AlertIntent {
-  object(value, ["operation", "target_id", "patch", "silence", "until", "reason"], ["operation", "reason"]);
+  object(value, ["operation", "target_id", "patch", "silence", "until", "user_id", "reason"], ["operation", "reason"]);
   bounded(value);
   if (!operations.includes(value.operation) || !text(value.reason).trim() || text(value.reason).length > 1000)
     throw new AssistantError(400, "请提供有效的告警操作和变更原因", "invalid_alert_change");
   if (value.operation !== "silence.create" && (typeof value.target_id !== "string" || !value.target_id.trim() || value.target_id.length > 128))
     throw new AssistantError(400, "请先查询并指定准确的目标 ID", "invalid_alert_change");
-  const permitted = value.operation === "rule.update" || value.operation === "silence.update" ? "patch" : value.operation === "silence.create" ? "silence" : value.operation === "rule.silence" ? "until" : undefined;
-  for (const field of ["patch", "silence", "until"])
+  const permitted = value.operation === "incident.transfer" ? "user_id" : value.operation === "rule.update" || value.operation === "silence.update" ? "patch" : value.operation === "silence.create" ? "silence" : value.operation === "rule.silence" ? "until" : undefined;
+  for (const field of ["patch", "silence", "until", "user_id"])
     if (field !== permitted && value[field] !== undefined)
       throw new AssistantError(400, "变更字段与操作类型不符", "invalid_alert_change");
   if (permitted === "until" && typeof value.until !== "string")
     throw new AssistantError(400, "静默结束时间必须为 RFC3339，解除时填写空字符串", "invalid_alert_change");
+  if (permitted === "user_id" && (typeof value.user_id !== "string" || !value.user_id.trim() || value.user_id.length > 128))
+    throw new AssistantError(400, "请指定有效的转交成员 ID", "invalid_alert_change");
   if (permitted === "patch" || permitted === "silence") {
     const v = value[permitted];
     if (!v || typeof v !== "object" || Array.isArray(v) || !Object.keys(v).length)
@@ -127,7 +130,7 @@ export class AlertProposalService {
     };
     const existing = replay(); if (existing) return existing;
     let input: any;
-    if (intent.operation === "incident.ack") input = { id: intent.target_id };
+    if (intent.operation === "incident.ack" || intent.operation === "incident.transfer") input = { id: intent.target_id, ...(intent.operation === "incident.transfer" ? { user_id: intent.user_id } : {}) };
     else if (intent.operation.startsWith("rule.")) {
       const current = this.capabilities.getRule(actor, intent.target_id!);
       input = { id: current.id, revision: current.revision, ...(intent.operation === "rule.update" ? { patch: intent.patch } : { until: intent.until }) };
