@@ -1,0 +1,17 @@
+import { execFileSync, spawn } from "node:child_process";
+import { createServer } from "node:net";
+import { openSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+import { randomBytes } from "node:crypto";
+const root=resolve(new URL("../..",import.meta.url).pathname),work=process.env.LIGHTMONI_CORE_E2E_DIR??"/tmp/lightmoni-core-e2e",stateFile=join(work,"state.json"),secretsFile=join(work,"secrets.json"),state=JSON.parse(readFileSync(stateFile,"utf8")),secrets=JSON.parse(readFileSync(secretsFile,"utf8"));
+const dockerHost=process.env.DOCKER_HOST??"unix:///Users/vchive/.colima/core-e2e/docker.sock";
+const run=(command,args)=>execFileSync(command,args,{stdio:"inherit",cwd:root,env:{...process.env,DOCKER_HOST:dockerHost}});
+run("docker",["exec",state.agentContainer,"sh","-c","printf '#!/bin/sh\nexec /usr/local/bin/node /workspace/runtime/dist/agent/main.js \"$@\"\n' > /usr/local/bin/lightmoni-agent && chmod 0755 /usr/local/bin/lightmoni-agent && chown root:root /usr/local/bin/lightmoni-agent"]);
+const port=await new Promise(r=>{const s=createServer();s.listen(0,"127.0.0.1",()=>{const p=s.address().port;s.close(()=>r(p));});});
+const account=await fetch(state.centerURL+"/api/v1/machines/"+state.machineID+"/accounts",{method:"POST",headers:{"content-type":"application/json",cookie:secrets.cookie,origin:state.externalURL},body:JSON.stringify({username:"root",make_default:true})});
+const accountText=await account.text();if(!account.ok)throw Error(`account ${account.status} ${accountText}`);const accountData=JSON.parse(accountText);
+const password=randomBytes(24).toString("base64url"),credential=await fetch(`${state.centerURL}/api/v1/machines/${state.machineID}/accounts/${accountData.id}/credentials`,{method:"POST",headers:{"content-type":"application/json",cookie:secrets.cookie,origin:state.externalURL},body:JSON.stringify({method:"password",secret:password,confirm_managed:true})});
+const credentialText=await credential.text();if(!credential.ok)throw Error(`credential ${credential.status} ${credentialText}`);secrets.sshPassword=password;writeFileSync(secretsFile,JSON.stringify(secrets,null,2),{mode:0o600});
+const log=openSync(join(work,"ssh.log"),"a"),child=spawn(process.execPath,["scripts/e2e/core-mcp-ssh-server.mjs"],{cwd:root,detached:true,env:{...process.env,CORE_E2E_SSH_PORT:String(port),CORE_E2E_SSH_PASSWORD:password,CORE_E2E_AGENT_CONTAINER:state.agentContainer,CORE_E2E_DOCKER_HOST:dockerHost},stdio:["ignore",log,log]});child.unref();
+state.sshPort=port;state.sshPID=child.pid;state.sshAccountID=accountData.id;state.sshCredentialID=JSON.parse(credentialText).id;writeFileSync(stateFile,JSON.stringify(state,null,2),{mode:0o600});run(process.execPath,["scripts/e2e/core-mcp-native-setup.mjs","finish-setup"]);const updated=await fetch(state.centerURL+"/api/v1/machines/"+state.machineID,{method:"PUT",headers:{"content-type":"application/json",cookie:secrets.cookie,origin:state.externalURL},body:JSON.stringify({name:"Core E2E isolated host",address:"127.0.0.1",port,connection_method:"direct_ssh"})});if(!updated.ok)throw Error(await updated.text());writeFileSync(stateFile,JSON.stringify(state,null,2),{mode:0o600});
+await new Promise(r=>setTimeout(r,500));console.log(JSON.stringify({ssh_port:port,account_id:state.sshAccountID,credential_id:state.sshCredentialID}));
