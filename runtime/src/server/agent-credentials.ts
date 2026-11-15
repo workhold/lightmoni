@@ -439,6 +439,9 @@ export function registerAgentCredentials(
       // Concurrent tokens cannot activate different identities on one host.
       const claimed = db.run("UPDATE managed_machines SET agent_id=?,agent_last_seen='',observed_hostname='' WHERE id=? AND agent_id=?", row.agent_id, row.machine_id, row.replaces_agent_id);
       if (!claimed.changes) fail(409, "registered_host_required: 安装目标身份已变化");
+      // A successful activation supersedes only other active identities on the
+      // same host. Pending/issued records keep their original protocol semantics.
+      db.run("UPDATE agent_enrollments SET status='cancelled' WHERE machine_id=? AND status='active' AND id<>?", row.machine_id, row.id);
       runtimeActivation=activationHook?.({machine_id:row.machine_id,agent_id:row.agent_id,created_by:row.created_by,enrollment_id:row.id});
       // Registration subsequently records this Agent's observed host metadata;
       // the replaced Agent's hostname must not cross the activation boundary.

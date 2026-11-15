@@ -1,4 +1,5 @@
 export type AgentRuntimeMode = "root" | "user";
+export const defaultAgentRuntimeMode = (machine: {agent_runtime_mode?: AgentRuntimeMode | null}): AgentRuntimeMode => machine.agent_runtime_mode ?? "root";
 export type AgentRuntimeObservation = {
   mode: AgentRuntimeMode;
   permission_generation: number;

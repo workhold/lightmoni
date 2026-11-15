@@ -205,6 +205,7 @@ test("an interrupted activated install requires explicit resolution before a fre
 
 test("retired Agent replacement retains host ID and plan snapshots reject a changed prior identity", async t => {
   const f = await fixture(t), host = await f.host(), old = await f.enroll(host.id); assert.equal((await f.register(old)).status, 200);
+  const otherHost = await f.host("other-host"), otherAgent = await f.enroll(otherHost.id);
   assert.equal((await f.request(`/agents/${old.agentID}/credentials/revoke`, "POST", {})).status, 200);
   // A verified successful uninstall is historical evidence; a fresh preflight
   // must still prove that retained files were reviewed and the install is absent.
@@ -216,7 +217,10 @@ test("retired Agent replacement retains host ID and plan snapshots reject a chan
   assert.equal((await f.request(`/machines/${host.id}/deployments/${plan.data.id}/apply`, "POST", { confirm: true })).status, 409);
   f.db.run("UPDATE managed_machines SET agent_id=? WHERE id=?", old.agentID, host.id);
   const replacement = await f.enroll(host.id); assert.equal((await f.register(replacement)).status, 200);
-  assert.equal(f.machines.get(host.id).agent_id, replacement.agentID); assert.equal(f.machines.list().length, 1);
+  assert.equal(f.db.get<any>("SELECT status FROM agent_enrollments WHERE agent_id=?", old.agentID)!.status, "cancelled");
+  assert.equal(f.db.get<any>("SELECT status FROM agent_enrollments WHERE agent_id=?", replacement.agentID)!.status, "active");
+  assert.equal(f.db.get<any>("SELECT status FROM agent_enrollments WHERE agent_id=?", otherAgent.agentID)!.status, "active");
+  assert.equal(f.machines.get(host.id).agent_id, replacement.agentID); assert.equal(f.machines.list().length, 2);
   assert.equal(f.machines.get(host.id).agent_status, "online"); assert.equal(f.machines.get(host.id).last_uninstallation_status, "");
   assert.equal((await f.register(old)).status, 401); assert.equal(f.db.get<any>("SELECT count(*) n FROM machine_uninstallations WHERE machine_id=?", host.id)!.n, 1);
   assert.equal((await f.request(`/machines/${host.id}/accounts/${host.accountID}/credentials/${credential.data.credential_id}`, "DELETE")).status, 200);

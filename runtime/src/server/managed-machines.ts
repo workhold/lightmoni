@@ -18,7 +18,7 @@ import { createAgentUpdatesSchema, registerMachineAgentUpdates, type AgentUpdate
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import type { PrivilegedExecutorStore } from "./privileged-executors.js";
 import type { ExecutionGrantRegistry } from "../capabilities/execution-grants.js";
-import { createAgentRuntimeSchema, recordAgentRuntime, registerMachineAgentRuntime, validAgentRuntimeMode, validAgentRuntimeObservation } from './machine-agent-runtime.js';
+import { createAgentRuntimeSchema, preferredAgentRuntimeMode, recordAgentRuntime, registerMachineAgentRuntime, validAgentRuntimeMode, validAgentRuntimeObservation } from './machine-agent-runtime.js';
 import { assertNoPendingAgentRuntime } from './machine-agent-runtime-guard.js';
 import { PRIVILEGED_CAPABILITIES } from '../shared/privileged-executor.js';
 import { createInstallationRecoverySchema, registerInstallationRecovery } from "./machine-installation-recovery.js";
@@ -161,6 +161,7 @@ export interface MachineSummary {
   capabilities: { terminal: MachineCapability; ssh_check: MachineCapability; deploy_agent: MachineCapability; uninstall_agent: MachineCapability; recovery_uninstall_agent: MachineCapability; update_agent: MachineCapability; rollback_agent: MachineCapability };
   agent_release: any;
   agent_update: any;
+  agent_runtime_mode?: 'root'|'user';
   agent_operation: MachineAgentOperation | null;
   last_deployment_status: DeploymentStatus | "";
   last_uninstallation_status: UninstallationStatus | "";
@@ -449,6 +450,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       ssh_recovery_available: value.connection_method === "direct_ssh" && activeSSH > 0,
       capabilities: { terminal: pendingUpdate ? { available: false, reason: "agent_update_pending" } : capability(), ssh_check: capability(), deploy_agent: deployCapability, uninstall_agent: uninstallCapability, recovery_uninstall_agent: { ...uninstallCapability }, update_agent: updateCapability, rollback_agent: { ...updateCapability } },
       ...agentUpdates.machineState(value.id, value.agent_id),
+      agent_runtime_mode: preferredAgentRuntimeMode(db, value.id),
       agent_operation: agentOperation(value.id),
       last_deployment_status: value.last_deployment_status || "", last_uninstallation_status: value.last_uninstallation_status || "", updated_at: value.updated_at, created_at: value.created_at,
     };
@@ -874,7 +876,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   registerMachineStateRecovery(deps, { get, idle, revision: targetRevision, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe });
   const createPlan = (machineID: string, input: InstallPlanInput, actorID: string) => {
     parameters(record(input), ["check_id", "credential_id", "version", "arch", "initial_label_id", "runtime_mode"]);
-    const runtimeMode=input.runtime_mode??'root';if(!validAgentRuntimeMode(runtimeMode))fail(400,'invalid_agent_runtime_mode');
+    const runtimeMode=input.runtime_mode??preferredAgentRuntimeMode(db,machineID)??'root';if(!validAgentRuntimeMode(runtimeMode))fail(400,'invalid_agent_runtime_mode');
     idle(machineID);
     assertNoPendingMachineInstallation(db,machineID);
     assertNoPendingAgentUpdate(db, "", machineID);
