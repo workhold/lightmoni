@@ -1,0 +1,20 @@
+{
+  "image": "docker.heyphp.com/lightmoni/lightmoni:20261103-0b45683",
+  "revision": "0b4568316cb99f66a3c7e50d8284bf53901c7a6a",
+  "digest": "sha256:1bb3ec7afb825ef7714f564ec6c90230b4f174493f90790cbf38a6dd3adb936c",
+  "center_id": "8598887e7d9ada3ec9f9dd17a3480d082a7876c97bd4bfd9daa2edbd8a24fefe",
+  "health": "ok",
+  "root_jobs_idle_before_switch": true,
+  "other_containers_unchanged": 16,
+  "compose_only_image_changed": true,
+  "business_counts": {
+    "users": 1,
+    "ops_platform_resources": 14,
+    "managed_machines": 1,
+    "agents": 1,
+    "connection_credentials": 1
+  },
+  "managed_recovery": "awaiting fresh signed inspections and DNS/HTTPS readback",
+  "backup": "/root/lightmoni-upgrades/20261103-autodeploy-0b45683",
+  "rollback_image": "docker.heyphp.com/lightmoni/lightmoni:20261103-1bfd49c"
+}

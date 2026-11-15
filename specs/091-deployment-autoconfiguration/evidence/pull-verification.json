@@ -1,0 +1,12 @@
+[
+  {
+    "platform": "linux/amd64",
+    "remote_manifest": "sha256:ad4772ba62d06d797a40eec41246f9b5709ab71470d874c1c2fa7258109f9adf",
+    "exact_tested_config_and_rootfs": true
+  },
+  {
+    "platform": "linux/arm64",
+    "remote_manifest": "sha256:68a7cc8e556299b3abbc7e7e66d98e5452341923c2d5ea11f97a7622e04e4f71",
+    "exact_tested_config_and_rootfs": true
+  }
+]
