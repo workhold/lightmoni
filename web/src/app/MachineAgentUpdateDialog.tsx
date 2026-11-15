@@ -2,7 +2,7 @@ import SSHAccountsDialog from './SSHAccountsDialog';
 import InstallationAccountRecovery,{installationRecovery,missingInstallationAccount,type InstallationRecovery} from './InstallationAccountRecovery';
 import {type SSHAccount} from './machine-credentials';
 import {useEffect,useRef,useState} from 'react';
-import {Alert,Button,Checkbox,Descriptions,Modal,Select,Space,Table,Tag,Typography} from '../shared/ui';
+import {Alert,Button,Checkbox,Descriptions,Modal,Select,Space,Spin,Table,Tag,Typography} from '../shared/ui';
 import {api,ApiError} from '../shared/api';
 import {sshEndpoint} from './host-request-guard';
 import {useI18n} from '../shared/i18n';
@@ -11,7 +11,7 @@ import {agentOperationReadSignal} from './agent-operation-progress';
 import {installedRelease,releaseIdentity,shortIdentity,updateIsActive,updateMessageText,updatePath,updatePlanExpired,updateStatusColor,updateStatusText,type AgentRelease,type AgentUpdate,type AgentUpdateCredential} from './agent-update-model';
 
 type Machine={id:string;name:string;arch?:string;agent_id?:string;default_account_id?:string;accounts?:SSHAccount[]};
-type Props={machine:Machine;credentials:AgentUpdateCredential[];existing?:AgentUpdate;initialAction?:'upgrade'|'rollback';directUpgrade?:boolean;onClose:()=>void;onRefresh:()=>Promise<void>};
+type Props={machine:Machine;credentials:AgentUpdateCredential[];existing?:AgentUpdate;initialAction?:'upgrade'|'rollback';directUpgrade?:boolean;onClose:()=>void;onRefresh:()=>Promise<void>;onStartPendingChange?:(machineID:string,pending:boolean,uncertain?:boolean)=>void};
 
 async function readUpdate<T>(path:string,parent:AbortSignal):Promise<T>{
  const request=agentOperationReadSignal(parent);
@@ -23,6 +23,7 @@ async function readUpdate<T>(path:string,parent:AbortSignal):Promise<T>{
 export function AgentUpdatePlanSummary({record}:{record:AgentUpdate}){
  const {t,language}=useI18n(),plan=record.plan,current=installedRelease(plan?.current);
  if(!plan)return null;
+ const awaitingApproval=record.status==='awaiting_approval';
  const stepText=(value:string)=>({
   '核对主机、Agent 身份与当前程序指纹':t('核对主机、Agent 身份与当前程序指纹','Verify the host, Agent identity, and current runtime fingerprint'),
   '下载并校验审批固定的维护器和发行包':t('下载并校验审批固定的维护器和发行包','Download and verify the maintainer and release pinned by this plan'),
@@ -40,24 +41,37 @@ export function AgentUpdatePlanSummary({record}:{record:AgentUpdate}){
   '结果未知时只读核对；确认超时仅回退到已验证的同账户程序，不自动重试。':t('结果未知时先只读核对；正常运行的维护进程会在确认超时后尝试恢复已验证的同账户程序，进程中断需审阅恢复，不自动重试。','Verify uncertain outcomes read-only first. A running maintainer attempts to restore the verified runtime under the same account after confirmation times out. An interrupted process requires reviewed recovery; maintenance is not retried automatically.'),
  }[value]||value);
  const identity=(value?:string)=>value?<Typography.Text code copyable={{text:value}} className="lm-machine-path">{value}</Typography.Text>:'—';
- return <>
+ return <section className="lm-agent-update-plan" aria-label={t('Agent 更新计划摘要','Agent update plan summary')}>
   <Descriptions size="small" column={{xs:1,sm:2}} items={[
    {key:'action',label:t('操作','Action'),span:2,children:record.action==='rollback'?t('回退到保留的上一发行','Roll back to the retained previous release'):t('升级到指定发行','Upgrade to a selected release')},
-   {key:'host',label:t('目标主机','Target host'),span:2,children:`${plan.machine.name} · ${sshEndpoint(plan.machine.address,plan.machine.port,plan.ssh_account.username)}`},
-   {key:'agent',label:t('Agent 身份','Agent identity'),span:2,children:identity(record.agent_id||plan.current?.agent_id)},
+   {key:'host',label:t('目标主机','Target host'),span:2,children:plan.machine.name},
    {key:'current',label:t('当前发行','Current release'),children:`${current?.version||t('未知','Unknown')} · ${shortIdentity(current?.source_revision)}`},
    {key:'target',label:t('目标发行','Target release'),children:`${plan.target?.version||'—'} · ${shortIdentity(plan.target?.source_revision)} · ${plan.target?.arch||'—'}`},
-   {key:'current-build',label:t('当前构建','Current build'),children:current?.build_id||'—'},
-   {key:'target-build',label:t('目标构建','Target build'),children:plan.target?.build_id||'—'},
-   {key:'current-sha',label:t('当前包 SHA256','Current artifact SHA256'),span:2,children:identity(releaseIdentity(current))},
-   {key:'target-sha',label:t('目标包 SHA256','Target artifact SHA256'),span:2,children:identity(releaseIdentity(plan.target))},
-   {key:'fingerprint',label:t('已核对的安装指纹','Verified installation fingerprint'),span:2,children:identity(plan.current?.fingerprint)},
-   {key:'credential',label:t('SSH 凭据 ID','SSH credential ID'),children:plan.credential?.id||'—'},
-   {key:'expiry',label:t('计划有效期','Plan expires at'),children:new Date(plan.expires_at).toLocaleString(language)},
+   ...(awaitingApproval?[
+    {key:'endpoint',label:t('SSH 目标','SSH target'),span:2,children:sshEndpoint(plan.machine.address,plan.machine.port,plan.ssh_account.username)},
+    {key:'target-sha',label:t('目标包 SHA256','Target artifact SHA256'),span:2,children:identity(releaseIdentity(plan.target))},
+    {key:'fingerprint',label:t('已核对的安装指纹','Verified installation fingerprint'),span:2,children:identity(plan.current?.fingerprint)},
+   ]:[]),
+   ...(record.status==='awaiting_approval'?[{key:'expiry',label:t('计划有效期','Plan expires at'),span:2,children:new Date(plan.expires_at).toLocaleString(language)}]:[]),
   ]}/>
-  {!!plan.steps?.length&&<ol className="lm-machine-uninstall-steps">{plan.steps.map((step,index)=><li key={index}>{stepText(step)}</li>)}</ol>}
   {!!plan.warnings?.length&&<Alert showIcon type="info" className="lm-machine-form-notice" title={t('执行影响','Execution impact')} description={<ul className="lm-machine-uninstall-steps">{plan.warnings.map((warning,index)=><li key={index}>{stepText(warning)}</li>)}</ul>}/>}
- </>;
+  {awaitingApproval&&!!plan.steps?.length&&<div className="lm-agent-update-approval-steps"><Typography.Text strong>{t('执行步骤','Execution steps')}</Typography.Text><ol className="lm-machine-uninstall-steps">{plan.steps.map((step,index)=><li key={index}>{stepText(step)}</li>)}</ol></div>}
+  <details className="lm-agent-update-technical">
+   <summary>{t('技术详情与执行步骤','Technical details and execution steps')}</summary>
+   <Descriptions size="small" column={{xs:1,sm:2}} items={[
+    ...(!awaitingApproval?[{key:'endpoint',label:t('SSH 目标','SSH target'),span:2,children:sshEndpoint(plan.machine.address,plan.machine.port,plan.ssh_account.username)}]:[]),
+    {key:'agent',label:t('Agent 身份','Agent identity'),span:2,children:identity(record.agent_id||plan.current?.agent_id)},
+    {key:'current-build',label:t('当前构建','Current build'),children:current?.build_id||'—'},
+    {key:'target-build',label:t('目标构建','Target build'),children:plan.target?.build_id||'—'},
+    {key:'current-sha',label:t('当前包 SHA256','Current artifact SHA256'),span:2,children:identity(releaseIdentity(current))},
+    ...(!awaitingApproval?[{key:'target-sha',label:t('目标包 SHA256','Target artifact SHA256'),span:2,children:identity(releaseIdentity(plan.target))},{key:'fingerprint',label:t('已核对的安装指纹','Verified installation fingerprint'),span:2,children:identity(plan.current?.fingerprint)}]:[]),
+    {key:'credential',label:t('SSH 凭据 ID','SSH credential ID'),children:plan.credential?.id||'—'},
+    {key:'expiry',label:t('计划有效期','Plan expires at'),children:new Date(plan.expires_at).toLocaleString(language)},
+    {key:'operation',label:t('操作 ID','Operation ID'),span:2,children:identity(record.id)},
+   ]}/>
+   {!awaitingApproval&&!!plan.steps?.length&&<><Typography.Text strong>{t('执行步骤','Execution steps')}</Typography.Text><ol className="lm-machine-uninstall-steps">{plan.steps.map((step,index)=><li key={index}>{stepText(step)}</li>)}</ol></>}
+  </details>
+ </section>;
 }
 
 export function AgentUpdateHistory({machineID,onOpen}:{machineID:string;onOpen:(record:AgentUpdate)=>void}){
@@ -74,7 +88,7 @@ export function AgentUpdateHistory({machineID,onOpen}:{machineID:string;onOpen:(
  ]}/></div>;
 }
 
-export default function MachineAgentUpdateDialog({machine,credentials,existing,initialAction='upgrade',directUpgrade=false,onClose,onRefresh}:Props){
+export default function MachineAgentUpdateDialog({machine,credentials,existing,initialAction='upgrade',directUpgrade=false,onClose,onRefresh,onStartPendingChange}:Props){
  const {t,language}=useI18n(),[record,setRecord]=useState(existing),[action,setAction]=useState<'upgrade'|'rollback'>(existing?.action??initialAction);
  const [releases,setReleases]=useState<AgentRelease[]>([]),[target,setTarget]=useState<string>(),[credential,setCredential]=useState<string|undefined>(()=>defaultMachineCredential(credentials,machine,reusableMachineCredential));
  const [busy,setBusy]=useState(''),[refreshing,setRefreshing]=useState(false),[catalogBusy,setCatalogBusy]=useState(false),[catalogAttempt,setCatalogAttempt]=useState(0),[error,setError]=useState(''),[reviewed,setReviewed]=useState(false),[refreshNeeded,setRefreshNeeded]=useState(false),[planUncertain,setPlanUncertain]=useState(false),[recoveryUncertain,setRecoveryUncertain]=useState(false),[recoveryReview,setRecoveryReview]=useState(''),[accountRecovery,setAccountRecovery]=useState<InstallationRecovery>(),[now,setNow]=useState(Date.now());
@@ -85,7 +99,7 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
  const options=releases.filter(release=>!machine.arch||release.arch===machine.arch);
  const err=(value:unknown)=>value instanceof Error?updateMessageText(value.message,t):t('操作失败','Operation failed');
  // Parent projections refresh independently; a stuck parent GET must not trap this dialog.
- const refreshParent=()=>{void onRefresh().catch(e=>{if(mounted.current)setError(previous=>[previous,t('主机列表刷新失败，已保留本窗口记录：','The host list could not refresh; this dialog retains its record: ')+err(e)].filter(Boolean).join(' '))})};
+ const refreshParent=async()=>{try{await onRefresh();return true}catch(e){if(mounted.current)setError(previous=>[previous,t('主机列表刷新失败，已保留本窗口记录：','The host list could not refresh; this dialog retains its record: ')+err(e)].filter(Boolean).join(' '));return false}};
  const currentPlanExpired=updatePlanExpired(record,now);
  const recoveryKey=record?.status==='unknown'&&record.recovery_revision&&credentialReady?`${record.id}:${record.recovery_revision}:${credential}`:'';
  const recoveryReviewed=!!recoveryKey&&recoveryReview===recoveryKey;
@@ -116,18 +130,29 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
   if(!directUpgrade||existing||directStarted.current)return;
   directStarted.current=true;
   if(!begin('start'))return;
+  onStartPendingChange?.(machine.id,true);
   void (async()=>{
+   let uncertain=false;
    try{
     const next=exact(await api<AgentUpdate>(`${updatePath(machine.id)}/start`,{method:'POST',body:'{}'}));
-    if(mounted.current){recordRef.current=next;setRecord(next);refreshParent()}
+    if(mounted.current){recordRef.current=next;setRecord(next)}
    }catch(e){
+    let historyVerified=false;
     try{
-     const history=await readUpdate<AgentUpdate[]>(updatePath(machine.id),lifetime.current.signal);
+     // This read must survive closing the dialog while the original POST settles.
+     const history=await readUpdate<AgentUpdate[]>(updatePath(machine.id),new AbortController().signal);
+     if(history.some(item=>item.machine_id!==machine.id))throw Error('agent_update_history_host_mismatch');
      const current=history.find(item=>item.action==='upgrade'&&['awaiting_approval','running','verifying','unknown'].includes(item.status));
-     if(current&&mounted.current){const next=exact(current);recordRef.current=next;setRecord(next);refreshParent();return}
+     if(current){const next=exact(current);if(mounted.current){recordRef.current=next;setRecord(next)}return}
+     historyVerified=true;
     }catch{/* Keep the original error and avoid a second write. */}
-    if(mounted.current){setError(err(e));if(!(e instanceof ApiError&&e.status<500))setPlanUncertain(true)}
-   }finally{finish()}
+    uncertain=!(e instanceof ApiError&&e.status<500&&historyVerified);
+    if(mounted.current){setError(err(e));if(uncertain)setPlanUncertain(true)}
+   }finally{
+    // Keep the parent host row locked until its persisted state has been read,
+    // including when the POST failed or this dialog has already closed.
+    try{if(!await refreshParent())uncertain=true}finally{try{onStartPendingChange?.(machine.id,false,uncertain)}finally{finish()}}
+   }
   })();
  },[directUpgrade,machine.id]);
  const rejectMissingCredential=()=>{if(credential&&credentials.some(key=>key.id===credential&&reusableMachineCredential(key)))return false;setCredential(undefined);setError(t('请选择有效 SSH 凭据；到期后可添加新凭据并重新检查权限。','Select an active SSH credential. If it expired, add a new credential and check privileges again.'));return true};
@@ -156,17 +181,19 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
  };
  const changing=!!busy||refreshing;
  const stageText=(stage:string)=>({ready:t('已核对发行与主机','Release and host verified'),starting:t('正在启动维护','Starting maintenance'),accepted:t('维护器已接收','Maintainer accepted'),preparing:t('正在准备发行包','Preparing release'),switching:t('正在切换程序','Switching runtime'),waiting_confirmation:t('等待新进程健康确认','Waiting for health confirmation'),succeeded:t('升级成功','Upgrade succeeded'),rolled_back:t('已恢复原程序','Previous runtime restored'),failed:t('升级失败','Upgrade failed'),unknown:t('结果待核对','Outcome needs verification'),cancelled:t('已取消','Cancelled'),rollback_failed:t('自动恢复未确认','Automatic recovery unconfirmed')}[stage]||stage);
+ const latestEvent=record?.events?.at(-1);
+ const phaseTitle=record?.status==='awaiting_approval'?t('审阅已有计划','Review existing plan'):updateIsActive(record?.status)?t('执行进度','Execution progress'):t('执行结果','Execution result');
  const credentialSelect=<Select aria-label={t('更新 SSH 凭据','Update SSH credential')} value={credential} style={{width:'100%'}} placeholder={t('请选择有效 SSH 凭据','Select an active SSH credential')} disabled={changing} options={keys.map(key=>({value:key.id,label:`${key.username} · ${key.name||(key.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key'))} · ${key.secret_fingerprint||key.id} · ${key.retention==='permanent'?t('永久','Permanent'):new Date(key.expires_at).toLocaleString(language)}`}))} onChange={id=>{setCredential(id);setRecoveryReview('');setAccountRecovery(undefined)}}/>;
  const accountHelp=!keys.length||accountRecovery?<InstallationAccountRecovery recovery={accountRecovery||missingInstallationAccount(credentials)} busy={changing||planUncertain} onAddAccount={()=>setAccountEditor('add')} onManageAccounts={()=>setAccountEditor('manage')}/>:<Button className="lm-machine-form-notice" disabled={changing||planUncertain} onClick={()=>setAccountEditor('manage')}>{t('管理账号与凭据','Manage accounts and credentials')}</Button>;
  return <><Modal open className="lm-agent-update-dialog" style={{top:24}} styles={{body:{maxHeight:'calc(100dvh - 220px)',overflowY:'auto',paddingRight:8}}} title={t(`Agent 版本管理 · ${machine.name}`,`Agent releases · ${machine.name}`)} width={840} onCancel={()=>{if(!busy)onClose()}} closable={!busy} maskClosable={false} destroyOnHidden footer={<Space wrap>
    {!record&&!directUpgrade&&<Button type="primary" loading={busy==='plan'} disabled={changing||!credentialReady||action==='upgrade'&&!target||catalogBusy||planUncertain} onClick={()=>void plan()}>{t('检查并生成计划','Check and create plan')}</Button>}
-  {record?.status==='awaiting_approval'&&!record.rollout_id&&<><Button aria-label={t('执行已审阅计划','Execute reviewed plan')} danger type="primary" loading={busy==='apply'} disabled={changing||!reviewed||currentPlanExpired||refreshNeeded||appliedID.current===record.id} onClick={()=>void mutate('apply')}>{t('执行已审阅计划','Execute reviewed plan')}</Button><Button disabled={changing} onClick={()=>void mutate('cancel')}>{t('取消计划','Cancel plan')}</Button></>}
+  {record?.status==='awaiting_approval'&&!record.rollout_id&&<><Button aria-label={t('执行已审阅计划','Execute reviewed plan')} danger type="primary" loading={busy==='apply'} disabled={changing||!reviewed||currentPlanExpired||refreshNeeded||appliedID.current===record.id} onClick={()=>void mutate('apply')}>{t('执行已审阅计划','Execute reviewed plan')}</Button><Button loading={busy==='cancel'} disabled={changing} onClick={()=>void mutate('cancel')}>{t('取消计划','Cancel plan')}</Button></>}
   {record?.status==='unknown'&&<><Button type="primary" loading={busy==='reconcile'} disabled={changing||!credentialReady} onClick={()=>void mutate('reconcile')}>{t('只读核对结果','Verify outcome (read-only)')}</Button><Button danger loading={busy==='recover'} disabled={changing||!credentialReady||!recoveryReviewed||refreshNeeded||recoveryNeedsVerification} onClick={()=>void mutate('recover')}>{t('恢复中断维护','Recover interrupted maintenance')}</Button></>}
   {record&&<Button loading={refreshing} disabled={changing} onClick={()=>void refresh()}>{t('刷新状态','Refresh status')}</Button>}
   <Button disabled={!!busy&&busy!=='start'} onClick={onClose}>{t('关闭','Close')}</Button>
  </Space>}>
   {error&&<Alert role="alert" type="error" showIcon title={error} className="lm-machine-form-notice"/>}
-  {!record&&directUpgrade&&<Alert role="status" showIcon type="info" title={busy==='start'?t('正在检查主机并启动升级…','Checking the host and starting the upgrade…'):t('升级尚未开始','The upgrade has not started')} description={planUncertain?t('请求结果未确认；请从更新历史查看原操作，避免重复升级。','The request outcome is uncertain. Check update history before starting another upgrade.'):undefined}/>}
+  {!record&&directUpgrade&&<Alert role="status" showIcon={busy!=='start'} type="info" title={busy==='start'?<Space><Spin size="small"/>{t('正在检查主机并启动升级…','Checking the host and starting the upgrade…')}</Space>:t('升级尚未开始','The upgrade has not started')} description={planUncertain?t('请求结果未确认；请从更新历史查看原操作，避免重复升级。','The request outcome is uncertain. Check update history before starting another upgrade.'):undefined}/>}
   {!record&&!directUpgrade&&<>
    <p>{t('通过 SSH 执行固定维护步骤，保留 Agent 身份、配置和缓存。目标包使用 SHA256 固定。维护进程正常运行时，健康确认超时会尝试回退；若进程中断，请先只读核对，再审阅恢复。','Run fixed maintenance over SSH while retaining the Agent identity, configuration, and cache. The target artifact is pinned by SHA256. A running maintainer attempts rollback if health confirmation times out. If it is interrupted, verify the outcome read-only before reviewing recovery.')}</p>
    <Space wrap className="lm-machine-form-notice"><Typography.Text>{t('更新方式','Action')}</Typography.Text><Select aria-label={t('Agent 更新方式','Agent update action')} value={action} disabled={changing} onChange={value=>{setAction(value);setReviewed(false)}} options={[{value:'upgrade',label:t('升级到指定发行','Upgrade to a selected release')},{value:'rollback',label:t('回退到保留的上一发行','Roll back to the retained previous release')}]}/></Space>
@@ -176,11 +203,16 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
    {planUncertain&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('计划创建结果未确认','Plan creation was not confirmed')} description={t('请关闭窗口并从主机的更新历史核对已保存计划；不要重复创建。','Close this dialog and check saved plans in the host update history before creating another plan.')}/>}
   </>}
   {record&&<>
+   <h3 className="lm-agent-update-phase">{phaseTitle}</h3>
    <Alert className="lm-machine-form-notice" showIcon type={record.status==='succeeded'?'success':record.status==='failed'?'error':record.status==='unknown'||record.status==='rolled_back'?'warning':'info'} title={updateStatusText(record.status,t)} description={(record.error?updateMessageText(record.error,t):undefined)||(record.status==='unknown'?t('维护结果待核对；进程已停止时可审阅恢复。只读核对不会执行恢复，也不会重新派发更新。','The maintenance outcome needs verification. Review recovery once its process has stopped. Read-only verification neither performs recovery nor dispatches another update.'):record.status==='rolled_back'?t('已保留原身份并恢复原程序。请查看本次记录后再生成新计划。','The previous runtime was restored with its identity retained. Review this record before creating another plan.'):undefined)}/>
-   {directUpgrade?<Typography.Paragraph>{t('目标发行：','Target release: ')}{record.plan?.target?.version||'—'} · {shortIdentity(record.plan?.target?.source_revision)}</Typography.Paragraph>:<AgentUpdatePlanSummary record={record}/>}
-   <div className="lm-machine-form-notice"><Typography.Text strong>{t('升级日志','Upgrade log')}</Typography.Text>{record.events?.length?<ol className="lm-machine-uninstall-steps" aria-live="polite">{record.events.map((item,index)=><li key={`${item.at}-${index}`}><time dateTime={item.at}>{new Date(item.at).toLocaleString(language)}</time> · {stageText(item.stage)}</li>)}</ol>:<Typography.Paragraph type="secondary">{t('等待维护状态','Waiting for maintenance status')}</Typography.Paragraph>}</div>
+   <AgentUpdatePlanSummary record={record}/>
+   {(latestEvent||updateIsActive(record.status))&&<div className="lm-agent-update-stage lm-machine-form-notice">
+    <Typography.Text strong>{updateIsActive(record.status)?t('当前阶段','Current stage'):t('最后记录阶段','Last recorded stage')}</Typography.Text>
+    <div role="status" aria-live="polite">{latestEvent?<><span>{stageText(latestEvent.stage)}</span><time dateTime={latestEvent.at}>{new Date(latestEvent.at).toLocaleString(language)}</time></>:<Typography.Text type="secondary">{t('等待服务端阶段记录','Waiting for a stage recorded by the server')}</Typography.Text>}</div>
+   </div>}
+   {!!record.events?.length&&<div className="lm-machine-form-notice"><Typography.Text strong>{t('升级日志','Upgrade log')}</Typography.Text><details className="lm-agent-update-technical"><summary>{t('查看完整阶段日志','View full stage log')}</summary><ol className="lm-machine-uninstall-steps">{record.events.map((item,index)=><li key={`${item.at}-${index}`}><time dateTime={item.at}>{new Date(item.at).toLocaleString(language)}</time> · {stageText(item.stage)}</li>)}</ol></details></div>}
+   {updateIsActive(record.status)&&<Typography.Paragraph type="secondary">{t('关闭窗口不会停止升级；可从主机行重新打开原记录查看最新状态。','Closing this window does not stop the upgrade. Reopen the original record from the host row to see its latest state.')}</Typography.Paragraph>}
    {record.rollout_id&&<Alert className="lm-machine-form-notice" showIcon type="info" title={t('此操作属于升级批次','This operation belongs to an upgrade rollout')} description={<Typography.Link href={`/machines?agent_rollout=${encodeURIComponent(record.rollout_id)}`}>{t('打开批次审阅和控制后续主机','Open the rollout to review and control subsequent hosts')}</Typography.Link>}/>}
-   <Typography.Paragraph type="secondary">{t('操作 ID：','Operation ID: ')}<Typography.Text code copyable>{record.id}</Typography.Text></Typography.Paragraph>
    {record.status==='awaiting_approval'&&!record.rollout_id&&<>{currentPlanExpired&&<Alert className="lm-machine-form-notice" type="warning" showIcon title={t('计划已过期，请取消后重新检查','This plan expired. Cancel it and run a new check')}/>}<Checkbox checked={reviewed} disabled={changing||currentPlanExpired} onChange={event=>setReviewed(event.target.checked)}>{t('我已审阅主机、当前/目标发行、步骤和影响','I have reviewed the host, current/target releases, steps, and impact')}</Checkbox>{appliedID.current===record.id&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('已提交执行请求，请只读核对原记录，不会重复提交。','An execution request was sent. Read the original record; it will not be submitted again.')}/>}</>}
    {record.status==='unknown'&&<div className="lm-machine-form-notice">
     <Typography.Paragraph>{t('核对与恢复使用的 SSH 凭据','SSH credential for verification and recovery')}</Typography.Paragraph>{credentialSelect}{accountHelp}
@@ -191,5 +223,5 @@ export default function MachineAgentUpdateDialog({machine,credentials,existing,i
    </div>}
    {refreshNeeded&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('最后状态已保留，请重新读取原记录或关闭窗口。','The last state is retained. Read the original record again or close this dialog.')}/>}
   </>}
- </Modal>{accountEditor&&<SSHAccountsDialog machineID={machine.id} initialAction={accountEditor} onClose={()=>setAccountEditor(undefined)} onChanged={async()=>refreshParent()} onVerified={result=>{refreshParent();setCredential(result.credential_id);setRecoveryReview('');setAccountRecovery(undefined);setAccountEditor(undefined);setError('')}}/>}</>;
+ </Modal>{accountEditor&&<SSHAccountsDialog machineID={machine.id} initialAction={accountEditor} onClose={()=>setAccountEditor(undefined)} onChanged={async()=>{await refreshParent()}} onVerified={result=>{refreshParent();setCredential(result.credential_id);setRecoveryReview('');setAccountRecovery(undefined);setAccountEditor(undefined);setError('')}}/>}</>;
 }

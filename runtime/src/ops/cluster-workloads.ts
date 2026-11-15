@@ -332,6 +332,14 @@ export function createClusterWorkloads(
         i.current_run_id,
       )?.state,
     );
+  const unresolvedCurrentRuns = (applicationID: string) => new Set(
+    db.all<{ id: string }>(`SELECT DISTINCT i.current_run_id AS id FROM ops_cluster_instances i
+      JOIN ops_platform_runs run ON run.id=i.current_run_id
+      LEFT JOIN agent_jobs job ON job.id=run.job_id
+      WHERE i.owner_id=? AND i.retired=0 AND run.state='unknown'
+        AND (job.id IS NULL OR job.state!='unknown' OR (${blockingAgentJobSQL(db, 'job')}))`, applicationID)
+      .map((run) => run.id),
+  );
   const availability = createAvailability(db, deps.now, agent, key => machine(key).agent_id);
   const availabilityRows = (owner: string, cid: string) => availability.refresh(desired(store.get(owner, 'application'), cid), rows(owner, false, cid));
   const available = (i: Row) => availabilityRows(i.owner_id, i.cluster_id).find(v => v.id === i.id);
@@ -362,7 +370,8 @@ export function createClusterWorkloads(
     const r = store.get(key),
       instances = rows(key, true),
       summaries: Row[] = [],
-      states = new Map(evaluatedRows(key).map(i => [i.id,i]));
+      states = new Map(evaluatedRows(key).map(i => [i.id,i])),
+      unresolvedRuns = unresolvedCurrentRuns(key);
     const confirmed = (i: Row) => !!states.get(i.id)?.ready || states.get(i.id)?.availability === 'grace' && i.healthy === 1;
     let bytes = 0;
     const recoveryRows=tableExists('reconciliation_resources')?db.all<Row>("SELECT resource_key,agent_id,machine_id,state,code,failures,next_attempt_at FROM reconciliation_resources WHERE provider='deployment.instance' AND owner_id=? AND deleted=0",key):[];
@@ -389,6 +398,7 @@ export function createClusterWorkloads(
           last_seen: i.last_seen,
           health_failures: i.health_failures,
           restart_count: i.restart_count,
+          ...(unresolvedRuns.has(i.current_run_id) ? { unresolved_run_id: i.current_run_id } : {}),
           recovery:recoveryRows.find(v=>v.resource_key===i.id&&v.agent_id===i.agent_id&&v.machine_id===i.machine_id),
           observed: {
             digest: observation.digest ?? "",
@@ -3030,6 +3040,8 @@ export function createClusterWorkloads(
           ? "application_not_deployed_in_cluster"
           : "website_cluster_mismatch",
       );
+    if (r.kind === "application" && ["deploy", "stop", "remove", "reconcile"].includes(action) && unresolvedCurrentRuns(r.id).size)
+      fail(409, "platform_resource_busy");
     if (r.kind === 'website'&&websiteDeleting(store,r.id)&&!['disable','inspect'].includes(action))fail(409,'website_deletion_in_progress');
     if (r.kind === "website"&&!websiteDeleting(store,r.id)) followManagedWebsite(r);
     const selected = input.cluster_id ? [input.cluster_id] : ids;

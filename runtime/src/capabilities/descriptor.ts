@@ -131,7 +131,7 @@ const METADATA: Record<string, Metadata> = {
     targetResolver: input => input?.id ? [{ kind: "execution", id: input.id }] : [],
   },
   lightmoni_telemetry_catalog: {
-    id: "telemetry.catalog", outputSchema: data({ tables: arrayOfRecords, limit: count, truncated: flag }, ["tables", "limit", "truncated"]),
+    id: "telemetry.catalog", outputSchema: data({ tables: arrayOfRecords, limit: count, truncated: flag, byte_limit: count, byte_limited: flag }, ["tables", "limit", "truncated"]),
     risk: "R0", operationKind: "center_read", approvalPolicy: "none", idempotencyPolicy: "none", targetResolver: () => [], roles: ["admin", "member"],
   },
   lightmoni_telemetry_describe: {

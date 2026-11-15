@@ -8,7 +8,8 @@ import { TaskRunStore } from "../src/server/task-center.js";
 import { CapabilityAccess, scopesForUser } from "../src/capabilities/access.js";
 import { CapabilityDispatcher } from "../src/capabilities/index.js";
 import { CAPABILITY_SCOPES, type Principal } from "../src/capabilities/types.js";
-import { TelemetryService, TELEMETRY_SAMPLE_BYTES } from "../src/domains/telemetry.js";
+import { ASSISTANT_TELEMETRY_SAMPLE_BYTES, TelemetryService, TELEMETRY_SAMPLE_BYTES } from "../src/domains/telemetry.js";
+import { ASSISTANT_CATALOG_BYTES } from "../src/assistant/tools.js";
 import { registerAssistant } from "../src/assistant/index.js";
 import type { Dependencies, QueryRequest, QueryResponse, Table, User } from "../src/shared/types.js";
 
@@ -39,6 +40,7 @@ test("catalog, describe and query share telemetry service and require their dist
   try {
     const catalog = await f.invoke("lightmoni_telemetry_catalog", {});
     assert.equal(catalog.data.tables[0].name, "log_app");
+    assert.equal(catalog.data.tables[0].columns[0].name, "body");
     const described = await f.invoke("lightmoni_telemetry_describe", { table: "table-one" });
     assert.equal(described.data.table.services[0], "orders");
     const queried = await f.invoke("lightmoni_telemetry_query", { sql: "SELECT body FROM log_app WHERE $__timeFilter(event_time)", range, interval_ms: 1000, params: { service: {type: "String", value: "orders"} } });
@@ -67,15 +69,55 @@ test("assistant legacy names use the dispatcher without duplicate registration a
     assert.equal(new Set(tools.map(tool => tool.name)).size, tools.length);
     const member = f.access.sessionPrincipal({ id: "member", name: "Member", role: "member" }, "assistant");
     const query = tools.find(tool => tool.name === "run_query")!;
-    const result = await query.execute({ sql: "SELECT body FROM log_app", range, interval_ms: 1000 }, new AbortController().signal,
+    const result = await query.execute({ sql: "SELECT body FROM log_app WHERE $__timeFilter(event_time)", range, interval_ms: 1000 }, new AbortController().signal,
       { id: "member", role: "member" }, { session_id: "member-session" });
     assert.equal(result.sample_limit, 1000);
+    assert.equal(result.sample_byte_limit, ASSISTANT_TELEMETRY_SAMPLE_BYTES);
     assert.equal(f.requests[0].source, "assistant");
     assert.deepEqual(member.scopes, ["telemetry.catalog.read", "telemetry.query", "alerts.read", "alerts.detail.read", "logs.read", "traces.read", "dashboards.read", "dashboards.detail.read", "alerts.incidents.read", "alerts.notifications.read", "alerts.statistics.read"]);
     assert.deepEqual(scopesForUser({ id: "member", name: "Member", role: "member" }), []);
     assert.equal(f.dispatcher.list(member).every(d => d.id.startsWith("telemetry.")), true);
     await assert.rejects(f.dispatcher.invoke(member, "lightmoni_tasks_list", {}, { signal: new AbortController().signal }), /capability_forbidden/);
     assert.ok(f.db.get("SELECT 1 FROM capability_invocations WHERE source='assistant' AND capability='lightmoni_telemetry_query'"));
+  } finally { f.close(); }
+});
+
+test("assistant catalog is compact and byte bounded while describe retains full columns", async () => {
+  const f = fixture();
+  try {
+    const tables = Array.from({ length: 20 }, (_, index) => ({
+      ...table, id: `table-${index}`, name: `log_${index}`,
+      columns: Array.from({ length: 50 }, (_, column) => ({ name: `column_${column}_${"x".repeat(80)}`, type: "String" })),
+      services: Array.from({ length: 40 }, (_, service) => `service_${service}_${"y".repeat(80)}`),
+    }));
+    f.deps.cat.list = async () => tables;
+    const tools = f.dispatcher.assistantTools();
+    const catalog = await tools.find(tool => tool.name === "list_tables")!.execute({}, new AbortController().signal, admin);
+    assert.equal(catalog.byte_limit, ASSISTANT_CATALOG_BYTES);
+    assert.equal(catalog.truncated, true);
+    assert.equal(catalog.byte_limited, true);
+    assert.ok(catalog.tables.length < tables.length);
+    assert.ok(Buffer.byteLength(JSON.stringify(catalog)) <= ASSISTANT_CATALOG_BYTES);
+    assert.equal(catalog.tables[0].columns, undefined);
+    const described = await tools.find(tool => tool.name === "describe_table")!.execute({ table: "log_0" }, new AbortController().signal, admin);
+    assert.equal(described.columns.length, 50);
+  } finally { f.close(); }
+});
+
+test("assistant query uses its own byte budget and requires an actionable time macro", async () => {
+  const f = fixture(Array.from({ length: 1200 }, (_, i) => [i, "x".repeat(2000)]));
+  try {
+    const query = f.dispatcher.assistantTools().find(tool => tool.name === "run_query")!;
+    const result = await query.execute({ sql: "SELECT body FROM log_app WHERE $__timeFilter(event_time)", range, interval_ms: 1000 }, new AbortController().signal, admin);
+    assert.equal(result.sample_byte_limit, ASSISTANT_TELEMETRY_SAMPLE_BYTES);
+    assert.equal(result.sample_byte_limited, true);
+    assert.ok(Buffer.byteLength(JSON.stringify(result)) <= ASSISTANT_TELEMETRY_SAMPLE_BYTES);
+    const before = f.requests.length;
+    await assert.rejects(query.execute({ sql: "SELECT body FROM log_app", range, interval_ms: 1000 }, new AbortController().signal, admin), /\$__timeFilter\(column\)/);
+    assert.equal(f.requests.length, before);
+    const mcp = await f.invoke("lightmoni_telemetry_query", { sql: "SELECT body FROM log_app", range, interval_ms: 1000 });
+    assert.equal(mcp.data.sample_byte_limit, TELEMETRY_SAMPLE_BYTES);
+    assert.equal(f.requests.length, before + 1);
   } finally { f.close(); }
 });
 

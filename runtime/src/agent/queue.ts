@@ -50,12 +50,14 @@ export function saveLogCursor(db: DB, c: LogCursor): void {
 }
 export class Queue {
   readonly db: DB;
+  private expiredSinceLastReport = 0;
   constructor(readonly config: Config) {
     this.db = new DB(join(config.data_dir, "queue.sqlite"));
     this.db
       .exec(`CREATE TABLE IF NOT EXISTS receipts(id TEXT PRIMARY KEY,input_hash TEXT NOT NULL,forward_hash TEXT NOT NULL,agent_id TEXT NOT NULL,host_id TEXT NOT NULL,received_ns INTEGER NOT NULL,expires_ns INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS batches(id TEXT PRIMARY KEY,signal TEXT NOT NULL,table_name TEXT NOT NULL,service TEXT NOT NULL,created_ns INTEGER NOT NULL,payload BLOB NOT NULL,content_type TEXT NOT NULL,state TEXT NOT NULL DEFAULT 'pending',attempts INTEGER NOT NULL DEFAULT 0,next_ns INTEGER NOT NULL DEFAULT 0,last_error TEXT NOT NULL DEFAULT '',FOREIGN KEY(id) REFERENCES receipts(id));
 CREATE INDEX IF NOT EXISTS batches_due ON batches(state,next_ns,created_ns);
+CREATE INDEX IF NOT EXISTS batches_expiry ON batches(state,created_ns);
 CREATE TABLE IF NOT EXISTS queue_actions(id INTEGER PRIMARY KEY,batch_id TEXT NOT NULL,action TEXT NOT NULL,at_ns INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS log_cursors(id TEXT PRIMARY KEY,offset INTEGER NOT NULL,generation INTEGER NOT NULL,prefix BLOB NOT NULL,path TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS log_sources(id TEXT PRIMARY KEY);`);
@@ -66,6 +68,19 @@ CREATE TABLE IF NOT EXISTS log_sources(id TEXT PRIMARY KEY);`);
   }
   close() {
     this.db.close();
+  }
+  pruneExpired(now = nowNano()): number {
+    const expired = this.db.run(
+      "DELETE FROM batches WHERE state='pending' AND created_ns<?",
+      now - BigInt(Math.min(this.config.max_age_seconds, this.config.max_retention_seconds)) * 1000000000n,
+    ).changes;
+    this.expiredSinceLastReport += expired;
+    return expired;
+  }
+  takeExpiredCount(): number {
+    const count = this.expiredSinceLastReport;
+    this.expiredSinceLastReport = 0;
+    return count;
   }
   receipt(id: string):
     | {
@@ -94,6 +109,9 @@ CREATE TABLE IF NOT EXISTS log_sources(id TEXT PRIMARY KEY);`);
     received: bigint,
     cursor?: LogCursor,
   ): void {
+    // Expiration is committed independently so a later capacity or insert failure
+    // cannot restore old payloads while leaving the reported count incremented.
+    this.pruneExpired(received);
     this.db.transaction(() => {
       const old = this.receipt(b.id);
       if (old) {
@@ -190,7 +208,7 @@ CREATE TABLE IF NOT EXISTS log_sources(id TEXT PRIMARY KEY);`);
   }
   stats() {
     const s = this.db.get<any>(
-      "SELECT COALESCE(SUM(LENGTH(payload)),0) AS bytes,COUNT(*) AS count,COALESCE(SUM(CASE WHEN state='quarantine' THEN 1 ELSE 0 END),0) AS quarantine,MIN(created_ns) AS oldest FROM batches",
+      "SELECT COALESCE(SUM(LENGTH(payload)),0) AS bytes,COUNT(*) AS count,COALESCE(SUM(CASE WHEN state='quarantine' THEN 1 ELSE 0 END),0) AS quarantine,MIN(CASE WHEN state='pending' THEN created_ns END) AS oldest FROM batches",
     )!;
     return {
       queue_bytes: Number(s.bytes),

@@ -48,6 +48,8 @@ callback_port = 1455
 
 选择 OAuth 时不要再同时设置 PAT。OAuth 授权可以在 MCP 接入页撤销；刷新凭据轮换，旧授权码或刷新凭据被重放会撤销对应 grant。短期 access token 到期只影响新 HTTP 请求，不取消已批准长任务。真实客户端验收范围见 SDD 047，不以自动化 HTTP 测试声称所有版本开箱即用。
 
+2026-11-14，SDD 164 已在隔离环境用真实 Codex CLI `0.167.0-alpha.4.1`、PAT 和 MCP `2025-11-25` 验证真实日志读取、Host 越权拒绝、告警静默提案/审批/回读，以及任务派发/真实 helper 执行/结果回读与断连幂等重放。该记录不构成 Claude、真实 OAuth 或其他客户端版本兼容承诺；脱敏证据见 [SDD 164](../specs/164-ai-mcp-core-closure/validation.md)。
+
 ## 服务主体与固定只读自动化
 
 管理员可在 Web 会话内通过 `POST /api/v1/mcp-access/service-accounts` 创建独立服务主体，通过 `GET /api/v1/mcp-access` 查看自己创建的安全元数据，通过 `DELETE /api/v1/mcp-access/service-accounts/<服务 ID>` 撤销。当前提供管理 API，未新增服务主体前端管理页面；这些端点不是 MCP 工具，服务凭据不能调用它们自我提权。
@@ -137,7 +139,7 @@ callback_port = 1455
 
 返回 `data.proposal.review_url` 后到平台审阅。审批绑定当时任务、目标和状态；有变化需要重新生成。批准派发表示进入队列，使用返回的 run ID 或 `task:<run ID>` 查询实际结果。`queued`/`running`/`unknown` 不能报告成功，取消须以远端停止回执为准。断线后使用同一业务键和内容重试；修改内容需新键。同键不同内容冲突，不自动重新派发。
 
-普通程序可在平台登录会话内使用 `GET /api/v1/capabilities` 和 `POST /api/v1/capabilities/<工具名>/invoke`，也可只使用现有 PAT/OAuth或服务主体 Bearer、无需 Web Cookie，复用同一 Principal、Scope、Host 和审计策略。`GET /api/v1/openapi.json` 返回当前主体可见的 OpenAPI 3.1 文档，不需要模拟 MCP。无凭据请求失败关闭；Web 会话写调用继续校验 Origin。
+普通程序可在平台登录会话内使用 `GET /api/v1/capabilities` 和 `POST /api/v1/capabilities/<工具名>/invoke`，也可只使用现有 PAT/OAuth 或服务主体 Bearer、无需 Web Cookie，复用同一 Principal、Scope、Host 和审计策略。`GET /api/v1/openapi.json` 返回当前主体可见的 OpenAPI 3.1 文档，不需要模拟 MCP。无凭据请求失败关闭；Web 会话写调用继续校验 Origin。
 
 运维提案使用 `lightmoni_operations_plan`，输入 `resource_id`、领域允许的 `operation`、结构化 `input`、原因和稳定幂等键。它只创建 `awaiting_approval` 的原生 Run，不直接执行；管理员仍在原页面审批。审批后的 `queued`、实际执行和 `unknown` 均通过 Run 查询，不能报告为成功。
 

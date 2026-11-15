@@ -65,7 +65,7 @@ export class ApplicationObserver {
   inventory?: DockerInventory;
   private inventoryPending?: Promise<DockerInventory>;
   private clients = new Map<string, ReturnType<LightMoni['gauge']>>();
-  constructor(readonly agent: LogAgent & {sdk: LightMoni}, readonly command: OperationExecutionContext['command'] = operationCommand,
+  constructor(readonly agent: LogAgent & {config: LogAgent['config'] & {max_age_seconds:number;max_retention_seconds:number};sdk: LightMoni}, readonly command: OperationExecutionContext['command'] = operationCommand,
     readonly logs: (args:string[], signal?:AbortSignal,selected?:'stdout'|'stderr',checkpoint?:Checkpoint)=>Promise<Output> = readDockerLogs) {}
   refreshInventory(signal?: AbortSignal): Promise<DockerInventory> {
     if(this.inventoryPending)return this.inventoryPending;
@@ -109,8 +109,8 @@ export class ApplicationObserver {
   }
   async collectLogs(c: {id:string;name:string}, target: ApplicationTarget, signal?: AbortSignal) {
     const base = 'docker:'+c.id+':', db=this.agent.queue.db;
-    const cutoff=nowNano()-7n*86400000000000n;
-    const cursor=(stream:string)=>{const id=createHash('sha256').update(base+stream).digest('hex');const old=db.get<any>('SELECT offset,generation,prefix FROM log_cursors WHERE id=?',id);return {id,path:base+stream,prefix:old?Buffer.from(old.prefix):Buffer.from('0'),offset:old?BigInt(old.offset):cutoff,generation:old?BigInt(old.generation):0n};};
+    const cutoff=nowNano()-BigInt(Math.min(this.agent.config.max_age_seconds,this.agent.config.max_retention_seconds))*1000000000n;
+    const cursor=(stream:string)=>{const id=createHash('sha256').update(base+stream).digest('hex');const old=db.get<any>('SELECT offset,generation,prefix FROM log_cursors WHERE id=?',id),stale=old&&BigInt(old.offset)<cutoff;return {id,path:base+stream,prefix:old?Buffer.from(old.prefix):Buffer.from('0'),offset:stale?cutoff:old?BigInt(old.offset):cutoff,generation:stale?0n:old?BigInt(old.generation):0n};};
     const cursors={stdout:cursor('stdout'),stderr:cursor('stderr')};
     for(const stream of ['stdout','stderr'] as const){
       const point=cursors[stream];let records:any[]=[],duplicate=0n;

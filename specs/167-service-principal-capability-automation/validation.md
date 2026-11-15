@@ -1,8 +1,8 @@
-# SDD 162 验证记录
+# SDD 167 验证记录
 
-验证日期：2026-11-14。范围为 Slice 5 的独立服务主体与固定只读自动化，开发基线为 `main@5076f64`。未部署生产、未操作真实主机、未发布镜像。
+原分支验证日期：2026-11-14。范围为 Slice 5 的独立服务主体与固定只读自动化，开发基线为 `main@5076f64`。2026-11-15 集成 `main@7724f7c7` 并将本 SDD 从 162 重编号为 167。未部署生产、未操作真实主机、未发布镜像。
 
-## 自动化检查
+## 原分支自动化检查（2026-11-14）
 
 | 检查 | 结果 | 证据 |
 | --- | --- | --- |
@@ -15,6 +15,23 @@
 | Markdown 本地链接/代码围栏、`git diff --check`、秘密模式扫描 | 通过 | 无失效本地链接、空白错误或凭据模式 |
 
 全量五项失败仅位于既有 `agent-host-admission`、`machine-service-addresses`、`machine-terminal`、`managed-machines` 和 `node-lifecycle` 用例，不宣称 runtime 全量通过。
+
+## 集成最新主干后的检查（2026-11-15）
+
+| 检查 | 结果 | 范围 |
+| --- | --- | --- |
+| `npm run typecheck` | 通过 | runtime、ai-runtime、web |
+| `node --import tsx --test --test-concurrency=1 test/capability*.test.ts test/mcp*.test.ts test/service-principal-capabilities.test.ts`（runtime） | 56/56 通过 | Capability、MCP、PAT/OAuth、服务主体身份/权限/预算/撤销及审计 |
+| `npm --prefix ai-runtime test` | 79/79 通过 | 当前主干与服务主体分支的 AI runtime 回归 |
+| `git diff --check` | 通过 | 集成提交的空白格式 |
+
+本轮未复跑完整 runtime 测试、构建或真实客户端/生产 E2E；原分支的全量结果和失败记录不代表集成后的完整主干通过。
+
+## 架构同步状态
+
+- 架构影响：新增服务主体、服务凭据与 grant、固定只读授权和预算、Principal/审计主体类型，并调整 Capability HTTP 的 Bearer/Cookie 接线。
+- 仓库章节：[系统设计 §14.4](../../docs/system-design.md#144-平台开放能力与-mcp目标架构sdd-046) 的 SDD 167 段落，以及 [平台 MCP 架构](../../docs/platform-mcp.md) 和 [接入指南](../../docs/mcp.md)。
+- 在线基线：[LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 的对应平台开放能力/MCP 章节待写入；尚无保存后最新版本的目标文本、原生图块节点和连线回读结果，不能声称 Doca 已同步。
 
 ## 行为证据
 
@@ -40,4 +57,4 @@
 - 服务主体写提案持续授权、审批/领取/启动复验、直接 execute、远程探测和其他高风险自动化不属于本切片。
 - 网站、容器、备份、DNS、证书、Agent 后续生命周期及真实业务闭环仍需后续独立 SDD。
 
-交付 PR：[workhold/lightmoni#218](https://github.com/workhold/lightmoni/pull/218)，目标为 main；实现与验证完成，等待评审，未获本轮合并授权。
+交付 PR：[workhold/lightmoni#218](https://github.com/workhold/lightmoni/pull/218)，目标为 main；本轮已有合并与发版测试授权，Doca 同步/回读、PR 复核与检查、合并、发版和环境验收仍待完成。

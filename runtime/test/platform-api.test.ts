@@ -438,6 +438,37 @@ test("historical log receipts remain readable beyond the overview limit and are 
   assert.equal((await f.req('/ops/runs/'+old.id,'GET',undefined,{'x-role':'member'})).status,403);
   assert.equal((await f.req('/ops/runs/missing')).status,404);
 });
+test("overview uses one ordered resource snapshot for its page and total", async (t) => {
+  const f = await setup(t);
+  const snapshot = Array.from({ length: 1002 }, (_, index) => ({
+    ...f.cluster,
+    id: index === 0 ? f.cluster.id : `snapshot-${index}`,
+    name: `Snapshot ${index}`,
+  }));
+  const originalList = f.platform.store.list.bind(f.platform.store);
+  let listCalls = 0;
+  f.platform.store.list = () => { listCalls++; return snapshot; };
+  try {
+    const overview = await f.req("/ops/overview");
+    assert.equal(overview.status, 200);
+    assert.equal(listCalls, 1);
+    assert.equal(overview.body.total, snapshot.length);
+    assert.equal(overview.body.limit, 1000);
+    assert.deepEqual(
+      overview.body.resources.map((resource: any) => resource.id),
+      snapshot.slice(0, 1000).map((resource) => resource.id),
+    );
+
+    listCalls = 0;
+    const filtered = await f.req("/ops/overview?cluster_id=" + f.cluster.id);
+    assert.equal(filtered.status, 200);
+    assert.equal(listCalls, 1);
+    assert.equal(filtered.body.total, 1);
+    assert.deepEqual(filtered.body.resources.map((resource: any) => resource.id), [f.cluster.id]);
+  } finally {
+    f.platform.store.list = originalList;
+  }
+});
 test("real platform HTTP checks role, confirmation and revision with saved state readback", async (t) => {
   const f = await setup(t);
   assert.equal(

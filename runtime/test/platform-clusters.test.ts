@@ -1554,9 +1554,10 @@ test('recovery retains stopped containers, unknown execution and stateful data i
     await f.action(a,'deploy');f.finish('a');const old=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',a.id)!;rebindForRecovery(f);
     if(block==='job_unknown')f.db.run("UPDATE agent_jobs SET state='unknown' WHERE agent_id='a'");
     if(block==='unknown')f.db.run("UPDATE ops_platform_runs SET state='unknown' WHERE id=?",old.current_run_id);
-    const requested=await f.action(a,'deploy');assert.equal(requested.status,202);
+    const requested=await f.action(a,'deploy');assert.equal(requested.status,block==='unknown'?409:202);
     if(block==='containers') {f.finish('c',{instance_id:old.id,absent:false,container_count:1,observed_at:'2026-10-29T02:00:00.000Z'});const next=await f.action(a,'deploy');assert.equal(next.body.pending,'agent_reinstall_containers_remain');}
-    else assert.equal(requested.body.pending,['unknown','job_unknown'].includes(block)?'agent_reinstall_execution_unresolved':'agent_reinstall_stateful_review_required');
+    else if(block==='unknown')assert.equal(requested.body.error,'platform_resource_busy');
+    else assert.equal(requested.body.pending,block==='job_unknown'?'agent_reinstall_execution_unresolved':'agent_reinstall_stateful_review_required');
     assert.equal(f.db.get<any>('SELECT retired FROM ops_cluster_instances WHERE id=?',old.id)?.retired,0);assert(f.db.get('SELECT instance_id FROM ops_platform_ports WHERE instance_id=?',old.id));
   }
 });
@@ -2266,6 +2267,67 @@ test('an active website-owned gateway inspection fences deleting its removed app
  const run=f.store.queue(site,'a','inspect',{task:'gateway.inspect',instance_id:instance.id,generation:instance.desired_generation},'admin');
  f.db.run('UPDATE ops_cluster_instances SET current_run_id=? WHERE id=?',run.id,instance.id);
  const response=await f.req('/resources/'+gateway.id,'DELETE',{revision:gateway.revision});assert.equal(response.status,409);assert.equal(response.body.error,'platform_resource_busy');
+});
+test('unknown workload log execution stays visible and blocks application intent changes until reviewed',async t=>{
+  const f=await fixture(t),first=f.createCluster(['ma'],'First'),second=f.createCluster(['mb'],'Second');
+  const app=f.app(first,{deployments:[{cluster_id:first.id,machine_ids:['ma'],cpu:0.25,memory_mb:128},{cluster_id:second.id,machine_ids:['mb'],cpu:0.25,memory_mb:128}]});
+  assert.equal((await f.action(app,'deploy',{cluster_id:first.id})).status,202);
+  f.finish('a');
+  const instance=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE owner_id=?',app.id)!;
+  assert.equal(instance.state,'running');assert.equal(instance.healthy,1);
+  assert.equal(Object.hasOwn(f.store.get(app.id).status.instances[0],'unresolved_run_id'),false);
+  assert.equal((await f.action(app,'logs',{cluster_id:first.id})).status,202);
+  const logRunID=f.db.get<any>('SELECT current_run_id FROM ops_cluster_instances WHERE id=?',instance.id)!.current_run_id;
+  const {job,payload}=f.finish('a',{healthy:true,running:true,containers:[{running:true}]},'unknown');
+  assert.equal(payload.resource.config.task,'workload.logs');assert.equal(payload.operation_id,logRunID);
+  const afterLog=f.db.get<any>('SELECT * FROM ops_cluster_instances WHERE id=?',instance.id)!;
+  assert.equal(afterLog.state,'running');assert.equal(afterLog.healthy,1);
+  const publicApp=(await f.req('/overview')).body.resources.find((r:any)=>r.id===app.id);
+  assert.equal(publicApp.status.instances.find((i:any)=>i.id===instance.id).unresolved_run_id,logRunID);
+
+  const before={instances:f.db.all('SELECT * FROM ops_cluster_instances WHERE owner_id=?',app.id),deployments:f.db.all('SELECT * FROM ops_platform_application_deployments WHERE application_id=?',app.id),status:f.db.get<any>('SELECT status_json FROM ops_platform_resources WHERE id=?',app.id)!.status_json,runs:f.store.actions(app.id).length};
+  for(const action of ['deploy','stop','remove','reconcile']){
+    const rejected=await f.action(app,action,{cluster_id:second.id});
+    assert.equal(rejected.status,409,action);assert.equal(rejected.body.error,'platform_resource_busy',action);
+  }
+  assert.deepEqual(f.db.all('SELECT * FROM ops_cluster_instances WHERE owner_id=?',app.id),before.instances);
+  assert.deepEqual(f.db.all('SELECT * FROM ops_platform_application_deployments WHERE application_id=?',app.id),before.deployments);
+  assert.equal(f.db.get<any>('SELECT status_json FROM ops_platform_resources WHERE id=?',app.id)!.status_json,before.status);
+  assert.equal(f.store.actions(app.id).length,before.runs);
+
+  f.db.exec("CREATE TABLE machine_state_recoveries(id TEXT PRIMARY KEY,machine_id TEXT,agent_id TEXT,status TEXT,expires_at TEXT DEFAULT '');CREATE TABLE machine_state_recovery_jobs(recovery_id TEXT,machine_id TEXT,agent_id TEXT,job_id TEXT)");
+  f.db.run("INSERT INTO machine_state_recoveries(id,machine_id,agent_id,status) VALUES('review','ma','a','succeeded')");
+  f.db.run("INSERT INTO machine_state_recovery_jobs VALUES('review','ma','a',?)",job.id);
+  await f.platform.tick();
+  assert.equal(f.db.get<any>('SELECT current_run_id FROM ops_cluster_instances WHERE id=?',instance.id)!.current_run_id,logRunID);
+  const reviewed=f.store.get(app.id).status.instances.find((i:any)=>i.id===instance.id);
+  assert.equal(Object.hasOwn(reviewed,'unresolved_run_id'),false);
+  assert.equal((await f.action(app,'deploy',{cluster_id:second.id})).status,202);
+  assert.equal(f.db.get<any>('SELECT enabled FROM ops_platform_application_deployments WHERE application_id=? AND cluster_id=?',app.id,second.id)!.enabled,1);
+});
+test('unknown gateway log execution exposes the unresolved run and blocks gateway intent changes',async t=>{
+  const f=await fixture(t),c=f.createCluster(['ma']);
+  const gateway=f.store.create('application','Entry',catalogInstallation('openresty',{deployment_mode:'manual',deployments:[{cluster_id:c.id,machine_ids:['ma']}]}).spec,'admin');
+  assert.equal((await f.action(gateway,'deploy')).status,202);f.finish('a');
+  assert.equal((await f.action(gateway,'logs')).status,202);
+  const {payload}=f.finish('a',{healthy:true,running:true,containers:[{running:true}]},'unknown');
+  assert.equal(payload.resource.config.task,'gateway.logs');
+  const view=(await f.req('/overview')).body.resources.find((r:any)=>r.id===gateway.id);
+  assert.equal(view.status.instances[0].state,'running');
+  assert.equal(view.status.instances[0].unresolved_run_id,payload.operation_id);
+  const stopped=await f.action(gateway,'stop');assert.equal(stopped.status,409);assert.equal(stopped.body.error,'platform_resource_busy');
+});
+test('retired unknown instance history does not block a new application deployment',async t=>{
+  const f=await fixture(t),first=f.createCluster(['ma'],'First'),second=f.createCluster(['mb'],'Second');
+  const app=f.app(first,{deployments:[{cluster_id:first.id,machine_ids:['ma'],cpu:0.25,memory_mb:128},{cluster_id:second.id,machine_ids:['mb'],cpu:0.25,memory_mb:128}]});
+  assert.equal((await f.action(app,'deploy',{cluster_id:first.id})).status,202);f.finish('a');
+  assert.equal((await f.action(app,'logs',{cluster_id:first.id})).status,202);
+  f.finish('a',{healthy:true,running:true,containers:[{running:true}]},'unknown');
+  const instance=f.db.get<any>('SELECT id,current_run_id FROM ops_cluster_instances WHERE owner_id=?',app.id)!;
+  f.db.run('UPDATE ops_cluster_instances SET retired=1 WHERE id=?',instance.id);
+  const response=await f.action(app,'deploy',{cluster_id:second.id});
+  assert.equal(response.status,202);
+  assert.equal(f.db.get<any>('SELECT state FROM ops_platform_runs WHERE id=?',instance.current_run_id)?.state,'unknown');
 });
 test('storage inventory paginates retained instances without silently dropping later machines',async t=>{
  const f=await fixture(t),c=f.createCluster(),a=f.app(c);await f.action(a,'deploy');f.finish('a');

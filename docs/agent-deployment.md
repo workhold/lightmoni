@@ -99,11 +99,11 @@ sudo -u lightmoni-agent /usr/local/bin/lightmoni-agent status --config /etc/ligh
 
 ## 离线容量和隔离恢复
 
-Agent 在持久 SQLite 中事务保存 receipt、冻结 OTLP 内容和文件游标，成功提交后才向本地客户端 ACK。默认限制：单批 4 MiB、队列 256 MiB、10,000 批、100,000 receipts、最低空闲磁盘 32 MiB、最大重放年龄 24 小时、receipt 保存 48 小时。容量和期限都有限，隔离数据也占空间。
+Agent 在持久 SQLite 中事务保存 receipt、冻结 OTLP 内容和文件游标，成功提交后才向本地客户端 ACK。默认限制：单批 4 MiB、队列 256 MiB、10,000 批、100,000 receipts、最低空闲磁盘 32 MiB、批次接收年龄 24 小时、待发送保留 1 小时、成功补传间隔 1 秒、receipt 保存 48 小时。容量和期限都有限，隔离数据也占空间。
 
-按“平均入队字节/秒 × 期望断网秒数 × 余量系数”估算数据容量，另留 SQLite/WAL、receipt、隔离和操作系统空间。默认 256 MiB 不能保证在任意流量下保留 24 小时；超过重放年龄的数据会隔离。满队列或存储失败返回 503 背压，客户端需要保留和重试。业务 SDK 的有限内存/重试策略也决定端到端保留能力。
+按“平均入队字节/秒 × 期望断网秒数 × 余量系数”估算数据容量，另留 SQLite/WAL、receipt、隔离和操作系统空间。默认 256 MiB 不能保证在任意流量下保留 1 小时；超过 `min(max_age_seconds,max_retention_seconds)` 的 pending 批次会删除 payload 并记录过期计数，已有 receipt 继续去重。满队列或存储失败返回 503 背压，客户端需要保留和重试。业务 SDK 的有限内存/重试策略也决定端到端保留能力。已有配置若没有新字段，会使用 1 小时保留与 1 秒间隔默认值；可按业务需求调整 `max_retention_seconds` 与 `replay_interval_ms`（1–60000 毫秒）。
 
-网络、鉴权和限流故障会保留重试，401/403 不会清空队列；先修复 endpoint、TLS 或对应 data 凭据。不可重试、过期和部分成功批次进入隔离，不静默删除。需要维护隔离区时先停服务，避免把 CLI 描述成已具备运行时并发维护锁：
+网络、鉴权和限流故障会保留重试，401/403 不会清空队列；先修复 endpoint、TLS 或对应 data 凭据。不可重试和部分成功批次进入隔离，等待人工处理；过期 pending 数据按保留策略删除并生成 `queue_expired` 运行事件。Docker 日志补采也从该窗口起点继续，原始事件时间不改写；队列最老批次年龄仅统计待发送数据，隔离数量单独显示。需要维护隔离区时先停服务，避免把 CLI 描述成已具备运行时并发维护锁：
 
 ```sh
 sudo systemctl stop lightmoni-agent.service

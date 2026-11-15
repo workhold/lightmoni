@@ -21,9 +21,9 @@ LightMoni 是面向个人和小团队的一体化监控工作台。它把业务 
 
 ### 1.1 仓库设计维护
 
-本文以仓库中的 [`docs/system-design.md`](system-design.md) 为唯一持续维护的设计基线。任何影响组件职责、数据或控制路径、凭据边界、存储、协议、部署拓扑或 AI/工具边界的架构变更，都必须在同一个 SDD 和 Pull Request 中更新本文件。按用户于 2026-11-06 的要求，不再同步 Doca 或其他在线副本。
+本文以仓库中的 [`docs/system-design.md`](system-design.md) 和 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 为同步维护的设计基线。任何影响组件职责、数据或控制路径、凭据边界、存储、协议、部署拓扑或 AI/工具边界的架构变更，都必须在同一个 SDD 和 Pull Request 中更新两端，并回读目标章节或原生图块。
 
-Pull Request 记录架构影响判断、仓库文档章节和验证结果。历史在线文档及同步回读记录仅供追溯，不构成后续交付条件。不影响架构的改动填写“不适用”及理由即可；凭据不得写入仓库、日志、URL、Pull Request 或文档正文。
+Pull Request 记录架构影响判断、仓库文档章节、Doca 链接及最新版本回读结果。不影响架构的改动填写“不适用”及理由即可；凭据不得写入仓库、日志、URL、Pull Request 或文档正文。
 
 ## 2. 驱动目标
 
@@ -875,17 +875,17 @@ SDD 159 开始 Slice 4，新增 capability_proposals 安全投影及 domain prop
 
 SDD 160 扩展 execution_index 为跨领域执行投影，新增 domain executions list/get，覆盖 Task Run、Deployment、Operation Run、Agent 首装和维护。读取时按 executions.read、领域 Scope 和 Host 过滤并刷新 native_state/review_url，不把 queued/running/unknown/rolled_back 映射为成功。历史未索引记录不保证全部回填；OpenAPI/Bearer、服务主体和持续授权未完成。
 
-SDD 161 新增 GET /api/v1/openapi.json，从当前主体可见描述符生成 OpenAPI 3.1，包含真实输入/输出 Schema、capability/version、effect/risk、Scope 和安全错误。Capability HTTP 在保留 Web 会话的同时支持现有 PAT/OAuth Bearer，复用 McpAccess 与同一 Principal、Dispatcher、Scope、Host、限流和审计；不模拟 MCP，不提升角色或资源范围。文档不包含秘密或目标数据，服务主体和持续授权未完成。
+SDD 161 新增 GET /api/v1/openapi.json，从当前主体可见描述符生成 OpenAPI 3.1，包含真实输入/输出 Schema、capability/version、effect/risk、Scope 和安全错误。Capability HTTP 在保留 Web 会话的同时支持现有 PAT/OAuth Bearer，复用 McpAccess 与同一 Principal、Dispatcher、Scope、Host、限流和审计；不模拟 MCP，不提升角色或资源范围。文档不包含秘密或目标数据；在 SDD 161 时，服务主体和持续授权尚未完成。
 
-SDD 162 开始 Slice 5，增加独立服务主体与固定只读自动化。mcp_service_accounts 将服务 ID、管理员 Owner、能力/version/固定输入规则、总预算和期限绑定到独立 service grant/token；服务 ID 不写入 users，Principal 以 subject_type=service 和 owner_user_id 区分个人主体，调用审计增加 subject_type，旧记录默认 user。Owner 必须保持有效管理员，撤销、到期、降权或停用立即失败关闭。
+SDD 164 不改变控制路径或权限边界，只收敛核心验收：真实 Codex/PAT 通过同一 Dispatcher 完成 ClickHouse 日志读取与 Host 越权拒绝、告警静默原生提案/Web 审批/生效回读、任务派发/签名 helper 执行/原生回执回读；新客户端进程以同业务键返回同一 proposal，未创建替代执行。隔离环境、客户端版本、调用与原生 ID 见 SDD 164 validation 和脱敏证据。该记录不扩展到 OAuth、Claude、生产环境或后续自动化。
+
+SDD 167 开始 Slice 5，增加独立服务主体与固定只读自动化。mcp_service_accounts 将服务 ID、管理员 Owner、能力/version/固定输入规则、总预算和期限绑定到独立 service grant/token；服务 ID 不写入 users，Principal 以 subject_type=service 和 owner_user_id 区分个人主体，调用审计增加 subject_type，旧记录默认 user。Owner 必须保持有效管理员，撤销、到期、降权或停用立即失败关闭。
 
 服务规则只接受当前 Registry 中 read、center_read、R0/R1 且 MCP/HTTP 可见的能力，派生最小 Scope 并保留 Host 封闭范围。Dispatcher 的发现/OpenAPI 可见性和执行前授权复用同一规则；固定输入是递归 JSON 子集，不接受代码或模板。通过 Schema、Host 与限流后以单条条件 UPDATE 原子消耗预算，领域失败不退款，预算不代表成功。本切片不开放 propose、execute、远程探测或持续写授权，不增加 54 个工具的清单。
 
 Capability HTTP 的路由调整为可选认证：Bearer 无需 Web Cookie，Cookie 会话由平台 Auth 解析且写调用继续执行 Origin 校验，未认证请求仍失败关闭。该修正让 PAT/OAuth/服务 Bearer 在真实 Router 中与普通程序契约一致，不放宽管理 API 或 MCP 权限。
 
-
-
-完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 153](../specs/153-instrumentation-proposal-capability-write/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md)、[SDD 156](../specs/156-alert-escalation-proposal-capability-write/spec.md)、[SDD 157](../specs/157-alert-renewal-proposal-capability-write/spec.md)、[SDD 158](../specs/158-alert-delivery-retry-proposal-capability-write/spec.md)、[SDD 159](../specs/159-cross-domain-proposal-index/spec.md)、[SDD 160](../specs/160-cross-domain-execution-index/spec.md)、[SDD 161](../specs/161-capability-openapi-bearer/spec.md)、[SDD 162](../specs/162-service-principal-capability-automation/spec.md) 和 [MCP 接入指南](mcp.md)。
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 153](../specs/153-instrumentation-proposal-capability-write/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md)、[SDD 156](../specs/156-alert-escalation-proposal-capability-write/spec.md)、[SDD 157](../specs/157-alert-renewal-proposal-capability-write/spec.md)、[SDD 158](../specs/158-alert-delivery-retry-proposal-capability-write/spec.md)、[SDD 159](../specs/159-cross-domain-proposal-index/spec.md)、[SDD 160](../specs/160-cross-domain-execution-index/spec.md)、[SDD 161](../specs/161-capability-openapi-bearer/spec.md)、[SDD 164](../specs/164-ai-mcp-core-closure/spec.md)、[SDD 167](../specs/167-service-principal-capability-automation/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 
@@ -949,6 +949,8 @@ received → persisted → forwarding → acknowledged
 ```
 
 `persisted` 才能向 SDK ACK；`acknowledged` 才能回收队列 payload。队列 SQLite 保存 input hash、forward hash、身份、创建时间、attempts、next time、last error 和日志 cursor。容量不足返回可重试背压。
+
+pending payload 的有效保留窗口是 `min(max_age_seconds,max_retention_seconds)`，默认 1 小时；超窗批次在入队容量检查和发送前批量删除，receipt 继续独立保留用于去重，quarantine 仍由人工处理。成功 ACK 后按 `replay_interval_ms`（默认 1 秒）节流下一批，网络错误继续退避。Docker 日志游标不早于同一窗口起点，序号单调，事件时间不改写。队列最老年龄仅反映 pending，隔离数量独立计量。
 
 ### 18.3 告警响应状态
 
@@ -1094,8 +1096,8 @@ docker compose up -d --no-build --wait
 - AI 告警、主机和终端：[SDD 009](../specs/009-assistant-alert-controls/spec.md)、[SDD 013](../specs/013-ai-alert-controls/spec.md)、[SDD 014](../specs/014-managed-machines-agent-bootstrap/spec.md)、[SDD 017](../specs/017-assistant-ssh-bootstrap/spec.md)、[SDD 018](../specs/018-machine-web-terminal/spec.md)
 - 设计基线 SDD：[SDD 019](../specs/019-system-design-baseline/spec.md)
 - AI SDK 插桩与业务部署：[SDD 021](../specs/021-ai-sdk-instrumentation-deployment/spec.md)
-- 历史在线设计副本（不再同步）：[Doca：LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)
-- 历史架构文档同步规则（已由当前本地维护规则替代）：[SDD 020](../specs/020-architecture-design-sync/spec.md)
+- 在线设计基线：[Doca：LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)
+- 架构文档同步规则：[SDD 020](../specs/020-architecture-design-sync/spec.md)
 - 镜像发布与管理员运维：[SDD 023](../specs/023-registry-admin-cli/spec.md)
 
 ## 26. 运维平台基础与备份恢复（SDD 026，网站/容器现行设计见第33章）
@@ -1358,7 +1360,7 @@ AI 工具 list_agent_releases、propose_agent_update、get_agent_update 只返�
 
 统一入口和记录保留底层执行策略：持续采集使用配置 revision；有限脚本使用租约与退出结果；服务部署使用分阶段健康回执；Agent 首装/升级使用 SSH 生命周期与独立维护确认。主机检查等短操作可同步返回执行结果，耗时任务异步返回执行 ID，均记录来源、授权和目标；交互式能力另用会话协议，关联授权、开始、结束及退出状态，不把每次按键拆成任务，也不将终端原始输出持久化或发送给模型。高频采样不逐条创建任务执行记录。首次安装尚无 Agent 可接收任务，仍通过 SSH。周期任务与单次任务均归属明确主机，结果未知不会被幂等重试偷偷重放。
 
-本轮交付 Agent 维护自身的计划、审批和完整结果 API；SDD 047 已交付用户主体的 MCP 专用 PAT/OAuth、role/scope 与主机范围授权，任务提案复用平台审批。跨脚本、业务运维、Agent 生命周期的完整统一执行读模型、服务主体及自定义 typed action 注册表仍属于后续单独 SDD，不将已有分散接口声称为完整统一外部任务 API。
+本章原交付 Agent 维护自身的计划、审批和完整结果 API；SDD 047 已交付用户主体的 MCP 专用 PAT/OAuth、role/scope 与主机范围授权，任务提案复用平台审批。后续 SDD 167 已增加固定只读服务主体；跨脚本、业务运维、Agent 生命周期的完整统一执行读模型、服务主体写授权及自定义 typed action 注册表仍属于后续单独 SDD，不将已有分散接口声称为完整统一外部任务 API。
 
 ## 33. 网站、DNS、证书与 Docker 服务托管（SDD 033）
 
@@ -2853,3 +2855,48 @@ flowchart LR
 ### 131.3 静态资源升级
 
 中心对主 HTML 和 SPA 回退发送 `Cache-Control: no-store`；Vite 构建的 `/assets/` 内容哈希 URL 使用一年 `immutable`，每次构建由新 HTML 引用变更后的 URL。未版本化静态文件使用一小时有界缓存；缺失的构建资源返回 404，不回退为 HTML。API 的鉴权和缓存头沿用各自契约。规格、接口、任务与验收见 [SDD131](../specs/131-panel-responsive/spec.md)；本章与第 107 章在同一 PR 同步到 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 并回读原生图块。
+
+## 134. 应用状态、仓库阻塞与 Agent 有界补传（SDD134）
+
+### 134.1 应用状态证据
+
+应用列表沿用中心发布的部署修订、实例健康与服务地址可用性摘要。只有当前部署修订已应用，且每个现有实例有新鲜、成功的健康核对时才显示“运行中”。曾经成功但核对已过期的实例可按现有可用性策略保留服务地址，页面标记“待核实”；恢复作业被未知执行结果阻塞也标记“待核实”并展示原因。实例本身处于 unknown 时继续显示“结果未知”；正在排队或部署才显示“待处理”。保留地址不能作为当前健康证明。
+
+### 134.2 镜像仓库与主机围栏
+
+镜像版本读取仍通过受管主机作业访问仓库。当同机提权任务尚未完成或结果未知，`privileged_execution_pending` 继续阻止派发；仓库页面指出阻塞并链接到该主机的执行记录，供管理员按现有只读核对和人工结束流程处理。该页面不自动释放围栏，也不因仓库 GET 请求属只读而绕开作业准入。
+
+### 134.3 队列存储与发送
+
+Agent 本地 SQLite `batches` 增加按 pending 创建时间清理的索引；默认 `max_retention_seconds=3600` 与旧 `max_age_seconds=86400` 独立，旧配置加载时取得新默认值，有效窗口取两者较小值。过期待发送 payload 在容量判定前和转发前删除，过期数量写入有界运行事件；receipt 的身份、哈希和独立期限保持，quarantine 仍需人工处理。发送成功后按默认 1 秒间隔推进下一个批次，失败继续既有指数退避和 `Retry-After`；批次 ID、冻结 payload 与 OTLP 原始事件时间不变。Docker 日志游标前移到保留窗口起点时保留源序号，防止长期断链后重新采集大量旧日志。`agent.queue.oldest_age` 仅统计 pending；quarantine 另有计数。
+
+```mermaid
+flowchart LR
+  source["SDK / Agent 日志采集"] --> queue["Agent SQLite：pending 与 receipt"]
+  queue -->|超窗| expiry["删除 pending payload / 计数事件"]
+  queue -->|窗口内| pace["成功 ACK 后有界发送间隔"]
+  pace --> center["中心 OTLP / 幂等接收"]
+  queue -->|永久拒绝| quarantine["quarantine：人工核对"]
+```
+
+规格、契约、任务、验证与 Doca 最新版本回读见 [SDD134](../specs/134-app-state-registry-replay/spec.md)。
+
+## 162. 应用总览状态与未知执行核对（SDD162）
+
+应用页的定时与窗口焦点刷新遇到未完成的总览读取时跳过，显式刷新仍可替换旧请求；中心 `/ops/overview` 在单次请求中复用一次资源读取计算列表与总数，不改变鉴权、排序和上限。中心从实例当前 `current_run_id` 对应、尚未按现有流程核对的 unknown 运行记录派生可选 `status.instances[].unresolved_run_id`，在资源公开摘要中提供，不保存新状态或载荷。即使日志作业未知结果时实例仍为 `running/healthy`，页面也据此显示结果未知。其他已安装状态按启用且已发布集群的非退休当前实例与目标副本、就绪数量、部署修订及健康证据投影；保留、宽限、保护和未知恢复标记待核实，明确失败不被保护态遮盖，已保存新配置与旧已发布版本分开说明。零副本目标无运行实例或仅有已停实例时可视为就绪，全零目标显示停止；2→1 缩容要求目标槽位就绪、额外未退休实例已停。禁用集群的遗留实例不污染启用集群的发布态；没有启用发布集群时，非退休遗留实例仍活动或摘要截断则标待核实，停稳后才可显示停止；已退休历史不参与状态。
+
+卡片动作对所有非退休实例保持未知执行门禁，包括已禁用集群的阻塞实例，以及已移除但仍关联未核对执行的实例；已退休历史不触发本轮新增的应用动作门禁，但登记删除仍受既有 `store.remove` 对未核对历史运行的独立保护。所有“核对状态”入口均打开既有应用安装记录抽屉，只读调用 `/ops/resources/:id` 和 `/ops/runs?resource_id=:id`，优先显示当前未核对的 unknown 记录。历史列表最多 100 条；若摘要中的 `unresolved_run_id` 不在列表，抽屉使用既有 `GET /ops/runs/:id` 定向补读原记录。仅有 `recovery=blocked/unknown_execution_result` 而无当前运行 ID 时，抽屉显示待核实，并优先选择该应用历史中的 unknown 原记录。有当前未核对记录时，已核对的旧 unknown 不抢占默认选择，用户手选记录后轮询不抢回，不再派发新的 `inspect` 作业。需要核对的卡片限制升级、停止、卸载和删除登记，未知执行阻塞还限制部署/重新部署；记录抽屉对待核实/结果未知禁用编辑、重新部署和快装重试。中心对用户发起的 `deploy|stop|remove|reconcile` 在写入部署意图或实例期望状态前拒绝未核对 unknown，返回冲突且原意图不变；服务自动恢复沿用原机制。历史 unknown 回执、管理员人工核对、主机写入围栏与审计不改变。规格和验收见 [SDD162](../specs/162-app-overview-state/spec.md)。
+
+```mermaid
+flowchart LR
+  run["当前未核对 unknown 运行记录"] --> summary["实例公开摘要：unresolved_run_id"]
+  summary --> card["应用卡片：结果未知 / 待核实"]
+  card --> verify["核对状态：只读抽屉"]
+  verify --> resource["GET /ops/resources/:id"]
+  verify --> runs["GET /ops/runs?resource_id=:id"]
+  runs --> original["相关 unknown 原执行记录"]
+  runs --> missing["列表无当前记录：GET /ops/runs/:id"]
+  missing --> original
+  card --> gate["用户部署 / 停止 / 卸载 / 调和"]
+  gate --> reject["写意图前 409：原部署意图不变"]
+```

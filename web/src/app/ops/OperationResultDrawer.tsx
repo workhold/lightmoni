@@ -1,4 +1,4 @@
-import type {ReactNode} from 'react';
+import {useRef,useState,type ReactNode} from 'react';
 import {ReloadOutlined} from '@ant-design/icons';
 import {Alert,Descriptions,Drawer,Typography} from '../../shared/ui';
 import {useI18n} from '../../shared/i18n';
@@ -8,9 +8,12 @@ import {time,type Run} from './model';
 
 export default function OperationResultDrawer({run,resourceName,actionName,targetName,onClose,onRefresh,children}:{run?:Run;resourceName:string;actionName:string;targetName:string;onClose:()=>void;onRefresh:()=>Promise<void>;children?:ReactNode}){
  const {t}=useI18n();
+ const pending=useRef(false),[refreshing,setRefreshing]=useState(false),[refreshError,setRefreshError]=useState('');
+ const refresh=async()=>{if(pending.current)return;pending.current=true;setRefreshing(true);setRefreshError('');try{await onRefresh()}catch(error){setRefreshError(error instanceof Error?error.message:String(error))}finally{pending.current=false;setRefreshing(false)}};
  const result=run?.result??{},state=run?.state??'',active=['queued','leased','pending','accepted','running','verifying'].includes(state);
- return <Drawer open={!!run} onClose={onClose} title={t('执行结果','Execution result')} size="min(820px, 100vw)" className="lm-operation-result" destroyOnHidden extra={<IconAction label={t('刷新结果','Refresh result')} icon={<ReloadOutlined aria-hidden/>} onClick={()=>void onRefresh()}/>}>
+ return <Drawer open={!!run} onClose={onClose} title={t('执行结果','Execution result')} size="min(820px, 100vw)" className="lm-operation-result" destroyOnHidden extra={<IconAction label={t('刷新结果','Refresh result')} icon={<ReloadOutlined aria-hidden/>} loading={refreshing} onClick={()=>void refresh()}/>}>
   {run&&<><div className="lm-result-summary"><OperationStatus state={state}/><h2>{resourceName}</h2><span>{actionName}</span></div>
+   {refreshError&&<Alert showIcon type="error" title={refreshError} role="alert"/>}
    {state==='unknown'&&<Alert showIcon type="warning" title={t('执行结果未知','Execution outcome unknown')} description={t('先核对目标实际状态，再决定后续操作。原执行记录已保留。','Inspect the actual target state before taking further action. The original execution is retained.')}/>}
    {active&&<Alert showIcon type="info" title={['queued','leased','pending','accepted'].includes(state)?t('请求已提交，等待执行','Request submitted; awaiting execution'):t('请求已提交，正在执行','Request submitted; execution in progress')} description={t('可关闭此窗口，稍后从操作日志查看结果。','You can close this drawer and reopen the result from operation logs.')}/>}
    {result.message&&<Alert showIcon type={['failed','error'].includes(state)?'error':state==='unknown'?'warning':'info'} title={String(result.message)}/>}

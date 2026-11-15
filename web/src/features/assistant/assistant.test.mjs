@@ -9,7 +9,24 @@ test('timeline uses durable turn ids, deduplicates replay, and replaces streamed
   const events = [event(0, 'user.message', { text: '相同问题' }), event(1, 'assistant.delta', { text: '部分', step: 1 }), event(2, 'assistant.message', { text: '完整回答', step: 1 }), event(3, 'turn.completed'), event(4, 'user.message', { text: '相同问题' }, 'turn-2'), event(5, 'tool.call', { call_id: 'call-1', tool: 'run_query', input: {} }, 'turn-2'), event(6, 'turn.cancelled', { error: 'request cancelled' }, 'turn-2')];
   const turns = assistantTimeline([...events, events[1]]);
   assert.equal(turns.length, 2); assert.equal(turns[0].answer, '完整回答'); assert.equal(turns[0].status, 'completed');
-  assert.equal(turns[1].status, 'cancelled'); assert.equal(turns[1].tools[0].status, 'error');
+  assert.equal(turns[1].status, 'cancelled'); assert.equal(turns[1].tools[0].status, 'cancelled');
+});
+
+test('timeline distinguishes explicit cancelled receipts from real tool failures', () => {
+  const cancelled = assistantTimeline([
+    event(0, 'user.message', { text: 'cancel' }),
+    event(1, 'tool.call', { call_id: 'call-cancel', tool: 'check_managed_machine_ssh' }),
+    event(2, 'tool.result', { call_id: 'call-cancel', status: 'cancelled', value: { error: 'request cancelled' } }),
+    event(3, 'turn.cancelled', { error: 'request cancelled' }),
+  ]);
+  assert.equal(cancelled[0].tools[0].status, 'cancelled');
+  const failed = assistantTimeline([
+    event(0, 'user.message', { text: 'fail' }),
+    event(1, 'tool.call', { call_id: 'call-fail', tool: 'check_managed_machine_ssh' }),
+    event(2, 'tool.result', { call_id: 'call-fail', status: 'error', value: { error: 'ssh_failed' } }),
+    event(3, 'turn.failed', { error: 'ssh_failed' }),
+  ]);
+  assert.equal(failed[0].tools[0].status, 'error');
 });
 
 test('SSE reader preserves split UTF-8 and CRLF chunks with credentials', async () => {

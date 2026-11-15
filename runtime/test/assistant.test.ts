@@ -30,7 +30,7 @@ import {
   billingKey,
   decode,
 } from "../src/assistant/usage.js";
-import { monitoringTools } from "../src/assistant/tools.js";
+import { ASSISTANT_CATALOG_BYTES, monitoringTools } from "../src/assistant/tools.js";
 import {
   worker,
   validateMetadata,
@@ -525,7 +525,39 @@ test("concurrent turn rejects, cancellation releases slot and accounts unknown c
   assert.equal(records[0].input_tokens, null);
   assert.equal(records[0].estimated_cost, null);
 });
-test("ledger terminal snapshot keeps original rates and unknown/free/partial costs distinct", () => {
+
+test("pending tools are cancelled rather than reported as real failures", async (t) => {
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const runtime: Runtime = async (_input, signal) => {
+    entered();
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+    signal.throwIfAborted();
+  };
+  const f = await fixture(t, { runtime });
+  await configure(f);
+  const sid = await session(f), store = new Store(f.db, () => at);
+  const history: any = store.get(`session/alice/${sid}`);
+  history.messages = [
+    { role: "user", content: "previous request" },
+    {
+      role: "assistant", content: "",
+      tool_calls: [{ id: "ssh-check-1", type: "function", function: { name: "check_managed_machine_ssh", arguments: "{}" } }],
+    },
+  ];
+  store.put(`session/alice/${sid}`, history);
+  const turn = f.request(`/sessions/${sid}/turns`, "POST", { text: "cancel this pending SSH check" });
+  await started;
+  assert.equal((await f.request(`/sessions/${sid}/cancel`, "POST", {})).data.cancelled, true);
+  const raw = (await turn).raw;
+  assert.match(raw, /"status":"cancelled"/);
+  assert.doesNotMatch(raw, /"status":"error"/);
+  const stored = await f.request(`/sessions/${sid}`);
+  const receipt = stored.data.events.find((event: any) => event.type === "tool.result");
+  assert.equal(receipt.data.status, "cancelled");
+  const toolMessage = stored.data.messages.find((message: any) => message.role === "tool");
+  assert.equal(JSON.parse(toolMessage.content).error, "request cancelled");
+});test("ledger terminal snapshot keeps original rates and unknown/free/partial costs distinct", () => {
   const db = new DB(":memory:"),
     store = new Store(db, () => at);
   try {
@@ -619,7 +651,7 @@ test("monitoring tools use shared bounded queries, accurate failures and review-
   await assert.rejects(
     run.execute(
       {
-        sql: "SELECT body FROM log_app",
+        sql: "SELECT body FROM log_app WHERE $__timeFilter(event_time)",
         range: { from: "2026-10-16T00:00:00Z", to: "2026-10-17T00:00:00Z" },
         interval_ms: 1000,
       },
@@ -645,6 +677,24 @@ test("monitoring tools use shared bounded queries, accurate failures and review-
   assert.equal(draft.saved, false);
   assert.equal(draft.requires_review, true);
   assert.ok(draft.draft.panels[0].id);
+});
+
+test("monitoring catalog projection is bounded without losing full single-table descriptions", async (t) => {
+  const f = await fixture(t);
+  const tables = Array.from({ length: 20 }, (_, index) => ({
+    id: `log-${index}`, name: `log_${index}`, kind: "log",
+    columns: Array.from({ length: 50 }, (_, column) => ({ name: `column_${column}_${"x".repeat(80)}`, type: "String" })),
+    services: Array.from({ length: 40 }, (_, service) => `service_${service}_${"y".repeat(80)}`),
+  }));
+  f.deps.cat.list = async () => tables;
+  const tools = monitoringTools(f.deps);
+  const catalog = await tools.find(tool => tool.name === "list_tables")!.execute({}, new AbortController().signal);
+  assert.ok(Buffer.byteLength(JSON.stringify(catalog)) <= ASSISTANT_CATALOG_BYTES);
+  assert.equal(catalog.truncated, true);
+  assert.equal(catalog.byte_limited, true);
+  assert.equal(catalog.tables[0].columns, undefined);
+  const described = await tools.find(tool => tool.name === "describe_table")!.execute({ table: "log_0" }, new AbortController().signal);
+  assert.equal(described.columns.length, 50);
 });
 test("connection probe uses one fixed budget and preserves failed usage without changing config or sessions", async (t) => {
   const inputs: any[] = [];

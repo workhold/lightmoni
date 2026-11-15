@@ -5,4 +5,6 @@
 3. 新增管理员 Web 管理路由，按当前 Capability Registry 校验固定只读规则并派生最小 Scope；服务发现与调用使用同一规则，版本或策略不符即拒绝。
 4. Dispatcher 在清单过滤时应用服务能力可见性，在 JSON Schema 校验后、目标访问和领域执行前校验固定输入并原子扣减预算；审计记录主体类型。
 5. 添加服务身份、发现/HTTP/MCP 调用、输入/Host/版本边界、预算并发、撤销/过期/Owner 变化、秘密与兼容回归测试。
-6. 更新 docs/system-design.md、docs/platform-mcp.md、docs/mcp.md 与能力覆盖矩阵，运行定向和全量测试、类型检查、构建及文档检查，提交独立 PR；未获授权不合并。
+6. 更新 docs/system-design.md、docs/platform-mcp.md、docs/mcp.md 与能力覆盖矩阵；将架构变更同步到 [Doca 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)，保留原生图块与无关内容，并在保存后从最新版本回读目标文本、节点和连线。
+7. 运行定向和全量测试、类型检查、构建及文档检查，记录失败与范围；将仓库章节、Doca 链接、回读结果、兼容影响和验证结果写入 PR。
+8. 同步最新 main，处理 SDD 162 编号冲突与文档并行修改；在架构同步和检查完成后通过 PR 合并，再进行发版和环境验收。

@@ -203,15 +203,12 @@ export function registerOperationsPlatform(
   );
   router.get(
     "/api/v1/ops/overview",
-    safe((ctx) =>
+    safe((ctx) => {
+      const resources = store.list().filter(
+        (r) => publicKinds.has(r.kind) && inCluster(r, ctx.url.searchParams.get("cluster_id")),
+      );
       ctx.json({
-        resources: store
-          .list()
-          .filter(
-            (r) =>
-              publicKinds.has(r.kind) &&
-              inCluster(r, ctx.url.searchParams.get("cluster_id")),
-          )
+        resources: resources
           .slice(0, 1000)
           .map((r) => ({...store.public(r),...(r.kind==='application'?{upgrade:applicationUpgrade(r)}:{})})),
         agents: agents(),
@@ -223,16 +220,10 @@ export function registerOperationsPlatform(
           certificate_cloud_providers: ["aliyun", "tencent", "volcengine"],
           agent_capability: "operations.platform",
         },
-        total: store
-          .list()
-          .filter(
-            (r) =>
-              publicKinds.has(r.kind) &&
-              inCluster(r, ctx.url.searchParams.get("cluster_id")),
-          ).length,
+        total: resources.length,
         limit: 1000,
-      }),
-    ),
+      });
+    }),
   );
   router.get(
     "/api/v1/ops/resources",

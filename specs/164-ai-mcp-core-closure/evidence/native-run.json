@@ -1,0 +1,10 @@
+{
+  "id": "8ed83756-db0b-4850-93a7-17cbfaf5c68b",
+  "state": "succeeded",
+  "code": "",
+  "stdout": "CORE_E2E_TASK_SUCCESS_9895735c\n",
+  "stderr": "",
+  "exit_code": 0,
+  "started_at": "2026-11-14T14:55:47.340Z",
+  "finished_at": "2026-11-14T14:55:47.382Z"
+}
