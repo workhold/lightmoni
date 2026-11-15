@@ -1,4 +1,4 @@
-# SDD 170 验证记录
+# SDD 171 验证记录
 
 原始验证日期：2026-11-14。范围为 Slice 5 的现有任务服务提案持续授权。原始分支基线为 `main@5076f64` + PR #218 `8ce9bca`，当时的 SDD 编号为 162/163；以下旧测试数量仅对应该基线。未部署生产、未操作真实主机、未发布镜像。
 
@@ -74,4 +74,22 @@ PR #218 已合入。集成分支再次合并 `origin/main@5c3cbaec`，保留最�
 
 架构同步目标为 [Doca LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)。首次保存前 seq 1814/version 1816、1026 个块；保存成功后回读 seq 1815/version 1817、1028 个块。第 14.4 节在 SDD 167 后新增当时命名的 `sdd168-service-task-proposals` 和 `sdd168-service-task-continuation` 两块；第 28.7 节原块 `agent044-p-24` 保留 ID 并更新文字。首次回读时三段与当时的 SDD 168 仓库文本逐字一致；旧块无删除、原顺序不变，只有这一个旧文本块改变；58 张原生图块的节点、连线、端点和 ID 均逐一相同，MCP 三张图分别保持 15/17、10/10、8/9 个节点/连线。架构变化涉及服务主体提案的 owner、审批 actor、证据加密保存及审批/领取/重试复验路径；仓库同步位置为 `docs/system-design.md` 第 14.4 与 28.7 节。
 
-改号后 Doca 保存成功并按最新版本回读：seq 1816/version 1818、epochId `63d4490e-11da-4b5a-8674-cd671d8ad4b6`、总 1028 块。第 14.4 节当前目标块为 `sdd170-service-task-proposals` 和 `sdd170-service-task-continuation`，文字分别与仓库 `docs/system-design.md` 第 888、890 行逐字相等；第 28.7 节的 `agent044-p-24` 保持原 ID，文字与第 1367 行逐字相等。旧的两个 `sdd168-*` 块已删除；其他共享块顺序不变，除预期 `agent044-p-24` 外内容逐对象相等。58 张原生图的对象、ID、节点、连线和端点均与变更前逐对象相等，边端点有效；三张 MCP 图仍为 15/17、10/10、8/9 个节点/连线。当前仓库 SDD 170 架构段落与 Doca 最新回读一致。
+首次改号到 SDD 170 后，Doca 保存成功并按当时最新版本回读：seq 1816/version 1818、epochId `63d4490e-11da-4b5a-8674-cd671d8ad4b6`、总 1028 块。第 14.4 节当时目标块为 `sdd170-service-task-proposals` 和 `sdd170-service-task-continuation`，文字分别与当时仓库 `docs/system-design.md` 第 888、890 行逐字相等；第 28.7 节的 `agent044-p-24` 保持原 ID，文字与当时第 1367 行逐字相等。旧的两个 `sdd168-*` 块已删除；其他共享块顺序不变，除预期 `agent044-p-24` 外内容逐对象相等。58 张原生图的对象、ID、节点、连线和端点均与变更前逐对象相等，边端点有效；三张 MCP 图仍为 15/17、10/10、8/9 个节点/连线。此轮证据仅证明当时的 SDD 170 文本已同步。
+
+## 2026-11-15 合入 PR #231 后的集成
+
+主干更新到 `main@6febecd`，其中 PR #231 已占用 SDD 170。本切片因此改为 SDD 171，并保留主干的 `specs/170-assistant-lifecycle-fixes` 与相关实现。#231 的 Runtime 产品改动仅在 `runtime/src/assistant/types.ts`，与本切片所改源码无同文件冲突；AI runner、Web 助手和系统设计变更已随主干合入，`docs/system-design.md` 自动合并无冲突。产品代码相对上一轮 #219 集成未改变；需以本节复验新版主干的相关路径。
+
+SDD 171 仓库架构段落位于 `docs/system-design.md` 第 890、892、1371 行，第 894 行链接指向 `specs/171-service-task-proposal-automation/spec.md`。前一轮 Doca SDD 170 回读不作为此次改号的证据；下文记录最新保存及回读。
+
+| 检查 | `main@6febecd` 集成结果 |
+| --- | --- |
+| 9 个 #219 相关 Runtime 文件及 #231 的 `assistant.test.ts` | 89/89 通过 |
+| ai-runtime `npm test` | 84/84 通过 |
+| Web 助手时间线单测 | 10/10 通过 |
+| Runtime、ai-runtime、Web `npm run typecheck` 和 `npm run build` | 均通过；Web 仍有第三方依赖 `use client` 提示 |
+| `git diff --check` | 通过 |
+
+上述为交叉路径定向回归；`main@6febecd` 的 Runtime 全量未重跑，前一轮 1900 项及其主干基线对照仍仅对应 `main@5c3cbaec`，不作为新版主干全量结论。TypeScript SDK 产品代码未变，前一轮 28/28 结果仍为集成前参考；PR #231 自身验证记录也报告 28/28。日志位于 `/private/tmp/lightmoni-pr219-targeted-6feb.log`、`/private/tmp/lightmoni-pr219-ai-test-6feb.log` 和 `/private/tmp/lightmoni-pr219-web-assistant-6feb.log`。
+
+Doca [LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53) 再次保存成功并按最新版本回读：seq 1817/version 1819、1028 块。`sdd171-service-task-proposals`、`sdd171-service-task-continuation` 与仓库第 890、892 行逐字相等；保留原 ID 的 `agent044-p-24` 与第 1371 行逐字相等。旧 `sdd170-*` 两块已移除，两块新内容位于 `sdd167-capability-http-bearer` 后、`mcp047-summary-5` 前；其他共享块的内容与顺序不变。58 张原生图的完整对象、节点、连线、端点与 ID 均与 seq 1816 逐对象相等，所有边端点有效；三张 MCP 图保持 15/17、10/10、8/9 个节点/连线。当前仓库 SDD 171 架构文本与 Doca 最新回读一致。
