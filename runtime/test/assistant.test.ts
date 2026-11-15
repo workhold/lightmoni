@@ -30,7 +30,7 @@ import {
   billingKey,
   decode,
 } from "../src/assistant/usage.js";
-import { monitoringTools } from "../src/assistant/tools.js";
+import { ASSISTANT_CATALOG_BYTES, monitoringTools } from "../src/assistant/tools.js";
 import {
   worker,
   validateMetadata,
@@ -619,7 +619,7 @@ test("monitoring tools use shared bounded queries, accurate failures and review-
   await assert.rejects(
     run.execute(
       {
-        sql: "SELECT body FROM log_app",
+        sql: "SELECT body FROM log_app WHERE $__timeFilter(event_time)",
         range: { from: "2026-10-16T00:00:00Z", to: "2026-10-17T00:00:00Z" },
         interval_ms: 1000,
       },
@@ -645,6 +645,24 @@ test("monitoring tools use shared bounded queries, accurate failures and review-
   assert.equal(draft.saved, false);
   assert.equal(draft.requires_review, true);
   assert.ok(draft.draft.panels[0].id);
+});
+
+test("monitoring catalog projection is bounded without losing full single-table descriptions", async (t) => {
+  const f = await fixture(t);
+  const tables = Array.from({ length: 20 }, (_, index) => ({
+    id: `log-${index}`, name: `log_${index}`, kind: "log",
+    columns: Array.from({ length: 50 }, (_, column) => ({ name: `column_${column}_${"x".repeat(80)}`, type: "String" })),
+    services: Array.from({ length: 40 }, (_, service) => `service_${service}_${"y".repeat(80)}`),
+  }));
+  f.deps.cat.list = async () => tables;
+  const tools = monitoringTools(f.deps);
+  const catalog = await tools.find(tool => tool.name === "list_tables")!.execute({}, new AbortController().signal);
+  assert.ok(Buffer.byteLength(JSON.stringify(catalog)) <= ASSISTANT_CATALOG_BYTES);
+  assert.equal(catalog.truncated, true);
+  assert.equal(catalog.byte_limited, true);
+  assert.equal(catalog.tables[0].columns, undefined);
+  const described = await tools.find(tool => tool.name === "describe_table")!.execute({ table: "log_0" }, new AbortController().signal);
+  assert.equal(described.columns.length, 50);
 });
 test("connection probe uses one fixed budget and preserves failed usage without changing config or sessions", async (t) => {
   const inputs: any[] = [];

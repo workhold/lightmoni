@@ -16,6 +16,39 @@ const string = { type: "string" },
     additionalProperties: false,
   });
 const rangeSchema = obj({ from: string, to: string }, ["from", "to"]);
+export const ASSISTANT_CATALOG_BYTES = 12 << 10;
+const jsonBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value) ?? "");
+
+/** Keep the internal model catalog small; MCP retains its full schema projection. */
+export function compactAssistantCatalog(input: {
+  tables: Array<{ id: string; name: string; kind: string; services?: string[]; columns?: unknown }>;
+  limit?: number;
+  truncated?: boolean;
+}) {
+  const summaries = input.tables.map(({ id, name, kind, services }) => ({
+    id, name, kind, ...(services ? { services } : {}),
+  }));
+  const output: {
+    tables: typeof summaries;
+    limit: number;
+    truncated: boolean;
+    byte_limit: number;
+    byte_limited: boolean;
+  } = {
+    tables: [], limit: input.limit ?? input.tables.length,
+    truncated: input.truncated ?? false,
+    byte_limit: ASSISTANT_CATALOG_BYTES, byte_limited: false,
+  };
+  for (const summary of summaries) {
+    if (jsonBytes({ ...output, tables: [...output.tables, summary] }) > ASSISTANT_CATALOG_BYTES) {
+      output.truncated = true;
+      output.byte_limited = true;
+      break;
+    }
+    output.tables.push(summary);
+  }
+  return output;
+}
 const querySchema = obj(
   { refId: string, sql: string, params: { type: "object" } },
   ["refId", "sql"],
@@ -59,12 +92,12 @@ export function monitoringTools(
     {
       name: "list_tables",
       description:
-        "List available LightMoni telemetry tables, their kinds and services. Use this before constructing SQL.",
+        "List compact telemetry table identities, kinds and services for target selection. Use describe_table for columns. If the UI context already selects a table, skip this tool and call describe_table directly.",
       effect: "read",
       schema: obj({}),
       execute: async (input, signal) => {
         object(input, []);
-        return telemetry.list(signal);
+        return compactAssistantCatalog(await telemetry.list(signal));
       },
     },
     {
@@ -81,7 +114,7 @@ export function monitoringTools(
     {
       name: "run_query",
       description:
-        "Execute one bounded read-only ClickHouse query. Include $__timeFilter(event_time) and supply an explicit UTC half-open time range. Up to 1000 result rows are shown to the assistant; truncation is explicit.",
+        "Execute one bounded read-only ClickHouse query. Prefer one verified table per call and simple aggregates; do not UNION tables. Include $__timeFilter(column) with a verified time column and supply an explicit UTC half-open range. Verify selected, grouped and ordered columns. After a validation error, make one targeted correction rather than speculative rewrites. Results are row and byte bounded; truncation is explicit.",
       effect: "read",
       schema: obj(
         {

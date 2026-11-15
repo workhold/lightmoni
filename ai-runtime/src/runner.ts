@@ -268,6 +268,10 @@ async function run(input: Input) {
   const stream = await agent.stream(history, {
     abortSignal: signal,
     maxSteps: input.config.max_steps,
+    prepareStep: ({ stepNumber }) => {
+      if (stepNumber >= input.config.max_steps - 1)
+        return { toolChoice: "none" as const, activeTools: [] };
+    },
     modelSettings: {
       maxOutputTokens: input.config.max_output_tokens,
       maxRetries: 0,
