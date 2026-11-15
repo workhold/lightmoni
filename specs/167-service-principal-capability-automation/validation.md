@@ -36,10 +36,11 @@
 | Capability/MCP/服务主体、平台 API 与应用回归 | 79 项：78 通过、1 跳过、0 失败 | `/tmp/lightmoni-pr218-targeted-93dbe070.log`；跳过的是需真实容器 Agent 的集群同步用例 |
 | `npm --prefix ai-runtime test` | 79/79 通过 | `/tmp/lightmoni-pr218-ai-runtime-93dbe070.log` |
 | `npm --prefix sdk/typescript test` | 28/28 通过 | `/tmp/lightmoni-pr218-sdk-93dbe070.log` |
-| `npm --prefix runtime test` | 执行中 | `/tmp/lightmoni-pr218-runtime-93dbe070.log`；在结果完成前不声称全量通过 |
+| `npm --prefix runtime test` | 1892 项：1850 通过、35 跳过、7 失败 | `/tmp/lightmoni-pr218-runtime-93dbe070.log`；不声称全量通过 |
+| 在纯 `main@93dbe070` 重跑七个失败文件 | 131 项：124 通过、7 失败，失败名称与集成分支完全相同 | `/tmp/lightmoni-pr218-main-baseline-seven.log`；证明本轮七项失败均可在未含 #218 的主干复现 |
 | `git diff --check` | 通过 | 本轮 SDD 与架构同步证据无空白格式错误 |
 
-上述定向 runtime 检查覆盖 `capability*`、`mcp*`、`service-principal-capabilities`、`platform-api`、`application-install` 和 `application-list-filter` 测试文件。完整 runtime 结果待本轮补记；真实客户端矩阵与生产 E2E 未执行。
+上述定向 runtime 检查覆盖 `capability*`、`mcp*`、`service-principal-capabilities`、`platform-api`、`application-install` 和 `application-list-filter` 测试文件。完整 runtime 的七项失败位于 `agent-host-admission`、`machine-service-addresses`、`machine-terminal`、`managed-machines`、`node-lifecycle`、`runtime-monitor` 和 `workload-readiness`；相同七项均在纯主干重现，不归因于本 PR。真实客户端矩阵与生产 E2E 未执行。
 
 ## 架构同步状态
 
