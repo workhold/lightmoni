@@ -20,7 +20,7 @@ export function agentUpdateTools(store: AgentUpdateAssistantStore): Tool[] {
     },
     {
       name: "propose_agent_update", effect: "draft",
-      description: "Prepare a reviewable Agent upgrade or rollback plan for a registered host. This performs a fixed read-only SSH probe using an existing credential; it never changes the host, starts an upgrade, or reveals secrets. Upgrade requires a target SHA256 from list_agent_releases. Rollback selects the retained previous release. Return review_url for the administrator to explicitly approve in host management.",
+      description: "Prepare a reviewable Agent upgrade or rollback plan for a registered host. This performs a fixed read-only SSH probe using an existing credential; it never changes the host, starts an upgrade, or reveals secrets. Before every update batch, refresh list_agent_releases and select the current target by host architecture and immutable SHA256; never reuse an earlier conversation catalog. Upgrade requires a target SHA256 from that fresh list. Rollback selects the retained previous release. If the target is unavailable or its digest changed, refresh and re-evaluate only once; existing maintenance or host-task conflicts are not retryable. Return review_url for the administrator to explicitly approve in host management or the inline plan review.",
       schema: schema({ machine_id: string, action: { type: "string", enum: ["upgrade", "rollback"] }, target_sha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, credential_id: string }, ["machine_id", "action"]),
       execute: async (input, signal, user) => {
         admin(user); object(input, ["machine_id", "action", "target_sha256", "credential_id"], ["machine_id", "action"]);
