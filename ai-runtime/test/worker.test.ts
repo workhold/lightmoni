@@ -32,7 +32,7 @@ function reply(p:Protocol,tool:boolean,stream:boolean,usage=true){
  const value={candidates:[{index:0,content:{role:'model',parts:[tool?{functionCall:{name:'list_tables',args:{}},thoughtSignature:'opaque-gemini-signature'}:{text,thoughtSignature:'opaque-text-signature'}]},finishReason:'STOP'}],usageMetadata:usage?{promptTokenCount:10,candidatesTokenCount:3,thoughtsTokenCount:2,totalTokenCount:15}:undefined};
  return stream?[value]:value;
 }
-async function worker(p:Protocol,mode:'tool'|'summary'|'missing'|'error'|'cancel'|'length', replay?:any[], reasoning_effort?:'provider-default'|'none'|'minimal'|'low'|'medium'|'high'|'xhigh',options:{connectionTest?:boolean;model?:string;maxOutputTokens?:number}={}){
+async function worker(p:Protocol,mode:'tool'|'tool-budget'|'summary'|'missing'|'error'|'cancel'|'length', replay?:any[], reasoning_effort?:'provider-default'|'none'|'minimal'|'low'|'medium'|'high'|'xhigh',options:{connectionTest?:boolean;model?:string;maxOutputTokens?:number;maxSteps?:number}={}){
  const requests:any[]=[];let child:ReturnType<typeof spawn>;
  const server=createServer(async(req,res)=>{
  let raw='';for await(const chunk of req)raw+=chunk;
@@ -40,7 +40,8 @@ async function worker(p:Protocol,mode:'tool'|'summary'|'missing'|'error'|'cancel
  if(mode==='cancel'){res.writeHead(200,{'content-type':'text/event-stream'});res.write(': waiting\n\n');setTimeout(()=>child.kill('SIGTERM'),20);return;}
  if(mode==='error'){res.writeHead(401,{'content-type':'application/json'});res.end('{"error":{"message":"secret fixture error"}}');return;}
  const streaming=body.stream===true||req.url!.includes('streamGenerateContent');
- const tool=mode==='tool'&&requests.length===1;
+ const disabled=/(?:\"none\"|\"NONE\")/.test(JSON.stringify(body.tool_choice??body.toolChoice??body.toolConfig??{}))||!Array.isArray(body.tools)||body.tools.length===0;
+ const tool=(mode==='tool'&&requests.length===1)||(mode==='tool-budget'&&!disabled);
  const includeUsage=mode!=='missing'&&(p!=='openai-chat-completions'||!streaming||body.stream_options?.include_usage===true);
  const result=reply(p,tool,streaming,includeUsage);
  if(mode==='length'){
@@ -61,11 +62,29 @@ async function worker(p:Protocol,mode:'tool'|'summary'|'missing'|'error'|'cancel
  child.stderr!.on('data',chunk=>stderr+=chunk);
  const messages=replay??(mode==='summary'?[{role:'user',content:'old '.repeat(350)},{role:'assistant',content:'old answer'},{role:'user',content:'older '.repeat(250)},{role:'assistant',content:'older answer'},{role:'user',content:'new question'}]:[{role:'user',content:'previous question'},{role:'assistant',content:'previous answer'},{role:'user',content:'current question'}]);
  const model = options.model ?? (p === 'google-generative-ai' ? 'models/gemini-fixture' : p === 'openai-responses' && reasoning_effort ? 'gpt-5' : 'fixture');
- child.stdin!.write(JSON.stringify({type:'start',input:{system:'monitoring',...(options.connectionTest?{connection_test:true}:{}),config:{protocol:p,base_url:`http://127.0.0.1:${port}/tenant/v1`,api_key:'fixture',model,max_input_tokens:mode==='summary'?4096:20000,max_output_tokens:options.maxOutputTokens??1024,max_steps:4,...(reasoning_effort?{reasoning_effort}: {})},messages,tools:[{name:'list_tables',description:'list',schema:{type:'object',properties:{}}}]}})+'\n');
+ child.stdin!.write(JSON.stringify({type:'start',input:{system:'monitoring',...(options.connectionTest?{connection_test:true}:{}),config:{protocol:p,base_url:`http://127.0.0.1:${port}/tenant/v1`,api_key:'fixture',model,max_input_tokens:mode==='summary'?4096:20000,max_output_tokens:options.maxOutputTokens??1024,max_steps:options.maxSteps??4,...(reasoning_effort?{reasoning_effort}: {})},messages,tools:[{name:'list_tables',description:'list',schema:{type:'object',properties:{}}}]}})+'\n');
  const timer=setTimeout(()=>child.kill('SIGKILL'),15000);
  await new Promise<void>(r=>child.on('exit',()=>r()));clearTimeout(timer);server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));
  return {frames,requests,stderr};
 }
+
+for(const p of protocols)test(`${p} reserves the final step for a no-tool answer`,async()=>{
+ const {frames,requests,stderr}=await worker(p,'tool-budget',undefined,undefined,{maxSteps:2});
+ assert.equal(stderr,'');assertRequestLifecycle(frames,2,'succeeded');
+ assert.equal(requests.length,2,JSON.stringify(frames));
+ assert.ok(frames.some(f=>f.type==='done'),JSON.stringify(frames));
+ assert.ok(!frames.some(f=>f.type==='error'&&f.code==='step_limit'),JSON.stringify(frames));
+ assert.ok(frames.some(f=>f.name==='assistant.delta'&&f.data.text.includes('verified fixture answer')));
+ assert.ok(!Array.isArray(requests.at(-1).body.tools)||requests.at(-1).body.tools.length===0,JSON.stringify(requests.at(-1).body));
+});
+
+for(const p of protocols)test(`${p} a single-step budget is answer-only`,async()=>{
+ const {frames,requests}=await worker(p,'tool-budget',undefined,undefined,{maxSteps:1});
+ assert.equal(requests.length,1,JSON.stringify(frames));assertRequestLifecycle(frames,1,'succeeded');
+ assert.equal(frames.some(f=>f.type==='tool.request'),false);
+ assert.ok(frames.some(f=>f.type==='done'),JSON.stringify(frames));
+ assert.ok(!Array.isArray(requests[0].body.tools)||requests[0].body.tools.length===0,JSON.stringify(requests[0].body));
+});
 function assertRequestLifecycle(frames:any[],count:number,status:string){
  const starts=frames.filter(f=>f.name==='model.request.started'),usage=frames.filter(f=>f.name==='turn.usage');
  assert.equal(starts.length,count,JSON.stringify(frames));assert.equal(usage.length,count,JSON.stringify(frames));

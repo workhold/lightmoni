@@ -25,6 +25,7 @@ import { capabilityDigest } from "./idempotency.js";
 import type { AccessAuthority, CapabilityAuthority, CapabilityDispatcherContract, CapabilitySummary, InvocationContext, Principal, SessionAuthority } from "./types.js";
 import { defineCapability, validateCapabilityRegistry, type CapabilityDefinition, type CapabilityDefinitionSeed } from "./descriptor.js";
 import { capabilityErrorCategory, capabilityErrorDetail, capabilityErrorStatus } from "./errors.js";
+import { compactAssistantCatalog } from "../assistant/tools.js";
 
 const string = { type: "string", minLength: 1, maxLength: 128 };
 const schema = (properties: Record<string, any> = {}, required: string[] = []) => ({ type: "object", properties, required, additionalProperties: false });
@@ -181,7 +182,9 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         return {executions:options.taskCenter.list({...i,limit:i.limit??30}).map(r=>this.execution(p,r)),output_omitted:true};
       }},
       {name:"lightmoni_executions_get",description:"Read one real task execution and native state. Poll this ID after disconnect; no raw output is returned.",scope:"executions.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:(p,i)=>({execution:this.execution(p,options.taskCenter.get(i.id.startsWith("task:")?i.id.slice(5):i.id)),output_omitted:true})},
-      {name:"lightmoni_telemetry_catalog",description:"List telemetry table schema metadata. No telemetry rows or arbitrary SQL. Requires an installation-wide grant because tables are not isolated by host.",scope:"telemetry.catalog.read",allHosts:true,effect:"read",inputSchema:schema(),execute:async(_p,_i,c)=>{const tables=(await telemetry.list(c.signal)).tables;return {tables:tables.slice(0,100).map(t=>({id:t.id,name:t.name,kind:t.kind,columns:t.columns})),limit:100,truncated:tables.length>100};}},
+      {name:"lightmoni_telemetry_catalog",description:"List telemetry table schema metadata. No telemetry rows or arbitrary SQL. Requires an installation-wide grant because tables are not isolated by host.",scope:"telemetry.catalog.read",allHosts:true,effect:"read",inputSchema:schema(),execute:async(p,_i,c)=>{const tables=(await telemetry.list(c.signal)).tables,selected=tables.slice(0,100),truncated=tables.length>100;
+        if(p.source==="assistant")return compactAssistantCatalog({tables:selected.map(t=>({id:t.id,name:t.name,kind:t.kind,services:t.services})),limit:100,truncated});
+        return {tables:selected.map(t=>({id:t.id,name:t.name,kind:t.kind,columns:t.columns})),limit:100,truncated};}},
       {name:"lightmoni_telemetry_describe",description:"Read one telemetry table by stable ID or name. No data rows. Requires an installation-wide catalog grant.",scope:"telemetry.catalog.read",allHosts:true,effect:"read",inputSchema:schema({table:{...string,maxLength:200}},["table"]),execute:async(_p,i,c)=>({table:await telemetry.describe(i.table,c.signal)})},
       {name:"lightmoni_telemetry_query",description:"Execute one bounded read-only telemetry query through the existing checked Query service. Requires an installation-wide telemetry.query grant; host-scoped grants are not data isolation.",scope:"telemetry.query",allHosts:true,effect:"read",inputSchema:schema({
         sql:{type:"string",minLength:1,maxLength:16000},
@@ -647,7 +650,12 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     const telemetryMap:Record<string,string>={list_tables:"lightmoni_telemetry_catalog",describe_table:"lightmoni_telemetry_describe",run_query:"lightmoni_telemetry_query"};
     const telemetry = Object.entries(telemetryMap).map(([name,target])=>{
       const d=this.definitions.find(x=>x.name===target)!;
-      return {name,description:d.description,schema:d.inputSchema,effect:"read" as const,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+      const description = name === "list_tables"
+        ? "List compact telemetry table identities, kinds and services for target selection. Use describe_table for columns. If the UI context already selects a table, skip this tool and call describe_table directly."
+        : name === "run_query"
+          ? "Execute one bounded read-only ClickHouse query. Prefer one verified table per call and simple aggregates; do not UNION tables. Include $__timeFilter(column) with a verified time column and an explicit UTC half-open range. Verify selected, grouped and ordered columns. After a validation error, make one targeted correction rather than speculative rewrites. Results are row and byte bounded."
+          : d.description;
+      return {name,description,schema:d.inputSchema,effect:"read" as const,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
         if(!user)fail(401,"login_required");const p=this.authority.sessionPrincipal(user as User,"assistant");
         const v=await this.invoke(p,target,input,{signal,session_id:scope?.session_id});
         return name==="describe_table"?v.data.table:v.data;

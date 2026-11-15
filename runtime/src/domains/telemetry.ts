@@ -10,7 +10,9 @@ export interface TelemetryQueryInput {
 }
 export const TELEMETRY_SAMPLE_ROWS = 1000;
 export const TELEMETRY_SAMPLE_BYTES = 60 << 10;
+export const ASSISTANT_TELEMETRY_SAMPLE_BYTES = 16 << 10;
 const size = (value: unknown) => Buffer.byteLength(JSON.stringify(value) ?? "");
+const assistantTimeMacro = /\$__timeFilter\(\s*[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)?\s*\)/;
 
 /** Shared telemetry application service for assistant, MCP and HTTP adapters. */
 export class TelemetryService {
@@ -46,6 +48,8 @@ export class TelemetryService {
           || Object.keys(value).some(key => !["type", "value"].includes(key))) throw Error("invalid tool input");
       }
     }
+    if (source === "assistant" && !assistantTimeMacro.test(sql))
+      throw Error("assistant SQL must include $__timeFilter(column) with a verified time column");
     const response: QueryResponse = await this.deps.query({
       request_id: randomBytes(16).toString("hex"), range: {from, to}, interval_ms: input.interval_ms,
       source, queries: [{refId: "A", sql, params: input.params}],
@@ -59,16 +63,17 @@ export class TelemetryService {
         remaining -= frame.rows.length;
       }
     }
+    const byteLimit = source === "assistant" ? ASSISTANT_TELEMETRY_SAMPLE_BYTES : TELEMETRY_SAMPLE_BYTES;
     const output = { query: response, range: input.range, sample_limit: TELEMETRY_SAMPLE_ROWS,
-      sample_truncated: sampled, sample_byte_limit: TELEMETRY_SAMPLE_BYTES, sample_byte_limited: false };
+      sample_truncated: sampled, sample_byte_limit: byteLimit, sample_byte_limited: false };
     const frames = response.results.flatMap(result => result.frames);
-    while (size(output) > TELEMETRY_SAMPLE_BYTES) {
+    while (size(output) > byteLimit) {
       const frame = frames.reduce((largest, item) => item.rows.length > (largest?.rows.length ?? 0) ? item : largest, frames[0]);
       if (!frame?.rows.length) break;
       frame.rows = frame.rows.slice(0, -Math.max(1, Math.ceil(frame.rows.length / 4)));
       output.sample_truncated = true; output.sample_byte_limited = true;
     }
-    if (size(output) > TELEMETRY_SAMPLE_BYTES) fail(413, "result_too_large");
+    if (size(output) > byteLimit) fail(413, "result_too_large");
     return output;
   }
 }
