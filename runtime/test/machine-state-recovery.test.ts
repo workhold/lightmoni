@@ -156,3 +156,25 @@ test('foreign pending work and another active identity cannot enter a recovery p
     assert.equal(f.db.all('SELECT * FROM machine_state_recoveries').length, 0);
   }
 });
+
+test('verified remote absence retires current and historical same-machine enrollments without touching another host', async t => {
+  const f = await fixture(t), other = await f.request('/machines', 'POST', { name: 'other-host', address: 'other.example.test' });
+  const issue = (id: string, machine: string, agent: string) => f.db.run(`INSERT INTO agent_enrollments(id,token_hash,endpoint_origin,allowed_arch_json,version,initial_label_id,scopes_json,status,expires_at,created_at,created_by,machine_id,agent_id,replaces_agent_id)
+    SELECT ?,?,endpoint_origin,allowed_arch_json,version,initial_label_id,scopes_json,'active',expires_at,created_at,created_by,?,?,replaces_agent_id FROM agent_enrollments WHERE machine_id=? LIMIT 1`, id, 'fixture-hash-' + id, machine, agent, f.machine);
+  issue('historical-enrollment', f.machine, 'historical-agent'); issue('other-host-enrollment', other.data.id, 'other-host-agent');
+  const planned = await f.plan(); assert.equal(planned.status, 201, planned.text);
+  assert.ok(planned.data.plan.effects.identities.some((entry: any) => entry.table === 'agent_enrollments' && entry.agent_id === 'historical-agent'), JSON.stringify({rows:f.db.all('SELECT id,machine_id,agent_id,status FROM agent_enrollments'),identities:planned.data.plan.effects.identities}));
+  const result = await f.apply(planned.data); assert.equal(result.status, 200, result.text);
+  assert.deepEqual(f.db.all<any>("SELECT DISTINCT status FROM agent_enrollments WHERE machine_id=?", f.machine).map(row => row.status), ['cancelled']);
+  assert.equal(f.db.get<any>("SELECT status FROM agent_enrollments WHERE machine_id=?", other.data.id)!.status, 'active');
+  assert.equal(f.db.get<any>("SELECT state FROM agent_lifecycle WHERE agent_id=?", f.agent)!.state, 'removed');
+});
+
+test('a newly arriving same-machine enrollment invalidates the reviewed recovery snapshot', async t => {
+  const f = await fixture(t), planned = await f.plan(); assert.equal(planned.status, 201, planned.text);
+  f.db.run(`INSERT INTO agent_enrollments(id,token_hash,endpoint_origin,allowed_arch_json,version,initial_label_id,scopes_json,status,expires_at,created_at,created_by,machine_id,agent_id,replaces_agent_id)
+    SELECT 'late-enrollment','fixture-late-hash',endpoint_origin,allowed_arch_json,version,initial_label_id,scopes_json,'active',expires_at,created_at,created_by,machine_id,'late-agent',replaces_agent_id FROM agent_enrollments WHERE machine_id=? LIMIT 1`, f.machine);
+  const result = await f.apply(planned.data); assert.equal(result.status, 409, result.text);
+  assert.equal(f.db.get<any>("SELECT status FROM agent_enrollments WHERE id='late-enrollment'")!.status, 'active');
+  assert.equal(f.db.all('SELECT * FROM agent_lifecycle_events').length, 0);
+});
