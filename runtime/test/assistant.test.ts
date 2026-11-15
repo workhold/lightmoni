@@ -481,6 +481,25 @@ test("credential echo is rejected before public SSE, summary and checkpoint comm
     /plaintext/,
   );
 });
+
+test("degraded compaction metadata is persisted without changing the original checkpoint", async (t) => {
+ const f = await fixture(t, {
+  runtime: async (_input, _signal, _tool, emit) => {
+   if(!_input.messages.some(message => message.content === "second"))return;
+   await emit({ type: "compacted", summary: "Model history summary was truncated or empty.", through: 1, degraded: true });
+   await emit({ type: "event", name: "context.compacted", data: { rounds: 1, degraded: true } });
+  },
+ });
+ await configure(f);
+ const sid = await session(f);
+ await f.request("/sessions/" + sid + "/turns", "POST", { text: "first" });
+ const response = await f.request("/sessions/" + sid + "/turns", "POST", { text: "second" });
+ assert.match(response.raw, /context.compacted/);
+ assert.match(response.raw, /"degraded":true/);
+ const saved = await f.request("/sessions/" + sid);
+ assert.equal(saved.data.summary_through, 1);
+ assert.equal(saved.data.summary, "Model history summary was truncated or empty.");
+});
 test("concurrent turn rejects, cancellation releases slot and accounts unknown consumption", async (t) => {
   let entered!: () => void;
   const started = new Promise<void>((r) => {

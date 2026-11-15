@@ -43,7 +43,7 @@ export function assistantTimeline(events: AssistantEvent[],language:Language='zh
       if (trace) { trace.result = data.value; trace.status = data.status === 'success' ? 'success' : data.status === 'cancelled' ? 'cancelled' : 'error'; }
     }
     if (event.type === 'context.compacting') turn.compacting = true;
-    if (event.type === 'context.compacted') { turn.compacting = false; turn.compacted = true; }
+    if (event.type === 'context.compacted') { turn.compacting = false; turn.compacted = true; turn.degraded = data.degraded === true; }
     if (event.type === 'turn.usage') {
       const key = data.phase === 'compact' ? 'compactionUsage' : 'usage';
       const usage = turn[key] ?? {};

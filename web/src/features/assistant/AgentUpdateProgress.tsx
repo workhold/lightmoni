@@ -1,4 +1,4 @@
-import {useEffect,useState} from 'react';
+import React,{useEffect,useState} from 'react';
 import {Alert,Button,Checkbox,Popconfirm,Space,Tag,Typography} from '../../shared/ui';
 import {api} from '../../shared/api';
 import {useI18n} from '../../shared/i18n';
@@ -10,8 +10,25 @@ export default function AgentUpdateProgress({value,canApprove}:{value:unknown;ca
  const {t,language}=useI18n(),parsed=agentUpdateRecord(value);
  const [record,setRecord]=useState<AgentUpdate|undefined>(parsed),[reviewed,setReviewed]=useState(false),[busy,setBusy]=useState<''|'apply'|'cancel'>(''),[error,setError]=useState('');
  useEffect(()=>{setRecord(parsed);setReviewed(false);setError('')},[parsed?.id]);
+ const recordStatus=record?.status,recordID=record?.id,machineID=record?.machine_id,path=record?agentUpdateAPIPath(record):'';
+ useEffect(()=>{
+  if(!['running','verifying'].includes(recordStatus??''))return;
+  let active=true,timer:ReturnType<typeof setTimeout>|undefined;
+  const controller=new AbortController();
+  const poll=async()=>{
+   try{
+    const next=agentUpdateRecord(await api(path,{signal:controller.signal}));
+    if(!active)return;
+    if(!next||next.id!==recordID||next.machine_id!==machineID){setError(t('原更新记录响应无效，保留最后状态并稍后重试','Invalid original update response. Retaining the last state and retrying.'));timer=setTimeout(poll,5000);return;}
+    setRecord(next);setError('');
+    if(['running','verifying'].includes(next.status))timer=setTimeout(poll,2500);
+   }catch(problem){if(active){setError(t('暂时无法刷新更新状态，保留最后记录，稍后重试','Unable to refresh update status. Retaining the last record and retrying.'));timer=setTimeout(poll,5000)}}
+  };
+  timer=setTimeout(poll,1500);
+  return()=>{active=false;if(timer)clearTimeout(timer);controller.abort()};
+ },[recordStatus,path]);
  if(!record)return null;
- const awaiting=agentUpdateReviewable(record),expired=updatePlanExpired(record),path=agentUpdateAPIPath(record);
+ const awaiting=agentUpdateReviewable(record),expired=updatePlanExpired(record);
  const failure=(problem:unknown)=>{setError(problem instanceof Error?updateMessageText(problem.message,t):t('操作失败，请重试','Operation failed. Retry.'))};
  async function apply(){
   if(!canApprove||!awaiting||!reviewed||busy||expired)return;
@@ -47,6 +64,11 @@ export default function AgentUpdateProgress({value,canApprove}:{value:unknown;ca
    <small>{t('确认后调用原 Agent 更新审批接口，模型不会代替你审批或执行。','Confirmation uses the native Agent update approval API. The model does not approve or execute for you.')}</small>
   </div>}
   {['running','verifying'].includes(record.status)&&<Alert type="info" showIcon title={t('执行请求已接受，正在更新或核验；这不代表升级成功','Execution accepted. Updating or verifying; this is not success yet.')}/>}
+  {record.status==='succeeded'&&<Alert type="success" showIcon title={t('Agent 更新成功，已核验目标发行','Agent update succeeded; the target release is verified')}/>}
+  {record.status==='rolled_back'&&<Alert type="warning" showIcon title={t('目标更新未通过健康确认，已恢复原程序','The target update failed health verification; the previous runtime was restored')}/>}
+  {record.status==='failed'&&<Alert type="error" showIcon title={record.error||t('Agent 更新失败','Agent update failed')}/>}
+  {record.status==='unknown'&&<Alert type="warning" showIcon title={t('更新结果未知，请打开原记录只读核对','Update outcome is unknown. Open the original record for read-only verification')}/>}
+  {record.status==='cancelled'&&<Alert type="info" showIcon title={t('更新计划已取消，未执行','The update plan was cancelled and did not run')}/>}
   {error&&<Alert type="error" showIcon title={error}/>}
  </div>;
 }
