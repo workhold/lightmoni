@@ -206,8 +206,9 @@ npm run version:check
 
 ```sh
 npm run version:check
-IMAGE=$(sed -n 's#^    image: ##p' compose.yaml)
-docker build --platform linux/amd64 \
+IMAGE=$(sed -n 's#^    image: \(docker\.heyphp\.com/lightmoni/lightmoni:.*\)$#\1#p' compose.yaml)
+docker buildx build --platform linux/amd64 --load \
+  -f deploy/server/Dockerfile \
   --build-arg BUILD_REVISION="$(git rev-parse HEAD)" \
   -t "$IMAGE" .
 docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'
