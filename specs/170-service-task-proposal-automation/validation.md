@@ -1,4 +1,4 @@
-# SDD 168 验证记录
+# SDD 170 验证记录
 
 原始验证日期：2026-11-14。范围为 Slice 5 的现有任务服务提案持续授权。原始分支基线为 `main@5076f64` + PR #218 `8ce9bca`，当时的 SDD 编号为 162/163；以下旧测试数量仅对应该基线。未部署生产、未操作真实主机、未发布镜像。
 
@@ -43,7 +43,7 @@
 
 ## 2026-11-15 主干集成回归
 
-本地分支 `codex/219-integration-168` 从含 PR #226 的 `main@93dbe070` 和 #218 集成提交 `d11551fa` 出发，只移植 PR #219 的两笔功能/文档提交并解决 `docs/platform-mcp.md`、`docs/system-design.md` 冲突，随后对齐 #218 的 Doca 回读记录提交 `464469fd`。保留主干与 SDD 167 的设计记录，将本切片独立重编为 SDD 168；`docs/system-design.md` 第 14.4 节新增任务服务提案与持续复验两段，第 28.7 节更新服务主体边界，`docs/platform-mcp.md` 与 `docs/mcp.md` 同步当前能力说明。没有修改 #218 工作区。
+本地集成从含 PR #226 的 `main@93dbe070` 和 #218 集成提交 `d11551fa` 出发，只移植 PR #219 的两笔功能/文档提交并解决 `docs/platform-mcp.md`、`docs/system-design.md` 冲突，随后对齐 #218 的 Doca 回读记录提交 `464469fd`。保留主干与 SDD 167 的设计记录；此轮暂编为 SDD 168，随后因主干编号冲突改为 SDD 170。`docs/system-design.md` 第 14.4 节新增任务服务提案与持续复验两段，第 28.7 节更新服务主体边界，`docs/platform-mcp.md` 与 `docs/mcp.md` 同步当前能力说明。没有修改 #218 工作区。
 
 | 检查 | 本地集成结果 |
 | --- | --- |
@@ -58,7 +58,7 @@
 
 ## 2026-11-15 最新主干与架构回读
 
-PR #218 已合入。集成分支再次合并 `origin/main@5c3cbaec`，保留最新主干与 #218 的代码和文档；与主干相比，变更仅涉及本切片的 Runtime 源码/测试、SDD、`docs/system-design.md`、`docs/platform-mcp.md` 和 `docs/mcp.md`。主干已有另一个 `specs/168-host-agent-lifecycle-ux`，因此本切片的 SDD 168 编号存在重复；在 PR 合并前须确定并消除编号冲突，且若改号须重新同步和回读 Doca。此处记录当前 SDD 168 文本的回读证据，不将其视作未来改号的证据。
+PR #218 已合入。集成分支再次合并 `origin/main@5c3cbaec`，保留最新主干与 #218 的代码和文档；与主干相比，变更仅涉及本切片的 Runtime 源码/测试、SDD、`docs/system-design.md`、`docs/platform-mcp.md` 和 `docs/mcp.md`。主干已有 `specs/168-host-agent-lifecycle-ux` 和 `specs/169-release-versioning`，本切片因此从暂用的 SDD 168 改为 SDD 170。下面的测试覆盖相同产品代码；编号变化仅改文档与 SDD 路径。
 
 | 检查 | 最新主干结果 |
 | --- | --- |
@@ -72,4 +72,4 @@ PR #218 已合入。集成分支再次合并 `origin/main@5c3cbaec`，保留最�
 
 全量的 30 项安装失败来自当前主干发布版本改为 0.1.1 后测试 fixture 仍缺少同名 Agent 发行包；另 9 项属于当前主干基线，包括 Agent 身份、HTTP 安装入口、主机服务地址/终端/节点生命周期、运行监控、SDK 下载及负载就绪。`/private/tmp/lightmoni-pr219-runtime-5c3cbaec.log`、`/private/tmp/lightmoni-main-install-release-5c3.log`、`/private/tmp/lightmoni-main-nine-baseline-5c3.log` 和 `/private/tmp/lightmoni-pr219-targeted-5c3cbaec.log` 为本机详细日志；文件路径是本地证据，不是仓库内制品。
 
-架构同步目标为 [Doca LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)。保存前 seq 1814/version 1816、1026 个块；保存成功后回读 seq 1815/version 1817、1028 个块。第 14.4 节在 SDD 167 后新增 `sdd168-service-task-proposals` 和 `sdd168-service-task-continuation` 两块，与 `docs/system-design.md` 第 14.4 节两段逐字一致；第 28.7 节原块 `agent044-p-24` 保留 ID，文字更新为与仓库第 28.7 节逐字一致。旧块无删除、原顺序不变，只有这一个旧文本块改变；58 张原生图块的节点、连线、端点和 ID 均逐一相同，MCP 三张图分别保持 15/17、10/10、8/9 个节点/连线。架构变化涉及服务主体提案的 owner、审批 actor、证据加密保存及审批/领取/重试复验路径；仓库同步位置为 `docs/system-design.md` 第 14.4 与 28.7 节。若后续改动上述段落或 SDD 编号，须再次保存并回读在线基线。
+架构同步目标为 [Doca LightMoni 系统设计基线](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)。首次保存前 seq 1814/version 1816、1026 个块；保存成功后回读 seq 1815/version 1817、1028 个块。第 14.4 节在 SDD 167 后新增当时命名的 `sdd168-service-task-proposals` 和 `sdd168-service-task-continuation` 两块；第 28.7 节原块 `agent044-p-24` 保留 ID 并更新文字。首次回读时三段与当时的 SDD 168 仓库文本逐字一致；旧块无删除、原顺序不变，只有这一个旧文本块改变；58 张原生图块的节点、连线、端点和 ID 均逐一相同，MCP 三张图分别保持 15/17、10/10、8/9 个节点/连线。架构变化涉及服务主体提案的 owner、审批 actor、证据加密保存及审批/领取/重试复验路径；仓库同步位置为 `docs/system-design.md` 第 14.4 与 28.7 节。改为 SDD 170 后，首次回读不再证明当前文本已同步；须另记新的保存与回读证据。

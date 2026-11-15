@@ -70,7 +70,7 @@ callback_port = 1455
 
 `host_ids: null` 表示管理员明确授权全部已登记主机，数组是封闭范围，省略该字段不会获得隐式全主机权限。规则中的对象字段和值必须匹配，数组和标量整体相等；未固定字段仍须通过工具 Schema、Scope、Host、目标和输出安全投影，不能传入 SQL、脚本或模板。
 
-SDD 167 首版允许描述符标记为 `read + center_read`、风险 `R0/R1` 且同时向 MCP/HTTP 曝光的能力。SDD 168 仅追加 `lightmoni_tasks_plan@1` 的 `task.dispatch`、`run.cancel`、`run.retry`，且每条规则必须显式固定一种 `input.operation`；不能创建/修改任务或周期计划。其他领域提案、直接执行、远程探测、审批、凭据管理、任意 SQL/Shell 和通用持续写授权均不允许。服务策略不可编辑，需要变化时撤销并新建。
+SDD 167 首版允许描述符标记为 `read + center_read`、风险 `R0/R1` 且同时向 MCP/HTTP 曝光的能力。SDD 170 仅追加 `lightmoni_tasks_plan@1` 的 `task.dispatch`、`run.cancel`、`run.retry`，且每条规则必须显式固定一种 `input.operation`；不能创建/修改任务或周期计划。其他领域提案、直接执行、远程探测、审批、凭据管理、任意 SQL/Shell 和通用持续写授权均不允许。服务策略不可编辑，需要变化时撤销并新建。
 
 创建响应仅一次返回独立服务 Bearer，保存到受保护凭据存储后可用于相同 MCP 地址或普通 Capability HTTP。服务 ID 不是个人用户 ID，审计和限流均按服务主体隔离；Owner 必须持续保持有效管理员。撤销、到期、Owner 降权/停用、版本漂移、越界输入或 Host 都会失败关闭。
 
