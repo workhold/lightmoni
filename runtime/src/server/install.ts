@@ -11,7 +11,7 @@ export function registerInstall(
   directory: string,
   agentCredentials?: AgentCredentialStore,
 ) {
-  const version = "0.1.2";
+  const version = "0.1.3";
   d.router.get('/api/v1/backup-tool', c => {
     d.auth.requireAdmin(c);
     c.res.setHeader('cache-control', 'private, no-store');
