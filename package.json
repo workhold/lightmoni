@@ -1,6 +1,6 @@
 {
   "name": "lightmoni",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "engines": {
@@ -15,6 +15,8 @@
     "agent": "node runtime/dist/agent/main.js",
     "admin": "node runtime/dist/server/admin-cli.js",
     "release:agent": "node scripts/build-agent-release.mjs",
-    "release:sdk": "sh scripts/build-sdk-release.sh"
+    "release:sdk": "sh scripts/build-sdk-release.sh",
+    "version:check": "node scripts/release-version.mjs check",
+    "version:bump": "node scripts/release-version.mjs bump"
   }
 }
