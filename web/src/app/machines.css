@@ -90,6 +90,7 @@
 .lm-host-action-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px;min-width:0}
 .lm-host-action-grid>span,.lm-host-action-grid .ant-btn{width:100%}
 .lm-host-action-grid .ant-btn{padding-inline:6px;height:auto;min-height:28px;white-space:normal;font-size:12px}
+.lm-host-action-grid .lm-host-action-text{white-space:nowrap}
 .lm-host-row-actions>.ant-btn{height:auto;min-height:28px;white-space:normal;font-size:12px}
 .lm-host-unavailable{font-size:12px;color:var(--lm-muted);line-height:1.6}
 .lm-host-unavailable summary{cursor:pointer}
