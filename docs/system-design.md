@@ -875,13 +875,17 @@ SDD 159 开始 Slice 4，新增 capability_proposals 安全投影及 domain prop
 
 SDD 160 扩展 execution_index 为跨领域执行投影，新增 domain executions list/get，覆盖 Task Run、Deployment、Operation Run、Agent 首装和维护。读取时按 executions.read、领域 Scope 和 Host 过滤并刷新 native_state/review_url，不把 queued/running/unknown/rolled_back 映射为成功。历史未索引记录不保证全部回填；OpenAPI/Bearer、服务主体和持续授权未完成。
 
-SDD 161 新增 GET /api/v1/openapi.json，从当前主体可见描述符生成 OpenAPI 3.1，包含真实输入/输出 Schema、capability/version、effect/risk、Scope 和安全错误。Capability HTTP 在保留 Web 会话的同时支持现有 PAT/OAuth Bearer，复用 McpAccess 与同一 Principal、Dispatcher、Scope、Host、限流和审计；不模拟 MCP，不提升角色或资源范围。文档不包含秘密或目标数据，服务主体和持续授权未完成。
+SDD 161 新增 GET /api/v1/openapi.json，从当前主体可见描述符生成 OpenAPI 3.1，包含真实输入/输出 Schema、capability/version、effect/risk、Scope 和安全错误。Capability HTTP 在保留 Web 会话的同时支持现有 PAT/OAuth Bearer，复用 McpAccess 与同一 Principal、Dispatcher、Scope、Host、限流和审计；不模拟 MCP，不提升角色或资源范围。文档不包含秘密或目标数据；在 SDD 161 时，服务主体和持续授权尚未完成。
 
 SDD 164 不改变控制路径或权限边界，只收敛核心验收：真实 Codex/PAT 通过同一 Dispatcher 完成 ClickHouse 日志读取与 Host 越权拒绝、告警静默原生提案/Web 审批/生效回读、任务派发/签名 helper 执行/原生回执回读；新客户端进程以同业务键返回同一 proposal，未创建替代执行。隔离环境、客户端版本、调用与原生 ID 见 SDD 164 validation 和脱敏证据。该记录不扩展到 OAuth、Claude、生产环境或后续自动化。
 
+SDD 167 开始 Slice 5，增加独立服务主体与固定只读自动化。mcp_service_accounts 将服务 ID、管理员 Owner、能力/version/固定输入规则、总预算和期限绑定到独立 service grant/token；服务 ID 不写入 users，Principal 以 subject_type=service 和 owner_user_id 区分个人主体，调用审计增加 subject_type，旧记录默认 user。Owner 必须保持有效管理员，撤销、到期、降权或停用立即失败关闭。
 
+服务规则只接受当前 Registry 中 read、center_read、R0/R1 且 MCP/HTTP 可见的能力，派生最小 Scope 并保留 Host 封闭范围。Dispatcher 的发现/OpenAPI 可见性和执行前授权复用同一规则；固定输入是递归 JSON 子集，不接受代码或模板。通过 Schema、Host 与限流后以单条条件 UPDATE 原子消耗预算，领域失败不退款，预算不代表成功。本切片不开放 propose、execute、远程探测或持续写授权，不增加 54 个工具的清单。
 
-完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 153](../specs/153-instrumentation-proposal-capability-write/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md)、[SDD 156](../specs/156-alert-escalation-proposal-capability-write/spec.md)、[SDD 157](../specs/157-alert-renewal-proposal-capability-write/spec.md)、[SDD 158](../specs/158-alert-delivery-retry-proposal-capability-write/spec.md)、[SDD 159](../specs/159-cross-domain-proposal-index/spec.md)、[SDD 160](../specs/160-cross-domain-execution-index/spec.md)、[SDD 161](../specs/161-capability-openapi-bearer/spec.md)、[SDD 164](../specs/164-ai-mcp-core-closure/spec.md) 和 [MCP 接入指南](mcp.md)。
+Capability HTTP 的路由调整为可选认证：Bearer 无需 Web Cookie，Cookie 会话由平台 Auth 解析且写调用继续执行 Origin 校验，未认证请求仍失败关闭。该修正让 PAT/OAuth/服务 Bearer 在真实 Router 中与普通程序契约一致，不放宽管理 API 或 MCP 权限。
+
+完整 HLD/LLD、三张流程图、授权、工具矩阵、执行/幂等契约、数据与代码边界以及分期验收见 [平台开放能力与 MCP 架构](platform-mcp.md)、[SDD 046](../specs/046-platform-mcp/spec.md)；当前实现及使用边界见 [SDD 047](../specs/047-platform-mcp-service/spec.md)、[SDD 134～142](../specs/134-capability-core-decoupling/spec.md)、[SDD 144～151](../specs/144-instrumentation-capability-read/spec.md)、[SDD 152](../specs/152-assistant-model-execution-boundaries/spec.md)、[SDD 153](../specs/153-instrumentation-proposal-capability-write/spec.md)、[SDD 154](../specs/154-alert-incident-proposal-capability-write/spec.md)、[SDD 155](../specs/155-alert-transfer-proposal-capability-write/spec.md)、[SDD 156](../specs/156-alert-escalation-proposal-capability-write/spec.md)、[SDD 157](../specs/157-alert-renewal-proposal-capability-write/spec.md)、[SDD 158](../specs/158-alert-delivery-retry-proposal-capability-write/spec.md)、[SDD 159](../specs/159-cross-domain-proposal-index/spec.md)、[SDD 160](../specs/160-cross-domain-execution-index/spec.md)、[SDD 161](../specs/161-capability-openapi-bearer/spec.md)、[SDD 164](../specs/164-ai-mcp-core-closure/spec.md)、[SDD 167](../specs/167-service-principal-capability-automation/spec.md) 和 [MCP 接入指南](mcp.md)。
 
 ## 15. 告警、静默和通知
 
@@ -1356,7 +1360,7 @@ AI 工具 list_agent_releases、propose_agent_update、get_agent_update 只返�
 
 统一入口和记录保留底层执行策略：持续采集使用配置 revision；有限脚本使用租约与退出结果；服务部署使用分阶段健康回执；Agent 首装/升级使用 SSH 生命周期与独立维护确认。主机检查等短操作可同步返回执行结果，耗时任务异步返回执行 ID，均记录来源、授权和目标；交互式能力另用会话协议，关联授权、开始、结束及退出状态，不把每次按键拆成任务，也不将终端原始输出持久化或发送给模型。高频采样不逐条创建任务执行记录。首次安装尚无 Agent 可接收任务，仍通过 SSH。周期任务与单次任务均归属明确主机，结果未知不会被幂等重试偷偷重放。
 
-本轮交付 Agent 维护自身的计划、审批和完整结果 API；SDD 047 已交付用户主体的 MCP 专用 PAT/OAuth、role/scope 与主机范围授权，任务提案复用平台审批。跨脚本、业务运维、Agent 生命周期的完整统一执行读模型、服务主体及自定义 typed action 注册表仍属于后续单独 SDD，不将已有分散接口声称为完整统一外部任务 API。
+本章原交付 Agent 维护自身的计划、审批和完整结果 API；SDD 047 已交付用户主体的 MCP 专用 PAT/OAuth、role/scope 与主机范围授权，任务提案复用平台审批。后续 SDD 167 已增加固定只读服务主体；跨脚本、业务运维、Agent 生命周期的完整统一执行读模型、服务主体写授权及自定义 typed action 注册表仍属于后续单独 SDD，不将已有分散接口声称为完整统一外部任务 API。
 
 ## 33. 网站、DNS、证书与 Docker 服务托管（SDD 033）
 
