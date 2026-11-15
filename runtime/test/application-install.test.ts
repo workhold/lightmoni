@@ -22,13 +22,27 @@ test('catalog named mappings validate the full port contract and use named port 
  assert.throws(()=>catalogInstallation('openresty',{host_ports:{http:8080}}),/openresty_fixed_host_ports/);
 });
 test('installation completion requires all published deployments and healthy instances, without hiding partial or unknown outcomes',()=>{
- const resource:any={spec:{deployments:[{cluster_id:'a'},{cluster_id:'b'}]},status:{deployments:{a:{enabled:true,desired_revision:1,applied_revision:1},b:{enabled:true,desired_revision:1,applied_revision:0,pending:'capacity'}},instances:[{id:'a',cluster_id:'a',state:'running',healthy:true},{id:'b',cluster_id:'b',state:'queued',healthy:false}]}};
+ const ready=(cluster_id:string)=>({id:cluster_id,cluster_id,slot:0,state:'running',healthy:true,availability:'ready',observed_generation:1});
+ const resource:any={
+  kind:'application',revision:1,
+  spec:{deployment_mode:'managed',deployments:[{cluster_id:'a',replicas:1},{cluster_id:'b',replicas:1}]},
+  status:{
+   deployments:{
+    a:{enabled:true,desired_revision:1,applied_revision:1,instances_total:1,ready_instances:1},
+    b:{enabled:true,desired_revision:1,applied_revision:0,instances_total:1,ready_instances:0,pending:'capacity'},
+   },
+   instances:[ready('a'),{id:'b',cluster_id:'b',slot:0,state:'queued',healthy:false}],
+  },
+ };
  assert.equal(installationState(resource),'pending');
  resource.status.deployments.b.last_error='insufficient_node_capacity';assert.equal(installationState(resource),'failed');
  resource.status.instances[1].state='unknown';assert.equal(installationState(resource),'unknown');
- resource.status.instances[1]={id:'b',cluster_id:'b',state:'running',healthy:true};delete resource.status.deployments.b.last_error;resource.status.deployments.b.applied_revision=1;
+ resource.status.instances[1]=ready('b');delete resource.status.deployments.b.last_error;resource.status.deployments.b.applied_revision=1;resource.status.deployments.b.ready_instances=1;
  assert.equal(installationState(resource),'succeeded');
- resource.status.instances.pop();resource.status.deployments.b.instances_total=0;assert.equal(installationState(resource),'pending');
- resource.status.instances.push({id:'b',cluster_id:'b',state:'running',healthy:true});delete resource.status.deployments.b.instances_total;
- resource.status.instances[1].retired=true;resource.status.instances[0].healthy=false;assert.equal(installationState(resource),'pending');
+ resource.status.instances[1].availability='protected';assert.equal(installationState(resource),'unverified');
+ resource.status.instances[1].availability='ready';
+ resource.status.instances.pop();resource.status.deployments.b.instances_total=0;resource.status.deployments.b.ready_instances=0;assert.equal(installationState(resource),'pending');
+ resource.status.instances.push(ready('b'));resource.status.deployments.b.instances_total=1;resource.status.deployments.b.ready_instances=1;
+ resource.status.instances[0].healthy=false;assert.equal(installationState(resource),'pending');
+ resource.status.instances[0].healthy=true;resource.status.instances[1].retired=true;resource.status.deployments.b.instances_total=0;resource.status.deployments.b.ready_instances=0;assert.equal(installationState(resource),'pending');
 });
