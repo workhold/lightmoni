@@ -525,7 +525,39 @@ test("concurrent turn rejects, cancellation releases slot and accounts unknown c
   assert.equal(records[0].input_tokens, null);
   assert.equal(records[0].estimated_cost, null);
 });
-test("ledger terminal snapshot keeps original rates and unknown/free/partial costs distinct", () => {
+
+test("pending tools are cancelled rather than reported as real failures", async (t) => {
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const runtime: Runtime = async (_input, signal) => {
+    entered();
+    await new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve(), { once: true }));
+    signal.throwIfAborted();
+  };
+  const f = await fixture(t, { runtime });
+  await configure(f);
+  const sid = await session(f), store = new Store(f.db, () => at);
+  const history: any = store.get(`session/alice/${sid}`);
+  history.messages = [
+    { role: "user", content: "previous request" },
+    {
+      role: "assistant", content: "",
+      tool_calls: [{ id: "ssh-check-1", type: "function", function: { name: "check_managed_machine_ssh", arguments: "{}" } }],
+    },
+  ];
+  store.put(`session/alice/${sid}`, history);
+  const turn = f.request(`/sessions/${sid}/turns`, "POST", { text: "cancel this pending SSH check" });
+  await started;
+  assert.equal((await f.request(`/sessions/${sid}/cancel`, "POST", {})).data.cancelled, true);
+  const raw = (await turn).raw;
+  assert.match(raw, /"status":"cancelled"/);
+  assert.doesNotMatch(raw, /"status":"error"/);
+  const stored = await f.request(`/sessions/${sid}`);
+  const receipt = stored.data.events.find((event: any) => event.type === "tool.result");
+  assert.equal(receipt.data.status, "cancelled");
+  const toolMessage = stored.data.messages.find((message: any) => message.role === "tool");
+  assert.equal(JSON.parse(toolMessage.content).error, "request cancelled");
+});test("ledger terminal snapshot keeps original rates and unknown/free/partial costs distinct", () => {
   const db = new DB(":memory:"),
     store = new Store(db, () => at);
   try {

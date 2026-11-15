@@ -1143,7 +1143,7 @@ export function registerAssistant(
               emit("tool.result", {
                 call_id: call.id,
                 tool: call.function.name,
-                status: "error",
+                status: cancelled ? "cancelled" : "error",
                 value: { error: description },
               });
             } catch {}

@@ -40,7 +40,7 @@ export function assistantTimeline(events: AssistantEvent[],language:Language='zh
     if (event.type === 'tool.call') turn.tools.push({ callId: String(data.call_id), name: String(data.tool), input: data.input, status: 'running' });
     if (event.type === 'tool.result') {
       const trace = turn.tools.find(tool => tool.callId === data.call_id);
-      if (trace) { trace.result = data.value; trace.status = data.status === 'success' ? 'success' : 'error'; }
+      if (trace) { trace.result = data.value; trace.status = data.status === 'success' ? 'success' : data.status === 'cancelled' ? 'cancelled' : 'error'; }
     }
     if (event.type === 'context.compacting') turn.compacting = true;
     if (event.type === 'context.compacted') { turn.compacting = false; turn.compacted = true; }
@@ -58,7 +58,12 @@ export function assistantTimeline(events: AssistantEvent[],language:Language='zh
       turn.status = event.type === 'turn.cancelled' ? 'cancelled' : 'failed';
       turn.compacting = false;
       turn.error = String(data.error ?? t('请求失败','Request failed'));
-      for (const tool of turn.tools) if (tool.status === 'running') { tool.status = 'error'; tool.result = { error: turn.error }; }
+      for (const tool of turn.tools) {
+        if (event.type === 'turn.cancelled') {
+          if (tool.status === 'running') { tool.status = 'cancelled'; tool.result = { error: turn.error }; }
+          else if (tool.status === 'error' && (tool.result as { error?: unknown } | undefined)?.error === turn.error) tool.status = 'cancelled';
+        } else if (tool.status === 'running') { tool.status = 'error'; tool.result = { error: turn.error }; }
+      }
     }
   }
   return [...turns.values()];
