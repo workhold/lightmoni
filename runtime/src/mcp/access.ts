@@ -26,8 +26,12 @@ interface ServiceAccount {
   id: string; owner_user_id: string; grant_id: string; name: string; capabilities_json: string;
   max_invocations: number; invocation_count: number; created_at: string; expires_at: string; revoked_at: string;
 }
-const automationDefinition = (d: CapabilityDefinition) => d.effect === "read" && d.operationKind === "center_read"
-  && ["R0", "R1"].includes(d.risk) && d.exposure.mcp && d.exposure.http && d.roles.includes("admin");
+const automationDefinition = (d: CapabilityDefinition) => (d.effect === "read" && d.operationKind === "center_read"
+  && ["R0", "R1"].includes(d.risk) && d.exposure.mcp && d.exposure.http && d.roles.includes("admin"))
+  || (d.id === "tasks.plan" && d.name === "lightmoni_tasks_plan" && d.version === 1 && d.effect === "propose"
+  && d.risk === "R2" && d.operationKind === "domain_change" && d.exposure.mcp && d.exposure.http && d.roles.includes("admin"));
+const automationOperation = (d: CapabilityDefinition, input: unknown) => d.id !== "tasks.plan"
+  || ["task.dispatch", "run.cancel", "run.retry"].includes((input as any)?.operation);
 const fixedJSON = (value: unknown, depth = 0): any => {
   if (depth > 8) fail(400, "服务输入约束最多嵌套 8 层");
   if (value === null || typeof value === "boolean") return value;
@@ -143,6 +147,7 @@ CREATE INDEX IF NOT EXISTS mcp_service_accounts_owner ON mcp_service_accounts(ow
       if (rule.input !== undefined && (!rule.input || typeof rule.input !== "object" || Array.isArray(rule.input))) fail(400, "服务输入约束必须是对象");
       const constraint = fixedJSON(rule.input ?? {});
       if (Buffer.byteLength(JSON.stringify(constraint)) > 4096) fail(400, "服务输入约束过大");
+      if (!automationOperation(d, constraint)) fail(403, "automation_capability_forbidden");
       names.add(d.name); scopes.add(d.scope); for (const scope of d.additionalScopes ?? []) scopes.add(scope);
       return { id: d.id, name: d.name, version: d.version, input: constraint };
     });
@@ -173,16 +178,24 @@ CREATE INDEX IF NOT EXISTS mcp_service_accounts_owner ON mcp_service_accounts(ow
   allowsCapability(principal: Principal, definition: CapabilityDefinition): boolean {
     if (principal.subject_type !== "service") return true;
     const account = this.servicePolicy(principal), rules = JSON.parse(account.capabilities_json) as ServiceCapabilityRule[];
-    return automationDefinition(definition) && rules.some(rule => rule.id === definition.id && rule.name === definition.name && rule.version === definition.version);
+    return automationDefinition(definition) && rules.some(rule => rule.id === definition.id && rule.name === definition.name && rule.version === definition.version && automationOperation(definition, rule.input ?? {}));
   }
-  authorizeInvocation(principal: Principal, definition: CapabilityDefinition, input: unknown): void {
-    if (principal.subject_type !== "service") return;
+  private serviceInvocationAccount(principal: Principal, definition: CapabilityDefinition, input: unknown): ServiceAccount | undefined {
+    if (principal.subject_type !== "service") return undefined;
     const fresh = this.validateGrant(principal.grant_id, principal.user.id);
     if (fresh.subject_type !== "service") fail(403, "automation_capability_forbidden");
     const account = this.servicePolicy(fresh), rules = JSON.parse(account.capabilities_json) as ServiceCapabilityRule[];
     const rule = rules.find(candidate => candidate.id === definition.id && candidate.name === definition.name && candidate.version === definition.version);
-    if (!rule || !automationDefinition(definition)) fail(403, "automation_capability_forbidden");
+    if (!rule || !automationDefinition(definition) || !automationOperation(definition, input)) fail(403, "automation_capability_forbidden");
     if (!serviceInputMatches(input, rule.input ?? {})) fail(403, "automation_input_forbidden");
+    return account;
+  }
+  authorizeContinuation(principal: Principal, definition: CapabilityDefinition, input: unknown): void {
+    this.serviceInvocationAccount(principal, definition, input);
+  }
+  authorizeInvocation(principal: Principal, definition: CapabilityDefinition, input: unknown): void {
+    const account = this.serviceInvocationAccount(principal, definition, input);
+    if (!account) return;
     const consumed = this.deps.db.run(`UPDATE mcp_service_accounts AS a SET invocation_count=invocation_count+1
       WHERE a.id=? AND a.invocation_count<a.max_invocations AND a.revoked_at='' AND a.expires_at>?
       AND EXISTS(SELECT 1 FROM mcp_access_grants g WHERE g.id=a.grant_id AND g.revoked_at='' AND g.expires_at>? AND g.resource=?)
