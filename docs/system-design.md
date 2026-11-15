@@ -2574,6 +2574,8 @@ TypeScript（含Agent）、Go、Python、Rust的端点选择器在一次完整�
 
 SDD 175 补齐同机多次安装留下的历史 enrollment：远端完全卸载证据成立时，同机当前及历史 Agent ID 的有效 enrollment 均进入计划影响清单，并在原子修正中取消；其他主机身份不变。有效 executor、跨主机工作、目标/凭据/远端观测或快照漂移仍失败关闭。该修正是中心状态清理，不代表重新安装或 Agent 在线。
 
+SDD 178 收敛恢复体验：propose_agent_update 与 get_agent_update 共用同一助手卡片，进度条只由真实事件阶段推进，不按等待时间增长；远端终态事件仍需通过中心健康与身份核验，不能提前显示成功或已恢复。运行模式默认优先使用 machine_agent_runtime 的实际记录，其次最近成功安装计划；无证据的新主机保持原默认，批量读取到仅监控历史且用户未修改时使用仅监控。新 Agent 激活事务按 enrollment ID 取消同机其他 active 记录，pending/issued 与并发语义不变。恢复引导只列核对、状态修正、恢复卸载和重装顺序，各步仍独立审批；活跃操作刷新失败明确自动重试，不把刷新失败写成业务失败。
+
 ### 旧 libcap-ng 与当前内核的普通任务降权
 
 共享 task-runner 按内核 /proc/sys/kernel/cap_last_cap 的严格 0..63 上界展开 cap_N 编号，向 setpriv 的 bounding/inheritable/ambient 三类参数传入完整清除集合。避免旧库对 all 的编译期能力上界检查阻止安装；不省略清除或引入 root 任务回退。安装时的真实身份探针和每次任务使用同一参数构造；专用非 root UID/GID、空附加组、NoNewPrivs=1 与五种能力集合全零的实际核验继续强制。无效内核信息或执行核验失败明确拒绝，并只对中心公开固定安全诊断。

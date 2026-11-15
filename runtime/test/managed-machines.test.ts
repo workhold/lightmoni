@@ -1176,3 +1176,14 @@ test('unexpected post-bootstrap confirmation errors disclose only a fixed safe r
  assert.doesNotMatch(applied.raw+JSON.stringify(saved.receipt),/private upstream details|lm_enroll_secret|PRIVATE KEY/);
  assert.equal(f.issued.cancelled,undefined);
 });
+
+test('install plans inherit verified historical runtime mode without changing new-host defaults',async t=>{
+ const f=await fixture(t),h=await host(f,'historical-user');
+ f.db.run("INSERT INTO machine_agent_runtime(machine_id,agent_id,runtime_mode,permission_generation,updated_at) VALUES(?,?,'user',1,?)",h.id,'old-agent',f.deps.now().toISOString());
+ const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential});assert.equal(checked.status,200,checked.raw);
+ const plan=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{check_id:checked.data.id,credential_id:h.credential,version:'0.1.0',arch:'amd64'});assert.equal(plan.status,201,plan.raw);
+ assert.equal(plan.data.plan.runtime_mode,'user');assert.equal(f.machines.get(h.id).agent_runtime_mode,'user');
+ const fresh=await host(f,'fresh-default'),freshCheck=await f.request(`/machines/${fresh.id}/ssh-check`,'POST',{credential_id:fresh.credential});
+ const freshPlan=await f.request(`/machines/${fresh.id}/deployments/plan`,'POST',{check_id:freshCheck.data.id,credential_id:fresh.credential,version:'0.1.0',arch:'amd64'});
+ assert.equal(freshPlan.data.plan.runtime_mode,'root');
+});

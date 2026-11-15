@@ -20,6 +20,26 @@ export function agentUpdateReviewable(record: AgentUpdate): boolean {
   return record.status === 'awaiting_approval' && !record.rollout_id;
 }
 
+export function agentUpdateToolValue(name: string, value: unknown): AgentUpdate | undefined {
+  return ['propose_agent_update', 'get_agent_update'].includes(name) ? agentUpdateRecord(value) : undefined;
+}
+
+const updateStagePercent: Record<string, number> = { ready: 10, starting: 15, accepted: 25, preparing: 40, switching: 60, verifying: 80, waiting_confirmation: 80 };
+
+export function agentUpdateStageProgress(record: AgentUpdate): { percent: number; stage: string; at: string } {
+  const events = Array.isArray(record.events) ? record.events.filter(event => event && typeof event.at === 'string' && Number.isFinite(Date.parse(event.at)) && typeof event.stage === 'string') : [];
+  const known = [...events].reverse().find(event => updateStagePercent[event.stage] !== undefined);
+  const terminal = ['succeeded', 'rolled_back', 'failed', 'unknown', 'cancelled'].includes(record.status) ? record.status : '';
+  const terminalEvent = terminal ? [...events].reverse().find(event => event.stage === terminal) : undefined;
+  return {
+    percent: record.status === 'succeeded' ? 100 : known ? updateStagePercent[known.stage] : 0,
+    // A remote terminal-looking event is not success/restoration until the
+    // platform's own health and identity gates accept the terminal record.
+    stage: terminal || known?.stage || (record.status === 'running' ? 'starting' : record.status),
+    at: (terminalEvent ?? known)?.at ?? ([record.finished_at, record.started_at].find(value => value && Number.isFinite(Date.parse(value))) ?? ''),
+  };
+}
+
 export function agentUpdateAPIPath(record: AgentUpdate): string {
   return updatePath(record.machine_id, record.id);
 }

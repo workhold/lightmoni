@@ -16,7 +16,7 @@ import { streamTurn } from './client';
 import { assistantTimeline, queryRangeFromTurn } from './timeline';
 import SSHCheckSummary,{type SSHCheckResult} from '../../shared/SSHCheckSummary';
 import AgentUpdateProgress from './AgentUpdateProgress';
-import {agentUpdateRecord} from './agent-update-progress';
+import {agentUpdateToolValue} from './agent-update-progress';
 import AlertProposalProgress from './AlertProposalProgress';
 import type { AssistantConfig, AssistantContext, AssistantEvent, AssistantSession, CodeTaskResult, DashboardDraft, DraftPanel, ToolTrace, TurnView } from './types';
 import './assistant.css';
@@ -178,7 +178,8 @@ function ToolProgress({ turn, onDraft, canUseCodeTasks, canApproveAgentUpdate }:
   return <div className="lm-assistant-tools">{tools.map(tool => {
     if (tool.name === 'code_task') return <CodeTaskProgress key={tool.callId} tool={tool} />;
     if (tool.name === 'propose_alert_change') return <AlertProposalProgress key={tool.callId} tool={tool} />;
-    if (tool.name === 'propose_agent_update' && agentUpdateRecord(tool.result)) return <AgentUpdateProgress key={tool.callId} value={tool.result} canApprove={canApproveAgentUpdate} />;
+    const agentUpdate = agentUpdateToolValue(tool.name, tool.result);
+    if (agentUpdate) return <AgentUpdateProgress key={tool.callId} value={agentUpdate} canApprove={canApproveAgentUpdate} />;
     const result = tool.result as { draft?: DashboardDraft; error?: string;id?:string;machine_id?:string;status?:string } | undefined;
     return <Collapse key={tool.callId} size="small" ghost items={[{ key: tool.callId, label: <Space><span className={`lm-assistant-tool-dot ${tool.status}`} /><span>{toolLabels[tool.name] ?? tool.name}</span><Tag bordered={false} color={tool.status === 'error' ? 'error' : tool.status === 'success' ? 'success' : tool.status === 'cancelled' ? 'default' : 'processing'}>{tool.status === 'running' ? t("执行中","Running") : tool.status === 'error' ? t("失败","Failed") : tool.status === 'cancelled' ? t("已取消","Cancelled") : t("完成","Completed")}</Tag></Space>, children: <div><div className="lm-assistant-tool-heading">{t("调用参数","Call arguments")}</div><pre className="lm-assistant-tool-json">{readable(tool.input)}</pre>{tool.result !== undefined && <><div className="lm-assistant-tool-heading">{t("执行结果","Execution result")}</div><pre className="lm-assistant-tool-json">{readable(tool.result)}</pre></>}{tool.status==='success'&&tool.name==='check_managed_machine_ssh'&&result?.id&&<SSHCheckSummary result={tool.result as SSHCheckResult}/>} {tool.status==='success'&&tool.name==='propose_agent_install'&&result?.id&&result.machine_id&&<Button type="primary" onClick={()=>navigate(`/machines?machine=${encodeURIComponent(result.machine_id!)}&deployment=${encodeURIComponent(result.id!)}`)}>{t('审阅部署计划','Review deployment plan')}</Button>}{tool.status === 'success' && result?.draft && <Button type="primary" onClick={() => onDraft(result.draft!, queryRangeFromTurn(turn, tool.callId))}>{t("审阅大盘草稿","Review dashboard draft")}</Button>}</div> }]} />;
   })}</div>;

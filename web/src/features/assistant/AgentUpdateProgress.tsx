@@ -1,10 +1,10 @@
 import React,{useEffect,useState} from 'react';
-import {Alert,Button,Checkbox,Popconfirm,Space,Tag,Typography} from '../../shared/ui';
+import {Alert,Button,Checkbox,Popconfirm,Progress,Space,Tag,Typography} from '../../shared/ui';
 import {api} from '../../shared/api';
 import {useI18n} from '../../shared/i18n';
 import {AgentUpdatePlanSummary} from '../../app/MachineAgentUpdateDialog';
-import {updatePlanExpired,updateMessageText,updateStatusColor,updateStatusText,type AgentUpdate} from '../../app/agent-update-model';
-import {agentUpdateAPIPath,agentUpdateRecord,agentUpdateReviewable} from './agent-update-progress';
+import {updatePlanExpired,updateMessageText,updateStatusColor,updateStatusText,updateIsActive,type AgentUpdate} from '../../app/agent-update-model';
+import {agentUpdateAPIPath,agentUpdateRecord,agentUpdateReviewable,agentUpdateStageProgress} from './agent-update-progress';
 
 export default function AgentUpdateProgress({value,canApprove}:{value:unknown;canApprove:boolean}) {
  const {t,language}=useI18n(),parsed=agentUpdateRecord(value);
@@ -30,6 +30,7 @@ export default function AgentUpdateProgress({value,canApprove}:{value:unknown;ca
  if(!record)return null;
  const originalRecord=record;
  const awaiting=agentUpdateReviewable(record),expired=updatePlanExpired(record);
+ const progress=agentUpdateStageProgress(record),stageText=(stage:string)=>({ready:t('已核对发行与主机','Release and host verified'),starting:t('正在启动维护','Starting maintenance'),accepted:t('维护器已接收','Maintainer accepted'),preparing:t('正在准备发行包','Preparing release'),switching:t('正在切换程序','Switching runtime'),verifying:t('正在核验目标发行','Verifying target release'),waiting_confirmation:t('等待新进程健康确认','Waiting for health confirmation'),succeeded:t('更新成功','Update succeeded'),rolled_back:t('已恢复原程序','Previous runtime restored'),failed:t('更新失败','Update failed'),unknown:t('结果待核对','Outcome needs verification'),cancelled:t('已取消','Cancelled'),rollback_failed:t('自动恢复未确认','Automatic recovery unconfirmed')} as Record<string,string>)[stage]||stage;
  const failure=(problem:unknown)=>{setError(problem instanceof Error?updateMessageText(problem.message,t):t('操作失败，请重试','Operation failed. Retry.'))};
  async function apply(){
   if(!canApprove||!awaiting||!reviewed||busy||expired)return;
@@ -84,6 +85,10 @@ export default function AgentUpdateProgress({value,canApprove}:{value:unknown;ca
  return <div className="lm-assistant-agent-update">
   <AgentUpdatePlanSummary record={record}/>
   <Space wrap><Tag color={updateStatusColor(record.status)}>{updateStatusText(record.status,t)}</Tag>{record.review_url&&<Typography.Link href={record.review_url} target="_blank" rel="noreferrer">{t('打开原更新记录','Open original update record')}</Typography.Link>}</Space>
+  {!awaiting&&<section className="lm-assistant-agent-update-progress" aria-label={t('Agent 更新进度','Agent update progress')}>
+   <Progress percent={progress.percent} status={record.status==='succeeded'?'success':['failed','unknown','rolled_back'].includes(record.status)?'exception':updateIsActive(record.status)?'active':'normal'} showInfo={false}/>
+   <small>{t('当前阶段：','Current stage: ')}{stageText(progress.stage)}{progress.at?` · ${new Date(progress.at).toLocaleString(language)}`:t(' · 等待服务端阶段记录',' · Waiting for a server stage record')}</small>
+  </section>}
   {canApprove&&awaiting&&<div className="lm-assistant-code-approval">
    {expired&&<Alert type="warning" showIcon title={t('计划已过期，请让助手重新准备','The plan expired. Ask the assistant to prepare it again.')}/>}
    <Checkbox checked={reviewed} disabled={!!busy||expired} onChange={event=>setReviewed(event.target.checked)}>{t('我已审阅目标主机、当前/目标发行、执行步骤和影响','I have reviewed the host, current/target releases, steps, and impact')}</Checkbox>
@@ -98,6 +103,7 @@ export default function AgentUpdateProgress({value,canApprove}:{value:unknown;ca
   {record.status==='rolled_back'&&<Alert type="warning" showIcon title={t('目标更新未通过健康确认，已恢复原程序','The target update failed health verification; the previous runtime was restored')}/>}
   {record.status==='failed'&&<Alert type="error" showIcon title={record.error||t('Agent 更新失败','Agent update failed')}/>}
   {record.status==='unknown'&&<Alert type="warning" showIcon title={t('更新结果未知，请打开原记录只读核对','Update outcome is unknown. Open the original record for read-only verification')}/>}
+  {['failed','unknown'].includes(record.status)&&<Alert type="info" showIcon title={t('需要恢复时的操作顺序','Recovery sequence when needed')} description={t('先核对原记录；确认程序已移除时先修正 Agent 状态；需要全新安装时再执行恢复卸载；最后按原权限模式重新安装。每一步都需要单独核对和审批。','Verify the original record first. If the runtime is removed, correct Agent state. Use recovery removal only when a clean reinstall requires it, then reinstall with the original permission mode. Every step requires separate verification and approval.')}/>}
   {canApprove&&record.status==='unknown'&&<div className="lm-assistant-code-approval lm-assistant-agent-recovery">
    <Alert type="warning" showIcon title={t('先只读核对；不要重复派发维护','Reconcile read-only first; do not dispatch maintenance again')} description={t('恢复只处理这次中断维护：确认维护进程停止后，恢复原审批固定的程序快照，不会自动升级或重新接入。','Recovery handles only this interrupted maintenance. It confirms the maintenance process has stopped and restores the runtime snapshot pinned by the original approval; it does not upgrade or enroll again.')}/>
    {record.recovery_requires_verification&&<Alert type="warning" showIcon title={t('上次恢复结果尚未核对，禁止再次恢复','The previous recovery needs verification; another recovery is blocked')}/>}

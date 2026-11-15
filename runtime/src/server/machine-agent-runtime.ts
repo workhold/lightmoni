@@ -81,6 +81,19 @@ export function recordAgentRuntime(
     d.now().toISOString(),
   );
 }
+export function preferredAgentRuntimeMode(db: Dependencies["db"], machineID: string): AgentRuntimeMode | undefined {
+  const has = (name: string) => !!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", name);
+  if (has("machine_agent_runtime")) {
+    const saved = db.get<{runtime_mode?:string}>("SELECT runtime_mode FROM machine_agent_runtime WHERE machine_id=?", machineID);
+    if (validAgentRuntimeMode(saved?.runtime_mode)) return saved.runtime_mode;
+  }
+  if (!has("machine_deployments")) return undefined;
+  const previous = db.get<{plan_json?:string}>("SELECT plan_json FROM machine_deployments WHERE machine_id=? AND status='succeeded' ORDER BY created_at DESC,rowid DESC LIMIT 1", machineID);
+  try {
+    const mode = previous?.plan_json ? JSON.parse(previous.plan_json).runtime_mode : undefined;
+    return validAgentRuntimeMode(mode) ? mode : undefined;
+  } catch { return undefined; }
+}
 export function agentRuntimeState(d: Dependencies, machineID: string) {
   const h = d.db.get<Row>(
     "SELECT agent_id FROM managed_machines WHERE id=?",

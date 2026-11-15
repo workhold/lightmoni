@@ -21,8 +21,14 @@ test('awaiting native plan renders its summary and administrator approval action
 });
 
 test('running plan only reports accepted execution, not approval or success', () => {
-  const html = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: { ...record, status: 'running' }, canApprove: true }));
+  const html = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: { ...record, status: 'running', events: [{ at: '2026-11-15T00:00:01Z', stage: 'accepted' }] }, canApprove: true }));
   assert.match(html, /执行请求已接受/); assert.doesNotMatch(html, /确认升级/); assert.doesNotMatch(html, /更新成功/);
+  assert.match(html, /维护器已接收/); assert.match(html, /aria-valuenow="25"/);
+});
+
+test('a remote success event awaiting platform health verification is not shown as success', () => {
+  const html = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: { ...record, status: 'running', events: [{ at: '2026-11-15T00:00:01Z', stage: 'waiting_confirmation' }, { at: '2026-11-15T00:00:02Z', stage: 'succeeded' }] }, canApprove: true }));
+  assert.match(html, /等待新进程健康确认/); assert.doesNotMatch(html, /更新成功/); assert.match(html, /aria-valuenow="80"/);
 });
 
 test('members and malformed results get no approval action', () => {
@@ -38,4 +44,10 @@ test('unknown native record renders read-only reconciliation and reviewed recove
   assert.match(admin, /只读核对结果/); assert.match(admin, /恢复中断维护/); assert.match(admin, /我已核对目标主机/);
   const member = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: unknown, canApprove: false }));
   assert.doesNotMatch(member, /只读核对结果/); assert.doesNotMatch(member, /恢复中断维护/);
+});
+
+test('failed updates show recovery guidance without presenting its steps as completed', () => {
+  const html = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: { ...record, status: 'failed' }, canApprove: true }));
+  assert.match(html, /需要恢复时的操作顺序/); assert.match(html, /每一步都需要单独核对和审批/);
+  assert.doesNotMatch(html, /已完成状态修正/);
 });

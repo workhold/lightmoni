@@ -16,10 +16,11 @@ export default function AgentOperationProgress({kind,machineID,record,submitting
  const name=t(kind==='install'?'Agent 安装进度':'Agent 卸载进度',kind==='install'?'Agent installation progress':'Agent removal progress');
  return <section aria-label={name} data-agent-operation-id={record.id} data-agent-operation-machine={machineID} data-agent-operation-status={progress.status} style={{minWidth:0,maxWidth:'100%',marginBlock:compact?6:12,overflowWrap:'anywhere'}}>
   {showStatus&&<Typography.Text strong={!compact}>{statuses[progress.status]||progress.status}</Typography.Text>}
-  <Progress aria-label={name} percent={progress.percent} status={record.status==='succeeded'?'success':record.status==='failed'||record.status==='unknown'?'exception':progress.active?'active':'normal'} showInfo={false} size={compact?'small':'default'}/>
+  <Progress aria-label={name} percent={progress.percent} status={record.status==='succeeded'?'success':record.status==='failed'||record.status==='unknown'?'exception':progress.active?'active':'normal'} showInfo={false} size={compact?'small':'medium'}/>
   <Typography.Text type="secondary" style={{display:'block',fontSize:compact?12:undefined}}>{t('阶段进度：','Stage progress: ')}{stages[progress.stage]}{elapsed!==undefined?' · '+t('已耗时 '+elapsed+' 秒','Elapsed '+elapsed+' seconds'):''}</Typography.Text>
   {record.error&&<Typography.Text type="danger" style={{display:'block'}}>{record.error}</Typography.Text>}
   {(record.status==='unknown'||record.resolved_at)&&<Typography.Text type="warning" style={{display:'block'}}>{t('请查看原记录并只读核对，不会自动重试。','Open the original record for read-only verification. No automatic retry occurs.')}</Typography.Text>}
   {refreshError&&<Typography.Text type="warning" style={{display:'block'}}>{refreshError}</Typography.Text>}
+  {refreshError&&progress.active&&<Typography.Text type="secondary" style={{display:'block'}}>{t('正在自动重试读取原记录，请勿重复提交操作。','The original record is retried automatically. Do not submit the operation again.')}</Typography.Text>}
  </section>;
 }
