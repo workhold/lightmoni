@@ -12,3 +12,13 @@
 - 架构影响判断：本发行不适用，理由见 [规格](spec.md)；#218/#219 的架构同步结果记录在各自 SDD 和 PR 中。SDD169 的版本规范现要求 0.1.1 的 amd64 固定标签。
 
 待记录：发行 PR/Release、生产备份/切换及线上回归。
+
+## 发行交付与生产处置（2026-11-15）
+
+- 发行 PR #232 已合入 main，SDD091 历史证据补录 PR #233 已合入；GitHub Release `20261115-4ce37ce` 指向源码提交 `4ce37ce4` 并附发行回执附件。固定标签与 `latest` 的远端摘要经独立 `docker buildx imagetools inspect` 回读一致，镜像 OCI revision 与源码提交一致。
+- 生产中心（1Panel Compose 项目）已切换到 `v0.1.1-20261115-100500-amd64`，`/healthz` 200、实例版本 0.1.1。切换后复核发现根 Compose 仍固定旧标签（配置漂移），已修正为 v0.1.1 固定标签并保留原文件备份；旧标签远端摘要确认未被污染，回滚路径完整。切换后补做一致性备份：SQLite `VACUUM INTO` 快照（约 3.2GB，integrity ok）与 compose、主密钥副本同存于服务器受保护目录。
+- 线上只读验收通过：`/api/v1/*`、`/api/v1/mcp`、Agent 下载未认证均 401；系统日志与主机指标持续入库（分钟级新鲜）；`/api/v1/capabilities` 正常返回能力描述符。未为测试创建生产应用动作、任务提案或服务主体调用。
+- 生产主机 zz-bj-1 复核发现：11-14 01:26 一次受管 job 因 Agent 租约过期形成 unknown 围栏，四个应用实例的平台观察停摆约 37 小时（实例 healthy=false、applied=0），宿主容器实际全部运行。经人工核对释放该 job（`privileged-execution/jobs/:id/reconcile`），主机内存 busy 标志出现泄漏、以重启中心清除后，Agent 经标准 `agent-updates/start` 流程升级至 0.1.1（一次成功，含健康确认与自动回退保障）。恢复循环随后自动完成四个应用对账：全部 healthy、applied 与 desired 一致（9/9、7/7、3/3、7/7）。过程未修改应用配置或数据。
+- 生产主机 zsw-hk8c8g-3xui-1 的 11-13 升级残留记录为 `rollback_failed`→unknown：只读核对通过但记录无法终态化（recover 要求现场与计划快照一致，而现场 helper activation 已变化），且阻断新维护计划。经管理员裁定以 cancelled 收尾（附审计事件）；现场 Agent 0.1.0 健康运行。其新升级因 Agent 侧维护残留（疑似操作锁）预检被拒，待主机现场核查后另行升级。
+- 遗留：zsw-bj-1 已在 0.1.1 旧构建，可择机升级到固定构建；vchive 主机 11-11 起离线、升级记录挂起，待确认机器现状后处理。
+- 待改进项（另行 SDD 承载）：(1) `rollback_failed` 的 unknown 维护无法终态化形成死局：cancel 仅接受 awaiting_approval、recover 严格要求现场与快照一致、旧记录阻断新计划；(2) 主机 busy 标志为内存 Set，无持有者、TTL 与观测手段，泄漏时只能重启中心；(3) 维护类 409 文案未附带处理入口（哪个 job/哪条记录、去哪核对）；(4) 实例观察停摆缺少主动检测与告警。
