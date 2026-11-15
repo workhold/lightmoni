@@ -92,7 +92,10 @@ export function registerMachineStateRecovery(deps: Dependencies, access: Access)
           ? db.all<Row>("SELECT id,agent_id,status FROM agent_enrollments WHERE machine_id=? AND status IN ('issued','pending_activation','active') ORDER BY id", machine)
           : db.all<Row>("SELECT id,agent_id,audience,revoked_at FROM agent_credentials WHERE agent_id=? AND revoked_at IS NULL ORDER BY id", agent);
       for (const value of values) {
-        if (value.agent_id && value.agent_id !== agent) fail(409, '当前主机还有另一 Agent 的有效身份，不能结束其状态');
+        // Once the fixed remote probe proves that no Agent or worker remains,
+        // same-machine historical enrollments are part of this reviewed cleanup.
+        // Active executors and foreign pending work still fail closed.
+        if (value.agent_id && value.agent_id !== agent && table !== 'agent_enrollments') fail(409, '当前主机还有另一 Agent 的有效身份，不能结束其状态');
         identities.push({ table, ...value });
       }
     }
@@ -146,7 +149,7 @@ export function registerMachineStateRecovery(deps: Dependencies, access: Access)
       }
     }
     const revoked = has('agent_credentials') ? db.run("UPDATE agent_credentials SET revoked_at=?,revoke_reason=? WHERE agent_id=? AND revoked_at IS NULL", at(), 'Verified absent Agent; state recovery ' + recovery, machine.agent_id).changes : 0;
-    if (has('agent_enrollments')) db.run("UPDATE agent_enrollments SET status='cancelled' WHERE machine_id=? AND status IN ('issued','pending_activation','active') AND (agent_id='' OR agent_id=?)", machine.id, machine.agent_id);
+    if (has('agent_enrollments')) db.run("UPDATE agent_enrollments SET status='cancelled' WHERE machine_id=? AND status IN ('issued','pending_activation','active')", machine.id);
     if (has('privileged_executors')) {
       db.run("UPDATE privileged_executors SET state='revoked' WHERE machine_id=? AND agent_id=?", machine.id, machine.agent_id);
       if (has('privileged_enrollments')) db.run("UPDATE privileged_enrollments SET state='revoked' WHERE state='issued' AND executor_id IN (SELECT id FROM privileged_executors WHERE machine_id=? AND agent_id=?)", machine.id, machine.agent_id);
