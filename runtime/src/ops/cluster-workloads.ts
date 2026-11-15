@@ -374,7 +374,7 @@ export function createClusterWorkloads(
       unresolvedRuns = unresolvedCurrentRuns(key);
     const confirmed = (i: Row) => !!states.get(i.id)?.ready || states.get(i.id)?.availability === 'grace' && i.healthy === 1;
     let bytes = 0;
-    const recoveryRows=tableExists('reconciliation_resources')?db.all<Row>("SELECT resource_key,agent_id,machine_id,state,code,failures,next_attempt_at FROM reconciliation_resources WHERE provider='deployment.instance' AND owner_id=? AND deleted=0",key):[];
+    const recoveryRows=tableExists('reconciliation_resources')?db.all<Row>("SELECT resource_key,agent_id,machine_id,state,code,job_id,failures,next_attempt_at,observed_at FROM reconciliation_resources WHERE provider='deployment.instance' AND owner_id=? AND deleted=0",key):[];
     for (const i of instances) {
       const observation = JSON.parse(i.observed_json),
         summary = {

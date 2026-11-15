@@ -18,6 +18,21 @@ export function maintenanceWorkBusy(deps: Pick<Dependencies,'db'|'decrypt'>, age
   return has(db,'privileged_jobs')&&db.all<any>("SELECT * FROM privileged_jobs WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND (state IN ('queued','running') OR (state='unknown' AND resolved_at=''))",agent,machine,machine).some(j=>!unclaimed(j));
 }
 
+export type MaintenanceBlocker = { kind: 'executor_bootstrap'|'task_run'|'agent_job'|'privileged_job'; id: string; state: string };
+
+/** Read-only detail for actionable 409s. Never used as a gate. */
+export function maintenanceBlockers(deps: Pick<Dependencies,'db'|'decrypt'>, agent: string, machine=''): MaintenanceBlocker[] {
+  const {db}=deps;
+  if(!agent&&machine)agent=db.get<any>('SELECT agent_id FROM managed_machines WHERE id=?',machine)?.agent_id??'';
+  const out: MaintenanceBlocker[]=[];
+  const push=(kind:MaintenanceBlocker['kind'],rows:any[])=>{for(const r of rows){if(out.length>=8)return;out.push({kind,id:String(r.id),state:String(r.state)});}};
+  if(has(db,'machine_executor_bootstraps'))push('executor_bootstrap',db.all<any>("SELECT id,state FROM machine_executor_bootstraps WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND status IN ('running','verifying','unknown') LIMIT 8",agent,machine,machine));
+  if(has(db,'task_runs'))push('task_run',db.all<any>("SELECT id,state FROM task_runs WHERE (agent_id=? OR (?<>'' AND host_id=?)) AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='' AND superseded_by='')) LIMIT 16",agent,machine,machine).filter(t=>!unclaimed(t)));
+  if(has(db,'agent_jobs'))push('agent_job',db.all<any>(`SELECT id,state FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(db)} LIMIT 16`,agent).filter(j=>!unclaimed(j)));
+  if(has(db,'privileged_jobs'))push('privileged_job',db.all<any>("SELECT id,state FROM privileged_jobs WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='')) LIMIT 8",agent,machine,machine).filter(j=>!unclaimed(j)));
+  return out;
+}
+
 export function pendingMaintenancePreparation(db: Dependencies['db'], agent: string, machine='', exclude=''): boolean {
   return has(db,'machine_maintenance_preparations')&&!!db.get("SELECT machine_id FROM machine_maintenance_preparations WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND token<>? AND expires_ms>? LIMIT 1",agent,machine,machine,exclude,Date.now())
     || has(db,'machine_state_recoveries')&&!!db.get("SELECT id FROM machine_state_recoveries WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND id<>? AND status='awaiting_approval' AND expires_at>? LIMIT 1",agent,machine,machine,exclude,new Date().toISOString());

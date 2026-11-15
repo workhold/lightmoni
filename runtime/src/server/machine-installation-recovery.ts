@@ -7,6 +7,7 @@ import { agentProbeCommand, parseAgentProbe } from "./machine-agent-lifecycle.js
 import { machineCredentialCurrent } from "./machine-credential-policy.js";
 import type { MachineSummary, SSHMachineTarget } from "./managed-machines.js";
 import { assertSSHAccount, sshAccountSnapshot, sshCredentialRevision, type SSHRunner } from "./machine-ssh.js";
+import { holdBusy, type BusyLane } from './machine-busy-lane.js';
 
 type Row = Record<string, any>;
 const decode = (value: string) => { try { return JSON.parse(value); } catch { return {}; } };
@@ -22,7 +23,7 @@ interface Access {
   resolveRuntime?(operation:Record<string,any>,actor:string):Record<string,unknown>|null;
   activated(machineID: string, actorID: string): void;
   deployment(machineID: string, deploymentID: string): any;
-  busy: Set<string>; runner: SSHRunner; safe(handler: Handler): Handler;
+  busy: BusyLane; runner: SSHRunner; safe(handler: Handler): Handler;
 }
 export function registerInstallationRecovery(deps: Dependencies, access: Access, credentials?: AgentCredentialStore) {
   const {db,router} = deps, at = () => deps.now().toISOString();
@@ -101,7 +102,7 @@ export function registerInstallationRecovery(deps: Dependencies, access: Access,
     if (input.credential_id) selected=access.credential(machine.id,input.credential_id);
     else selected=access.credential(machine.id,operation.credential_id);
     const verificationAccount=sshAccountSnapshot(selected.machine),verificationRevision=sshCredentialRevision(selected.credential);
-    access.busy.add(machine.id);
+    holdBusy(access.busy, machine.id, "installation-recovery", deps.now().getTime());
     try {
       const output = await access.runner({machine:selected.machine,...access.authentication(machine.id,selected.credential),credentialID:selected.credential.id,
         command:agentProbeCommand(),signal:ctx.signal,port:machine.port,timeoutMs:60_000});

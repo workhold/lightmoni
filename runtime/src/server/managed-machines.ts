@@ -1,4 +1,5 @@
 import { InstallationReadinessError, waitForInstallationReadiness } from './agent-install-readiness.js';
+import { busyLaneLabel, holdBusy, type BusyLane } from './machine-busy-lane.js';
 import { registerMachineDocker } from './machine-docker.js';
 import { registerMachineStateRecovery } from './machine-state-recovery.js';
 import { machineDockerEnvironment, type DockerEnvironment } from './docker-environment.js';
@@ -295,7 +296,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   `);
   const now = () => deps.now();
   createAgentRuntimeSchema(deps);
-  const busy = new Set<string>();
+  const busy: BusyLane = new Map();
   let executorStore: PrivilegedExecutorStore | undefined;
   const terminals = new Map<string, { credentialID: string; invalidate: () => void }>();
   const library = connectionCredentials(deps, (bindingID, reason, actorID) => clearCredential(bindingID, reason, actorID));
@@ -339,7 +340,19 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     try { cleanupInvalidCredentials(); } catch (error) { deps.logger.error(error); }
   }, CLEANUP_INTERVAL_MS);
   cleanupTimer.unref();
-  const idle = (machineID: string) => { cleanupInvalidCredentials(); assertNoDockerInstallation(db,machineID); if (busy.has(machineID)) fail(409, "此主机有终端、检查或部署正在进行，请先结束后重试"); };
+  const idle = (machineID: string) => {
+    cleanupInvalidCredentials(); assertNoDockerInstallation(db,machineID);
+    const lane = busy.get(machineID);
+    if (lane) fail(409, `此主机有${busyLaneLabel(lane.holder)}操作进行中（自 ${iso(new Date(lane.since))} 起），请等待其结束；若确认操作已异常中断，管理员可通过主机忙状态接口释放`);
+  };
+  const busyView = (machineID: string) => { const lane = busy.get(machineID); return { machine_id: machineID, busy: !!lane, ...(lane ? { holder: lane.holder, since: iso(new Date(lane.since)) } : {}) }; };
+  const releaseBusy = (machineID: string, actor: string, reason: string) => {
+    const lane = busy.get(machineID);
+    if (!lane) return { machine_id: machineID, released: false };
+    busy.delete(machineID);
+    deps.logger.warn({ event: "machine_busy_release", machine_id: machineID, holder: lane.holder, since: iso(new Date(lane.since)), actor_id: actor, reason });
+    return { machine_id: machineID, released: true, holder: lane.holder, since: iso(new Date(lane.since)) };
+  };
   // A user label is not part of the SSH connection identity. Plans that show
   // that label are invalidated separately when the asset is renamed.
   const targetRevision = (machine: any) => hash(JSON.stringify([machine.address, machine.port, machine.connection_method, machine.host_key_fingerprint, Number(machine.ssh_target_generation || 0), deps.externalURL]));
@@ -667,7 +680,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     };
     let revision = targetRevision(machine);
     let released = false;
-    busy.add(machineID);
+    holdBusy(busy, machineID, "terminal", now().getTime());
     terminals.set(machineID, { credentialID: credential.id, invalidate });
     return lease;
   };
@@ -726,7 +739,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       connected: false, ready: false, platform: "", arch: "", checks: {}, error_code: "",
       privilege: { ...unknownSSHPrivilege(), ...privilegeBinding() },
       agent_installation: { state: "unknown" }, discovery: unavailableSSHDiscovery(), checked_at: iso(at), expires_at: iso(new Date(at.getTime() + PLAN_SECONDS * 1000)) };
-    busy.add(machineID);
+    holdBusy(busy, machineID, "ssh-check", now().getTime());
     const checkSignal = AbortSignal.any([signal, AbortSignal.timeout(CHECK_TIMEOUT_MS)]);
     try {
       signal.throwIfAborted();
@@ -801,7 +814,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       db.run("UPDATE machine_installation_selections SET status='failed',finished_at=? WHERE id=?",iso(now()),selection.id);
       throw new InstallationAccountError(unavailableRecovery(scoped));
     }
-    busy.add(machineID);
+    holdBusy(busy, machineID, "installation", now().getTime());
     let last:SSHCheckResult|undefined;
     const bounded=AbortSignal.any([signal,AbortSignal.timeout(5*60_000)]);
     try {
@@ -920,7 +933,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const started = db.run(`UPDATE machine_deployments SET status='running',execution_stage='preflight',approved_at=?,started_at=? WHERE id=? AND status='awaiting_approval'
       AND NOT EXISTS (SELECT 1 FROM machine_deployments other WHERE other.machine_id=? AND other.id!=? AND ${unresolvedInstallationSQL(db,"other")})`, iso(now()), iso(now()), deployment.id,machine.id,deployment.id);
     if (!started.changes) fail(409, "部署计划已被其他请求执行");
-    busy.add(machine.id);
+    holdBusy(busy, machine.id, "deployment", now().getTime());
     let enrollment: AgentEnrollmentIssued | undefined;
     let dispatched = false;
     let completedStages: string[] = [];
@@ -1042,6 +1055,16 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     ctx.json({ ok: true });
   }));
   router.post("/api/v1/machines/:id/ssh-check", safe(async ctx => { admin(ctx); ctx.json(await checkSSH(ctx.params.id, await machineBody(ctx), ctx.user.id, ctx.signal)); }));
+  router.get("/api/v1/machines/:id/busy", safe(ctx => { admin(ctx); ensureMachine(ctx.params.id); ctx.json(busyView(ctx.params.id)); }));
+  router.post("/api/v1/machines/:id/busy/release", safe(async ctx => {
+    admin(ctx); ensureMachine(ctx.params.id);
+    const body = await ctx.body() as any;
+    if (body?.confirm !== true) fail(400, "必须明确确认释放主机忙状态");
+    const reason = String(body?.reason ?? "").trim();
+    if (!reason) fail(400, "释放主机忙状态需要填写原因");
+    if (reason.length > 500) fail(400, "invalid reason");
+    ctx.json(releaseBusy(ctx.params.id, ctx.user.id, reason));
+  }));
   router.post('/api/v1/machines/:id/installation-preflight',safe(async ctx=>{admin(ctx);ctx.json(await installationPreflight(ctx.params.id,await machineBody(ctx),ctx.user.id,ctx.signal));}));
   router.get('/api/v1/machines/:id/installation-preflights',safe(ctx=>{admin(ctx);ensureMachine(ctx.params.id);ctx.json(db.all<any>('SELECT * FROM machine_installation_selections WHERE machine_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100',ctx.params.id).map(value=>({...value,attempts:db.all<any>('SELECT ordinal,credential_id,account_id,username,account_revision,status,check_id,result_json,created_at,finished_at FROM machine_installation_selection_attempts WHERE selection_id=? ORDER BY ordinal',value.id).map(attempt=>({...attempt,result:parseJSON(attempt.result_json,{}) ,result_json:undefined}))})));}));
   router.post("/api/v1/machines/:id/agent-link", safe(ctx => { admin(ctx); fail(410, "手工关联 Agent 已移除；请从已登记主机部署 Agent"); }));

@@ -6,7 +6,7 @@ import {Router} from '../src/shared/http.js';
 import {NodeStore} from '../src/server/nodes-model.js';
 import {registerAgentJobs} from '../src/server/agent-jobs.js';
 import {OperationsPlatformStore} from '../src/ops/store.js';
-import {maintenanceWorkBusy,prepareMachineMaintenance,pendingMaintenancePreparation} from '../src/server/machine-maintenance.js';
+import {maintenanceBlockers,maintenanceWorkBusy,prepareMachineMaintenance,pendingMaintenancePreparation} from '../src/server/machine-maintenance.js';
 import {hasPendingAgentUpdate} from '../src/server/machine-agent-updates-guard.js';
 
 function fixture(t:any) {
@@ -55,6 +55,19 @@ test('leased, previously attempted and unknown work remain maintenance barriers'
   f.db.run("UPDATE agent_jobs SET state='queued',attempts=0,lease_id='',lease_expires_at='' WHERE id=?",f.job.id);
   f.db.run("UPDATE ops_platform_runs SET payload_cipher='corrupt' WHERE job_id=?",f.job.id);
   assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),false,'an unclaimed job can wait even when its payload cannot be read');
+});
+
+test('maintenance blockers expose actionable detail without changing the fence',t=>{
+  const f=fixture(t);
+  assert.deepEqual(maintenanceBlockers(f.deps,'agent','host'),[]);
+  f.db.run("UPDATE agent_jobs SET state='leased',lease_id='issued' WHERE id=?",f.job.id);
+  const blockers=maintenanceBlockers(f.deps,'agent','host');
+  assert.equal(blockers.length,1);
+  assert.deepEqual(blockers[0],{kind:'agent_job',id:f.job.id,state:'leased'});
+  assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),true);
+  f.db.run("UPDATE agent_jobs SET state='queued',attempts=0,lease_id='',lease_expires_at='' WHERE id=?",f.job.id);
+  assert.equal(maintenanceBlockers(f.deps,'agent','host').length,0,'unclaimed queued work is not a blocker');
+  assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),false);
 });
 
 test('unclaimed queued work waits while started or unknown work blocks maintenance',t=>{

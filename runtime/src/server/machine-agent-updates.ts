@@ -1,4 +1,5 @@
-import {maintenanceWorkBusy,prepareMachineMaintenance} from './machine-maintenance.js';
+import {maintenanceBlockers,maintenanceWorkBusy,prepareMachineMaintenance,type MaintenanceBlocker} from './machine-maintenance.js';
+import { holdBusy, type BusyLane } from './machine-busy-lane.js';
 import { createReadStream, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -43,7 +44,7 @@ export interface AgentUpdateAccess {
   authentication(machineID: string, credential: any): { privateKey: string; password?: string };
   markCredentialUsed(credentialID: string): void;
   executionStatus?(machineID: string): ReturnType<PrivilegedExecutorStore["getStatus"]> | undefined;
-  busy: Set<string>; runner: SSHRunner; safe(handler: Handler): Handler;
+  busy: BusyLane; runner: SSHRunner; safe(handler: Handler): Handler;
 }
 interface Options { downloadsDir: string; dataDir: string; credentials?: AgentCredentialStore; pollIntervalMs?: number; healthTimeoutMs?: number }
 const ACTIVE = "('awaiting_approval','running','verifying','unknown')";
@@ -141,13 +142,18 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   };
   const list = (machineID: string) => db.all<any>("SELECT * FROM machine_agent_updates WHERE machine_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100", machineID).map(view);
   const taskBusy = (machineID: string, agentID: string) => maintenanceWorkBusy(deps,agentID,machineID);
+  const taskBusyNote = (machineID: string, agentID: string) => {
+    const blockers = maintenanceBlockers(deps,agentID,machineID);
+    return blockers.length ? `主机存在待执行、运行中或结果未知的任务，请先处理（${blockers.map((b:MaintenanceBlocker)=>`${b.kind} ${b.id.slice(0,8)} ${b.state}`).join('、')}）` : "主机存在待执行、运行中或结果未知的任务，请先处理";
+  };
+  const holdLane = (machineID: string) => holdBusy(access.busy, machineID, "agent-update", deps.now().getTime());
   const assertTarget = (machine: MachineSummary) => {
     assertNoPendingAgentRuntime(db,machine.id,machine.agent_id);
     assertNoPendingMachineInstallation(db,machine.id,machine.agent_id,true);
     if (!machine.agent_id) fail(409, "主机尚未安装 Agent，请先部署");
     assertAgentActive(db, machine.agent_id);
     if (!options.credentials?.has(machine.agent_id, "control")) fail(409, "主机没有有效的 Agent 控制凭据");
-    if (taskBusy(machine.id, machine.agent_id)) fail(409, "主机存在待执行、运行中或结果未知的任务，请先处理");
+    if (taskBusy(machine.id, machine.agent_id)) fail(409, taskBusyNote(machine.id, machine.agent_id));
     if (db.get("SELECT id FROM machine_deployments WHERE machine_id=? AND status IN ('awaiting_approval','running') LIMIT 1", machine.id)
       || db.get("SELECT id FROM machine_uninstallations WHERE machine_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", machine.id))
       fail(409, "主机存在安装或卸载流程，请先结束");
@@ -174,16 +180,20 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     parseAgentUpdateProbe((await ssh(machine, credential, agentUpdateProbeCommand(), signal)).stdout);
   const validateProbe = (machine: MachineSummary, observation: AgentUpdateProbe, requireActive = true) => {
     if (observation.agent_id !== machine.agent_id) fail(409, "SSH 主机的 Agent 身份与平台不一致");
-    if (!observation.ready || requireActive && !observation.service_active || observation.lifecycle_locked || observation.operation_lock) fail(409, "Agent 不是空闲且健康的受管 systemd 安装，不能自动维护");
+    if (!observation.ready) fail(409, "Agent 不是空闲且健康的受管 systemd 安装：远端安装未通过受管校验，请检查安装状态后重试");
+    if (requireActive && !observation.service_active) fail(409, "Agent 不是空闲且健康的受管 systemd 安装：Agent 服务未在运行");
+    if (observation.lifecycle_locked) fail(409, "Agent 不是空闲且健康的受管 systemd 安装：生命周期锁未释放，可能有维护进程仍在进行；确认无维护进程后清理 /run/lightmoni-agent-lifecycle.lock");
+    if (observation.operation_lock) fail(409, "Agent 不是空闲且健康的受管 systemd 安装：操作锁未释放，主机存在未收尾的维护或任务状态文件；若维护已中断，重启 lightmoni-agent 服务让 Agent 自检回收后再试");
     if (observation.current.state_schema !== 1) fail(409, "当前 Agent 状态格式未知，不能安全升级或回退");
   };
   const validateOriginalProbe = (machine: MachineSummary, observation: AgentUpdateProbe, approved: any, requireOriginalService = true) => {
     validateProbe(machine, observation, false);
-    if (observation.current.fingerprint !== approved.current.fingerprint
-      || observation.runtime_mode !== approved.runtime_mode || observation.permission_generation !== approved.permission_generation
-      || observation.helper_active !== (approved.runtime_mode === "root")
-      || requireOriginalService && observation.service_active !== approved.current.service_active)
-      fail(409, "agent_update_recovery_unverified");
+    const drift = observation.current.fingerprint !== approved.current.fingerprint ? "程序指纹"
+      : observation.runtime_mode !== approved.runtime_mode ? "运行模式"
+      : observation.permission_generation !== approved.permission_generation ? "权限代次"
+      : observation.helper_active !== (approved.runtime_mode === "root") ? "执行通道状态"
+      : requireOriginalService && observation.service_active !== approved.current.service_active ? "原程序服务状态" : "";
+    if (drift) fail(409, `agent_update_recovery_unverified：${drift}与审批计划不一致，无法核实本次维护未执行`);
   };
   // Only the signature-verified helper observation can prove this component's
   // release; the ordinary Agent heartbeat does not carry that authority.
@@ -210,7 +220,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     const { machine, credential } = access.credential(machineID, input.credential_id);
     assertTarget(machine);
     const preparation=prepareMachineMaintenance(deps,machine.id,machine.agent_id);
-    access.busy.add(machine.id);
+    holdLane(machine.id);
     try {
       const observed = await probe(machine, credential, signal); validateProbe(machine, observed, input.action !== "rollback");
       access.credential(machine.id, credential.id); assertFree(machine.id); assertTarget(access.get(machine.id));
@@ -388,7 +398,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     if (operation.status !== "awaiting_approval") fail(409, "维护计划已执行或不可用，不能重复执行");
     const { machine, plan: body } = assertPlan(operation, true), { credential } = access.credential(machineID, operation.credential_id);
     for (const file of Object.values(body.files) as PinnedAgentFile[]) catalog.verify(file);
-    access.busy.add(machineID);
+    holdLane(machineID);
     let dispatched = false, observing = false;
     try {
       const observed = await probe(machine, credential, signal); validateProbe(machine, observed, operation.action !== "rollback");
@@ -437,7 +447,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     event(operationID,"cancelled");
     return view(row(machineID, operationID));
   };
-  const reconcile = async (machineID: string, operationID: string, credentialID: string | undefined, signal: AbortSignal) => {
+  const reconcile = async (machineID: string, operationID: string, credentialID: string | undefined, signal: AbortSignal, resolution?: "keep_current", reason?: string, actor?: string) => {
     access.idle(machineID);
     const operation = row(machineID, operationID);
     if (operation.status !== "unknown") fail(409, "只有结果未知的维护需要核对");
@@ -445,8 +455,28 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     const selected = access.credential(machineID, credentialID ?? operation.credential_id), { machine, credential } = selected;
     const verifyingAccount = sshAccountSnapshot(machine), verifyingRevision = sshCredentialRevision(credential);
     const recheck = () => { const current = row(machineID, operationID); if (current.status !== "unknown" || current.plan_json !== operation.plan_json) fail(409, "reconciliation_plan_changed"); assertPlan(operation, false, false); const live = access.credential(machineID, credential.id); assertSSHAccount(live.machine, verifyingAccount); if (sshCredentialRevision(live.credential) !== verifyingRevision) fail(409, "reconciliation_credential_changed"); };
-    access.busy.add(machineID);
+    holdLane(machineID);
     try {
+      if (resolution === "keep_current") {
+        // Admin escape hatch for the fingerprint-drift dead end: a fresh read-only
+        // probe must prove the original service state still matches the plan.
+        const body = JSON.parse(operation.plan_json);
+        if (!Number.isFinite(Date.parse(body.start_deadline)) || deps.now().getTime() <= Date.parse(body.start_deadline)) fail(409, "启动确认窗口尚未结束，请稍后再次核对");
+        const observed = await probe(machine, credential, signal);
+        validateProbe(machine, observed, false);
+        const target = approved.target;
+        if (["version", "source_revision", "build_id"].every(key => (observed.current as any)[key] === target[key])
+          && observed.current.artifact_sha256 === (target.artifact_sha256 ?? target.sha256))
+          fail(409, "agent_update_keep_current_unverified：当前程序已是本次维护的目标发行，请改用只读核对确认提交结果");
+        if (observed.service_active !== approved.current.service_active)
+          fail(409, `agent_update_keep_current_unverified：原程序服务状态与审批计划不一致（计划 ${approved.current.service_active ? "运行中" : "停止"}，实际 ${observed.service_active ? "运行中" : "停止"}）`);
+        recheck();
+        db.run("UPDATE machine_agent_updates SET status='failed',receipt_json=?,error=?,finished_at=?,ticket_hash='' WHERE id=? AND status='unknown'",
+          JSON.stringify({ ...recoveryReceipt(operation.id, {}), manual_keep_current: { reason, actor_id: actor, fingerprint: observed.current.fingerprint, service_active: observed.service_active, verified_at: at() } }),
+          "管理员只读核对后确认维持原程序，本次维护未执行", at(), operationID);
+        event(operationID, "keep_current");
+        return view(row(machineID, operationID));
+      }
       let remote: AgentUpdateRemoteStatus;
       try { remote = parseAgentUpdateStatus((await ssh(machine, credential, agentUpdateStatusCommand(operationID), signal)).stdout); }
       catch {
@@ -529,7 +559,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     const saveAttempt=()=>{const current=row(machineID,operationID),receipt=JSON.parse(current.receipt_json),attempts=Array.isArray(receipt.recovery_attempts)?receipt.recovery_attempts:[];
       const index=attempts.findIndex((item:any)=>item.id===attempt.id);if(index<0)attempts.push({...attempt});else attempts[index]={...attempt};
       db.run('UPDATE machine_agent_updates SET receipt_json=? WHERE id=?',JSON.stringify({...receipt,recovery_attempts:attempts}),operationID);};
-    access.busy.add(machineID);let dispatched=false;
+    holdLane(machineID);let dispatched=false;
     try {
       recheck();saveAttempt();dispatched=true;
       const output=await ssh(machine,credential,agentUpdateRecoveryBootstrap(operationID,pinned.file.sha256),signal,JSON.stringify({runner_base64:source.toString('base64'),request})+'\n',660_000);
@@ -605,9 +635,17 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     ctx.json(await apply(ctx.params.id, ctx.params.updateId, ctx.user.id, ctx.signal), 202);
   }));
   router.post(prefix + "/:updateId/cancel", access.safe(async ctx => { deps.auth.requireAdmin(ctx); fields(await ctx.body(), []); ctx.json(cancel(ctx.params.id, ctx.params.updateId)); }));
-  router.post(prefix + "/:updateId/reconcile", access.safe(async ctx => { deps.auth.requireAdmin(ctx); const input = fields(await ctx.body(), ["credential_id"]);
-    await reconcile(ctx.params.id, ctx.params.updateId, input.credential_id == null ? undefined : string(input.credential_id, "credential_id"), ctx.signal);
-    markRecoveryVerification(ctx.params.id,ctx.params.updateId,ctx.user.id);
+  router.post(prefix + "/:updateId/reconcile", access.safe(async ctx => { deps.auth.requireAdmin(ctx); const input = fields(await ctx.body(), ["credential_id", "resolution", "reason"]);
+    let resolution: "keep_current" | undefined;
+    if (input.resolution != null) {
+      if (input.resolution !== "keep_current") fail(400, "resolution 仅支持 keep_current");
+      const reason = String(input.reason ?? "").trim();
+      if (!reason) fail(400, "keep_current 需要填写核对说明");
+      if (reason.length > 500) fail(400, "invalid reason");
+      resolution = input.resolution;
+    }
+    await reconcile(ctx.params.id, ctx.params.updateId, input.credential_id == null ? undefined : string(input.credential_id, "credential_id"), ctx.signal, resolution, resolution ? String(input.reason).trim() : undefined, ctx.user.id);
+    if (!resolution) markRecoveryVerification(ctx.params.id,ctx.params.updateId,ctx.user.id);
     ctx.json(view(row(ctx.params.id,ctx.params.updateId))); }));
   router.post(prefix + '/:updateId/recover',access.safe(async ctx=>{deps.auth.requireAdmin(ctx);ctx.json(await recover(ctx.params.id,ctx.params.updateId,await ctx.body(),ctx.user.id,ctx.signal));}));
   router.get(prefix + "/:updateId/downloads/:file", access.safe(async ctx => {

@@ -515,6 +515,42 @@ test("a missing start receipt cannot release the fence before start deadline or 
   assert.equal(verified.data.status, "failed", verified.raw); assert.equal(verified.data.receipt.remote_unchanged, true);
 });
 
+test("keep_current resolution terminalizes a drifted unknown only with verified evidence", async t => {
+  const f = await fixture(t), h = await f.host(); f.modes.set(h.id, "missing_receipt");
+  const p = (await f.plan(h.id)).data; assert.equal((await f.apply(h.id, p.id)).data.status, "unknown");
+  assert.equal(f.machines.get(h.id).capabilities.update_agent.available, false);
+  f.advance(181);
+  f.observations.get(h.id).current = { ...oldRelease, fingerprint: "c".repeat(64) };
+  // The strict read-only reconciliation still refuses the drifted fingerprint.
+  assert.equal((await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", {})).status, 409);
+  // Input validation: unknown resolution values and a missing reason are refused.
+  assert.equal((await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", { resolution: "other", reason: "x" })).status, 400);
+  assert.equal((await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", { resolution: "keep_current" })).status, 400);
+  assert.equal((await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", { resolution: "keep_current", reason: "   " })).status, 400);
+  // The target identity guard: a probe that shows the target release refuses.
+  f.observations.get(h.id).current = { ...p.plan.target, artifact_sha256: p.plan.target.artifact_sha256 ?? p.plan.target.sha256, fingerprint: "d".repeat(64), boot_id: NEW_BOOT, service_active: true };
+  const switched = await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", { resolution: "keep_current", reason: "helper regenerated only" });
+  assert.equal(switched.status, 409, switched.raw); assert.match(switched.raw, /agent_update_keep_current_unverified/);
+  // Service state mismatch refuses.
+  f.observations.get(h.id).current = { ...oldRelease, fingerprint: "c".repeat(64) };
+  f.observations.get(h.id).service_active = false;
+  const stopped = await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", { resolution: "keep_current", reason: "helper regenerated only" });
+  assert.equal(stopped.status, 409, stopped.raw); assert.match(stopped.raw, /agent_update_keep_current_unverified/);
+  // Healthy original service with a drifted fingerprint terminalizes the record.
+  f.observations.get(h.id).service_active = true;
+  const done = await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", { resolution: "keep_current", reason: "helper regenerated only" });
+  assert.equal(done.data.status, "failed", done.raw);
+  assert.equal(done.data.error, "管理员只读核对后确认维持原程序，本次维护未执行");
+  assert.equal(done.data.receipt.manual_keep_current.reason, "helper regenerated only");
+  assert.equal(done.data.receipt.manual_keep_current.actor_id, "admin");
+  assert.equal(done.data.receipt.manual_keep_current.fingerprint, "c".repeat(64));
+  assert.equal(done.data.events.some((e: any) => e.stage === "keep_current"), true);
+  assert.equal(done.data.recovery_revision, undefined);
+  assert.equal(f.machines.get(h.id).capabilities.update_agent.reason, "", done.raw);
+  // A terminal record cannot be reconciled again.
+  assert.equal((await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`, "POST", {})).status, 409);
+});
+
 test("maintenance fencing prevents conflicting tasks, jobs, deletion, SSH terminals and host changes", async t => {
   const f = await fixture(t), h = await f.host(), tasks = f.taskStore(), jobs = registerAgentJobs(f.deps, { agentCredentials: f.credentials });
   t.after(() => jobs.close?.());

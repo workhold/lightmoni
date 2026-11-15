@@ -10,8 +10,9 @@ import { hasActiveTaskRuns } from './agent-hosts.js';
 import { assertNoPendingAgentUpdate } from './machine-agent-updates-guard.js';
 import { assertNoPendingMachineInstallation } from './machine-installations-guard.js';
 import { assertNoPrivilegedExecution } from './privileged-execution-guard.js';
+import { holdBusy, type BusyLane } from './machine-busy-lane.js';
 interface Access {
- get(id:string):MachineSummary; revision(machine:MachineSummary):string; idle(id:string):void; busy:Set<string>;
+ get(id:string):MachineSummary; revision(machine:MachineSummary):string; idle(id:string):void; busy:BusyLane;
  credential(id:string,credentialID?:string):{machine:SSHMachineTarget;credential:any};
  authentication(id:string,credential:any):{privateKey:string;password?:string};
  markCredentialUsed(id:string):void;runner:SSHRunner;safe(fn:Handler):Handler;
@@ -61,7 +62,7 @@ export function registerMachineDocker(deps:Dependencies,access:Access) {
    access.markCredentialUsed(credential.id);const live=access.credential(r.machine_id,credential.id);assertSSHAccount(live.machine,selectedAccount);if(sshCredentialRevision(live.credential)!==selectedRevision||access.revision(live.machine)!==r.target_revision)fail(409,"ssh_credential_changed");if(verificationCredentialID)db.run("UPDATE machine_docker_installations SET verification_json=? WHERE id=?",JSON.stringify({approved_ssh_account:JSON.parse(r.ssh_account_json),verification_ssh_account:selectedAccount,verification_credential_id:credential.id,verification_credential_revision:selectedRevision,verified_at:now()}),r.id);const status=parseDockerInstallStatus(output.stdout);update(r.id,status);return status;
  };
  const launch=(r:any,start=true)=>{
-  access.busy.add(r.machine_id);
+  holdBusy(access.busy, r.machine_id, "docker", deps.now().getTime());
   const work=(async()=>{try{
     let result=await read(r,start);
     for(let i=0;i<185&&result.state==='running';i++){
@@ -101,7 +102,7 @@ export function registerMachineDocker(deps:Dependencies,access:Access) {
   // Recovery is strictly read-only and may replace an expired credential.
   const body=await ctx.body<any>();if(!body||Array.isArray(body)||Object.keys(body).some(k=>k!=='credential_id')||body.credential_id!==undefined&&typeof body.credential_id!=='string')fail(400,'invalid_docker_verification');
   const verificationCredentialID=body.credential_id??r.credential_id;access.credential(r.machine_id,verificationCredentialID);
-  if(access.busy.has(r.machine_id))fail(409,'docker_install_host_busy');access.busy.add(r.machine_id);
+  if(access.busy.has(r.machine_id))fail(409,'docker_install_host_busy');holdBusy(access.busy,r.machine_id,"docker",deps.now().getTime());
   try{await read(r,false,body.credential_id);}catch(error){update(r.id,{state:'unknown',phase:'unknown',code:error instanceof SSHError?error.code:'docker_install_result_unavailable'});}finally{access.busy.delete(r.machine_id);}
   const latest=row(r.machine_id,r.id);
   ctx.json(view(latest));

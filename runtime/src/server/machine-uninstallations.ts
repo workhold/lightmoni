@@ -8,6 +8,7 @@ import { assertSSHAccount, sshAccountSnapshot, sshCredentialRevision, type SSHRu
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 import {createAgentLifecycleSchema} from './agent-lifecycle.js';
+import { holdBusy, type BusyLane } from './machine-busy-lane.js';
 export type UninstallationStatus = "awaiting_approval" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
 interface Access {
   get(id: string): MachineSummary; idle(id: string): void; revision(machine: MachineSummary): string;
@@ -15,7 +16,7 @@ interface Access {
   credential(machineID: string, credentialID?: string): { machine: SSHMachineTarget; credential: any };
   authentication(machineID: string, credential: any): { privateKey: string; password?: string };
   markCredentialUsed(credentialID: string): void;
-  busy: Set<string>; runner: SSHRunner; safe(handler: Handler): Handler;
+  busy: BusyLane; runner: SSHRunner; safe(handler: Handler): Handler;
   revokeUnifiedRuntime?(machineID:string,actor:string,operationID:string):void;
 }
 export function createUninstallationSchema(deps: Dependencies) {
@@ -125,7 +126,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     const {machine,credential}=access.credential(ctx.params.id,input.credential_id),check=access.checked(machine,input.check_id,credential.id);
     relation(machine,"",mode==="standard"?"recovery":mode);
     const preparation=prepareMachineMaintenance(deps,machine.id,machine.agent_id);
-    access.busy.add(machine.id);
+    holdBusy(access.busy, machine.id, "uninstallation", deps.now().getTime());
     try{
       const observed=await probe(machine,credential,ctx.signal);assertObservation(machine,observed,mode,preparation.token);
       if(mode==="standard"&&observed.installation!=="present" || mode==="recovery"&&observed.installation==="absent"&&!observed.config_present&&!observed.data_present) fail(409,"远端 Agent 已移除，没有待卸载内容");
@@ -144,7 +145,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     if(operation.status!=="awaiting_approval")fail(409,"卸载计划已执行或结果待核对，不能重复执行");
     if(!plan.observation)fail(409,"旧卸载计划没有审批快照，请取消并重新生成计划");
     if(!Number.isFinite(Date.parse(plan.expires_at))||Date.parse(plan.expires_at)<=deps.now().getTime())fail(409,"卸载计划已过期，请取消并重新检查");
-    const asset=assertPlanTarget(operation),{machine,credential}=access.credential(asset.id,operation.credential_id);assertSSHAccount(machine,plan.ssh_account);if(sshCredentialRevision(credential)!==plan.credential_revision)fail(409,"ssh_credential_changed");access.checked(machine,plan.check_id,credential.id);access.busy.add(machine.id);let destructive=false;
+    const asset=assertPlanTarget(operation),{machine,credential}=access.credential(asset.id,operation.credential_id);assertSSHAccount(machine,plan.ssh_account);if(sshCredentialRevision(credential)!==plan.credential_revision)fail(409,"ssh_credential_changed");access.checked(machine,plan.check_id,credential.id);holdBusy(access.busy, machine.id, "uninstallation", deps.now().getTime());let destructive=false;
     try{
       const observed=await probe(machine,credential,ctx.signal);assertObservation(machine,observed,plan.mode||"standard");if(!plan.observation||!same(observed,plan.observation))fail(409,"远端 Agent 证据与审核计划不一致，请重新计划");
       const live=access.credential(machine.id,credential.id);assertSSHAccount(live.machine,plan.ssh_account);if(sshCredentialRevision(live.credential)!==plan.credential_revision)fail(409,"ssh_credential_changed");access.checked(live.machine,plan.check_id,credential.id);assertPlanTarget(operation);
@@ -156,7 +157,7 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
   router.post(base+"/:uninstallationId/reconcile",access.safe(async ctx=>{
     deps.auth.requireAdmin(ctx);const input=await body(ctx,["credential_id"]);if(input.credential_id!==undefined&&(typeof input.credential_id!=="string"||!input.credential_id||input.credential_id.length>64))fail(400,"invalid credential_id");access.idle(ctx.params.id);const operation=row(ctx.params.id,ctx.params.uninstallationId);if(operation.status!=="unknown")fail(409,"只有结果未知的卸载可以核对");const machine=assertPlanTarget(operation),plan=JSON.parse(operation.plan_json);
     const selected=access.credential(machine.id,input.credential_id??operation.credential_id),verification={approved_ssh_account:plan.ssh_account,verification_ssh_account:sshAccountSnapshot(selected.machine),verification_credential_id:selected.credential.id,verification_credential_revision:sshCredentialRevision(selected.credential)};
-    access.busy.add(machine.id);try{const observed=await probe(selected.machine,selected.credential,ctx.signal);const live=access.credential(machine.id,selected.credential.id);assertSSHAccount(live.machine,verification.verification_ssh_account);if(sshCredentialRevision(live.credential)!==verification.verification_credential_revision)fail(409,"reconciliation_credential_changed");assertPlanTarget(operation);
+    holdBusy(access.busy, machine.id, "uninstallation", deps.now().getTime());try{const observed=await probe(selected.machine,selected.credential,ctx.signal);const live=access.credential(machine.id,selected.credential.id);assertSSHAccount(live.machine,verification.verification_ssh_account);if(sshCredentialRevision(live.credential)!==verification.verification_credential_revision)fail(409,"reconciliation_credential_changed");assertPlanTarget(operation);
       if(observed.installation==="present"&&observed.program_complete&&plan.observation&&sameProgram(observed,plan.observation)){assertObservation(machine,observed,plan.mode||"standard");if(!db.run("UPDATE machine_uninstallations SET status='failed',error=?,receipt_json=?,finished_at=? WHERE id=? AND status='unknown'","核对确认原程序完整未移除，请重新审阅",JSON.stringify({...verification,mode:plan.mode||"standard",purge:!!plan.purge,remote_removed:false,credentials_revoked:false,remote_unchanged:true,service_stopped:!observed.service_running,verified_at:at()}),at(),operation.id).changes)fail(409,"卸载状态已变化");}
       else complete(operation,observed,"unknown",verification);ctx.json(decode(row(machine.id,operation.id)));
     }finally{access.busy.delete(machine.id);}
