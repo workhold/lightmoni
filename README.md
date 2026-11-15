@@ -20,7 +20,7 @@
 
 ## Docker Compose 部署
 
-根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像使用 `docker.heyphp.com/lightmoni/lightmoni`，固定发布标签由根 Compose 维护，支持 Linux amd64/arm64，内置网页、双架构 Agent 和四种 record SDK。镜像版本由仓库维护，无需在 `.env` 指定。中心以非 root 用户运行。
+根目录 [compose.yaml](compose.yaml) 同时运行 LightMoni 和 ClickHouse。中心镜像使用 `docker.heyphp.com/lightmoni/lightmoni`，固定发布标签由根 Compose 维护并明确平台架构；当前固定为 Linux amd64，内置网页、双架构 Agent 和四种 record SDK。Agent 双架构不表示同时发布了 arm64 平台镜像，arm64 中心需按源码单独构建。镜像版本由仓库维护，无需在 `.env` 指定。中心以非 root 用户运行。
 
 首次获取源码：
 
@@ -185,9 +185,35 @@ LIGHTMONI_DATA=.local-dev/node-dev/state LIGHTMONI_ADDR=127.0.0.1:18880 LIGHTMON
 需要测试下载与安装时，单独生成发布包（默认输出 `runtime/downloads`）：
 
 ```sh
-npm run release:agent -- 0.1.0
-npm run release:sdk -- 0.1.0
+npm run release:agent -- 0.1.1
+npm run release:sdk -- 0.1.1
 ```
+
+### 版本号与 AI 发布检查
+
+根 `package.json.version` 是平台、Agent 和随镜像分发 SDK 的统一版本事实来源。AI/自动化代理在**每次推送前**必须运行 `npm run version:check`；检查失败时先补齐遗漏，不得直接推送或发布。普通提交不需要机械涨版，只有发布 PR 才递增版本：修复使用补丁号，例如本次为 `0.1.1`，下一个补丁版本示例为 `0.1.2`。
+
+```sh
+# 每次推送前检查；发布 PR 中先递增，再复查。
+npm run version:check
+npm run version:bump -- 0.1.2
+npm run version:check
+```
+
+`version:bump` 会同步登记的平台、Agent、MCP、SDK、构建默认值和 README 示例，结构化更新本地 package locks，不改写第三方依赖版本，并把根 Compose 更新为 `v<版本>-<UTC 日期>-<UTC 时间>-amd64` 的固定标签。相同版本重复执行只检查，拒绝降级。不要分别手改这些版本点，也不要把历史验收文档中的旧版本当成当前发布版本。
+
+发布顺序固定为：版本 PR 检查并合入 `main` → 同步 `origin/main` → 本地构建和隔离验证 → 推送 Compose 固定标签及便捷别名 → 回读 registry digest 和 OCI revision。不要推送未合入或未验证的代码，不使用 GitHub 流水线代替本次本地发布，不把 `latest` 当作 Compose 的固定发布标签。
+
+```sh
+npm run version:check
+IMAGE=$(sed -n 's#^    image: ##p' compose.yaml)
+docker build --platform linux/amd64 \
+  --build-arg BUILD_REVISION="$(git rev-parse HEAD)" \
+  -t "$IMAGE" .
+docker image inspect "$IMAGE" --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'
+```
+
+推送前还应启动隔离容器，核对健康检查、`/api/v1/settings/instance`、MCP 版本及 Agent/SDK 发行文件；推送后回读 digest。仓库登录只使用受保护的 Docker 凭据状态，不把账号、密码或令牌写入 README、命令、Git 或 PR。生产部署仍按 [Docker 部署与更新](deploy/server/README.md) 单独执行，发布镜像不等于更新生产主机。
 
 Agent 发布脚本下载并校验 Linux 双架构的固定 Node 发行包；打包成功不代表已在相应 Linux 主机运行验收。已由平台部署并取得独立凭据的 Agent，其源码运行入口为 `node runtime/dist/agent/main.js run --config /path/agent-config.json`；这个命令不签发身份，也不能绕过主机预约。生命周期和业务应用分开管理，诊断与隔离开发说明见 [Agent 运行与恢复](examples/agent/README.md)。
 
