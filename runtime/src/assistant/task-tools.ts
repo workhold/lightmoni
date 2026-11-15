@@ -19,6 +19,10 @@ export interface ProposalSource {
   session_id?: string;
   grant_id?: string;
   credential_id?: string;
+  subject_type?: "service";
+  subject_id?: string;
+  owner_user_id?: string;
+  capability?: { id: string; name: string; version: number; input: unknown };
 }
 interface Stored { owner_id: string; intent: Intent; fingerprint: string; proposal: Proposal; source?: ProposalSource }
 const stringify = (v: any): string => JSON.stringify(v, (_key, value) => value && typeof value === "object" && !Array.isArray(value)
@@ -81,6 +85,7 @@ export const taskMetadata = ({ script, config: _config, ...task }: Task) => ({ .
 export class TaskProposalService {
   readonly nodes: NodeStore;
   constructor(readonly deps: Dependencies, readonly runs: TaskRunStore, readonly hooks: {
+    beforeCreate?: (actor: Actor, source: ProposalSource, intent: Intent) => void;
     afterCreate?: (actor: Actor, source: ProposalSource, intent: Intent, proposal: Proposal) => void;
     beforeApply?: (actor: Actor, source: ProposalSource, intent: Intent, proposal: Proposal) => void;
     afterApply?: (actor: Actor, source: ProposalSource, intent: Intent, proposal: Proposal) => void;
@@ -113,10 +118,12 @@ export class TaskProposalService {
   }
   private load(actor: Actor, proposalID: string): Stored {
     requireAdmin(actor); id(proposalID);
-    const row = this.deps.db.get<{body:string}>("SELECT body FROM assistant_task_proposals WHERE id=? AND owner_id=?", proposalID, actor.id);
+    const row = this.deps.db.get<{body:string}>("SELECT body FROM assistant_task_proposals WHERE id=?", proposalID);
     if (!row) throw new AssistantError(404, "任务提案不存在");
     const stored = JSON.parse(this.deps.decrypt(row.body)) as Stored;
-    if (stored.owner_id !== actor.id || stored.proposal.id !== proposalID) throw new AssistantError(500, "任务提案无法读取");
+    if (stored.proposal.id !== proposalID) throw new AssistantError(500, "任务提案无法读取");
+    if (stored.owner_id !== actor.id && !(stored.source?.subject_type === "service" && stored.source.owner_user_id === actor.id))
+      throw new AssistantError(404, "任务提案不存在");
     return stored;
   }
   get(actor: Actor, proposalID: string): Proposal { return convert(() => structuredClone(this.load(actor, proposalID).proposal)); }
@@ -133,6 +140,10 @@ export class TaskProposalService {
       object(value, ["operation", "task_id", "run_id", "task", "host_ids", "reason"], ["operation", "reason"]);
       if (!["task.create", "task.update", "task.dispatch", "run.cancel", "run.retry"].includes(value.operation)
         || typeof value.reason !== "string" || !value.reason.trim() || value.reason.length > 1000) throw new AssistantError(400, "请提供任务操作和原因");
+      if (source.subject_type === "service" && (source.source !== "mcp" || source.subject_id !== actor.id || !source.owner_user_id
+        || source.capability?.id !== "tasks.plan" || source.capability.name !== "lightmoni_tasks_plan" || source.capability.version !== 1
+        || (source.capability.input as any)?.operation !== value.operation || !["task.dispatch", "run.cancel", "run.retry"].includes(value.operation)))
+        throw new AssistantError(403, "服务任务提案只支持固定既有任务操作");
       bounded(value, 160 << 10);
       const intent = structuredClone(value) as Intent;
       if (intent.host_ids != null && (!Array.isArray(intent.host_ids) || intent.host_ids.length > 200 || intent.host_ids.some(host => typeof host !== "string" || !host || host.length > 128))) throw new AssistantError(400, "主机目标无效");
@@ -140,6 +151,7 @@ export class TaskProposalService {
         || !["task.create", "task.update"].includes(intent.operation) && intent.task !== undefined
         || intent.operation.startsWith("task.") && intent.run_id !== undefined
         || intent.operation.startsWith("run.") && intent.task_id !== undefined) throw new AssistantError(400, "提案字段与操作不符");
+      this.hooks.beforeCreate?.(actor, source, intent);
       let before: any = null, after: any = null;
       if (intent.operation === "task.create" || intent.operation === "task.update") {
         if (!intent.task || typeof intent.task !== "object" || Array.isArray(intent.task)) throw new AssistantError(400, "请提供任务定义");
@@ -175,6 +187,8 @@ export class TaskProposalService {
   apply(actor: Actor, proposalID: string): Proposal {
     return convert(() => this.deps.db.transaction(() => {
       const saved = this.load(actor, proposalID), { intent, proposal } = saved;
+      if (saved.source?.subject_type === "service" && (actor.id === saved.owner_id || actor.id !== saved.source.owner_user_id))
+        throw new AssistantError(403, "服务提案须由其 Owner 管理员审批");
       if (proposal.status === "completed") return structuredClone(proposal);
       if (saved.source?.source === "mcp" && (!this.hooks.beforeApply || !this.hooks.afterApply))
         throw new AssistantError(503, "外部授权校验不可用，请恢复 MCP 配置后重试");
@@ -190,7 +204,7 @@ export class TaskProposalService {
       }
       saved.proposal = { ...proposal, status: "completed", applied_at: this.deps.now().toISOString(), result };
       if (saved.source) this.hooks.afterApply?.(actor, saved.source, intent, saved.proposal);
-      this.deps.db.run("UPDATE assistant_task_proposals SET body=? WHERE id=? AND owner_id=?", this.deps.encrypt(JSON.stringify(saved)), proposalID, actor.id);
+      this.deps.db.run("UPDATE assistant_task_proposals SET body=? WHERE id=? AND owner_id=?", this.deps.encrypt(JSON.stringify(saved)), proposalID, saved.owner_id);
       const audit = intent.operation === "task.create" || intent.operation === "task.update" ? taskMetadata(result as Task) : result;
       this.deps.db.run("INSERT INTO assistant_task_audit(proposal_id,actor_id,operation,applied_at,receipt) VALUES(?,?,?,?,?)", proposalID, actor.id, proposal.operation, saved.proposal.applied_at, this.deps.encrypt(JSON.stringify(audit)));
       return structuredClone(saved.proposal);

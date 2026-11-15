@@ -425,7 +425,12 @@ export class TaskRunStore {
       if (pendingMachineUninstallation(this.deps.db,r.host_id,r.agent_id)) return;
       if(this.sshOnly&&r.requested_by!=='scheduler'&&!this.sshOnceReady?.(r.host_id)){close();return;}
       const next = this.insert(task, r.host_id, "retry", r.requested_by, "auto-retry:" + r.id, r.id, snapshot, r.automatic_attempt + 1);
-      if (this.externalAuthorization(r.id)) this.deps.db.run("INSERT INTO capability_run_authorizations(run_id,grant_id,user_id,host_id) SELECT ?,grant_id,user_id,host_id FROM capability_run_authorizations WHERE run_id=?", next.id, r.id);
+      if (this.externalAuthorization(r.id)) {
+        // TaskCenter can run before the capability migration in isolated/legacy deployments.
+        const hasProposal = this.deps.db.all<{name:string}>("PRAGMA table_info(capability_run_authorizations)").some(column => column.name === "proposal_id");
+        if (hasProposal) this.deps.db.run("INSERT INTO capability_run_authorizations(run_id,grant_id,user_id,host_id,proposal_id) SELECT ?,grant_id,user_id,host_id,proposal_id FROM capability_run_authorizations WHERE run_id=?", next.id, r.id);
+        else this.deps.db.run("INSERT INTO capability_run_authorizations(run_id,grant_id,user_id,host_id) SELECT ?,grant_id,user_id,host_id FROM capability_run_authorizations WHERE run_id=?", next.id, r.id);
+      }
       this.deps.db.run("UPDATE task_runs SET superseded_by=?,auto_retry_closed=1 WHERE id=?", next.id, r.id);
     });
   }
