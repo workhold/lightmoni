@@ -4,7 +4,7 @@ import {useI18n} from '../shared/i18n';
 import {agentOperationMatches,agentOperationProgress,type AgentOperationKind,type AgentOperationRecord} from './agent-operation-progress';
 
 /** Stage evidence only: percentages never advance because time has passed. */
-export default function AgentOperationProgress({kind,machineID,record,submitting=false,compact=false,refreshError}:{kind:AgentOperationKind;machineID:string;record:AgentOperationRecord;submitting?:boolean;compact?:boolean;refreshError?:string}){
+export default function AgentOperationProgress({kind,machineID,record,submitting=false,compact=false,refreshError,showStatus=true}:{kind:AgentOperationKind;machineID:string;record:AgentOperationRecord;submitting?:boolean;compact?:boolean;refreshError?:string;showStatus?:boolean}){
  const {t}=useI18n(),[now,setNow]=useState(Date.now());
  const valid=agentOperationMatches(record,machineID),progress=agentOperationProgress(kind,record,submitting);
  useEffect(()=>{setNow(Date.now());if(!valid||!progress.active)return;const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer)},[valid,record.id,progress.active]);
@@ -15,7 +15,7 @@ export default function AgentOperationProgress({kind,machineID,record,submitting
  const elapsed=Number.isFinite(start)?Math.max(0,Math.floor(((Number.isFinite(end)?end:now)-start)/1000)):undefined;
  const name=t(kind==='install'?'Agent 安装进度':'Agent 卸载进度',kind==='install'?'Agent installation progress':'Agent removal progress');
  return <section aria-label={name} data-agent-operation-id={record.id} data-agent-operation-machine={machineID} data-agent-operation-status={progress.status} style={{minWidth:0,maxWidth:'100%',marginBlock:compact?6:12,overflowWrap:'anywhere'}}>
-  <Typography.Text strong={!compact}>{statuses[progress.status]||progress.status}</Typography.Text>
+  {showStatus&&<Typography.Text strong={!compact}>{statuses[progress.status]||progress.status}</Typography.Text>}
   <Progress aria-label={name} percent={progress.percent} status={record.status==='succeeded'?'success':record.status==='failed'||record.status==='unknown'?'exception':progress.active?'active':'normal'} showInfo={false} size={compact?'small':'default'}/>
   <Typography.Text type="secondary" style={{display:'block',fontSize:compact?12:undefined}}>{t('阶段进度：','Stage progress: ')}{stages[progress.stage]}{elapsed!==undefined?' · '+t('已耗时 '+elapsed+' 秒','Elapsed '+elapsed+' seconds'):''}</Typography.Text>
   {record.error&&<Typography.Text type="danger" style={{display:'block'}}>{record.error}</Typography.Text>}

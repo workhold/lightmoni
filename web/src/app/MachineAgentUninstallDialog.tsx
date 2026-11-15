@@ -171,19 +171,60 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
  const credentialSelect=<Select aria-label={t('卸载 SSH 凭据','Uninstall SSH credential')} value={credential} disabled={busy||planUncertain} style={{width:'100%'}} onChange={setCredential} options={keys.map(c=>({value:c.id,label:`${c.username} · ${c.name||(c.method==='password'?t('密码','Password'):t('SSH 私钥','SSH private key'))} · ${c.secret_fingerprint||c.id} · ${c.retention==='permanent'?t('永久','Permanent'):time(c.expires_at)}`}))}/>;
  const status=record?.status==='awaiting_approval'&&applyAttempted?t('卸载请求已发送，正在等待执行结果','Uninstall request sent; waiting for the execution result'):record?statusLabel(record.status):'';
  const statusDescription=record?.status==='awaiting_approval'?applyAttempted?t('正在核验远端状态，尚未确认移除。状态会自动刷新，请勿重复执行。','Remote verification is pending; removal is not confirmed. Status refreshes automatically. Do not repeat removal.'):t('计划已生成，尚未执行。请审阅后确认卸载，或取消计划以恢复后续操作。','The plan is ready and has not run. Review and confirm removal, or cancel the plan to resume other operations.'):record?.status==='running'?t('正在通过 SSH 卸载并核验结果，最长约 2 分钟。状态会自动刷新。','Removing Agent over SSH and verifying the result; this can take about two minutes. Status refreshes automatically.'):record?.status==='unknown'?t('远端可能已经改变。只读核对检查原操作，不会重放卸载；可选择当前有效 SSH 凭据。','The host may already have changed. Read-only verification checks the original operation without replaying removal. Select a currently active SSH credential.'):record?.error?localizeMessage(record.error):undefined;
+ const plan=record?.plan,receipt=record?.receipt;
+ const planDetails=plan?<>
+  <Descriptions size="small" layout="vertical" column={1} items={[
+   {key:'target',label:t('目标主机','Target host'),children:sshEndpoint(plan.machine.address,plan.machine.port,plan.ssh_account.username)},
+   {key:'mode',label:t('卸载方式','Uninstall method'),children:plan.mode==='recovery'?t('SSH 恢复卸载','SSH recovery uninstall'):t('标准卸载','Standard uninstall')},
+   ...(plan.reason?[{key:'reason',label:t('恢复原因','Recovery reason'),children:plan.reason}]:[]),
+   {key:'policy',label:t('已固定的数据策略','Pinned data policy'),children:dataPolicy(!!plan.purge)},
+   {key:'agent',label:t('已核对的节点身份','Verified Agent identity'),children:plan.agent_id?<Typography.Text code>{plan.agent_id}</Typography.Text>:t('未取得有效身份','No valid identity observed')},
+   {key:'scope',label:t('平台凭据撤销范围','Platform credential revocation scope'),children:scopeText(scope)},
+   ...(scope?.reason?[{key:'ownership',label:t('归属核验说明','Ownership evidence'),children:localizeMessage(scope.reason)}]:[]),
+   {key:'credential',label:t('SSH 凭据 ID','SSH credential ID'),children:plan.credential.id},
+   {key:'expiry',label:t('计划有效期','Plan expires at'),children:time(plan.expires_at)},
+  ]}/>
+  {observation&&<><h3>{t('实际远端快照（执行前会再次核验）','Actual remote snapshot (rechecked before execution)')}</h3><Descriptions size="small" layout="vertical" column={{xs:1,sm:2}} items={[
+   {key:'identity-state',label:t('身份文件','Identity file'),children:({valid:t('有效','Valid'),missing:t('缺失','Missing'),invalid:t('损坏','Invalid'),unsafe:t('路径不安全','Unsafe path')})[observation.identity_state]},
+   {key:'runtime',label:t('运行程序','Runtime'),children:observation.installation==='absent'?t('已缺失','Absent'):observation.program_complete?t('完整','Complete'):t('部分残留','Partial runtime')},
+   {key:'unit',label:t('受管服务文件','Managed service file'),children:observation.unit_managed?t('已核验','Verified'):t('不存在或未归属','Absent or unowned')},
+   {key:'running',label:t('服务运行状态','Service running state'),children:observation.service_running?t('运行中','Running'):t('已停止','Stopped')},
+   {key:'config',label:t('配置目录','Configuration directory'),children:observation.config_present?t('存在','Present'):t('不存在','Absent')},
+   {key:'data',label:t('缓存目录','Cache directory'),children:observation.data_present?t('存在','Present'):t('不存在','Absent')},
+   {key:'paths',label:t('固定路径检查','Fixed path checks'),children:observation.paths_safe?t('通过','Passed'):t('未通过','Failed')},
+   {key:'locks',label:t('生命周期锁 / 操作标记','Lifecycle lock / operation marker'),children:observation.lifecycle_locked||observation.operation_lock?t('存在，执行将受阻','Present; execution is blocked'):t('未发现','None observed')},
+   {key:'identity-sha',label:t('身份文件 SHA256','Identity file SHA256'),span:2,children:<Typography.Text code className="lm-machine-path">{observation.identity_sha256}</Typography.Text>},
+   {key:'runtime-sha',label:t('程序快照 SHA256','Runtime snapshot SHA256'),span:2,children:<Typography.Text code className="lm-machine-path">{observation.program_sha256}</Typography.Text>},
+  ]}/></>}
+  {!!plan.steps?.length&&<ol className="lm-machine-uninstall-steps">{plan.steps.map((step,index)=><li key={index}>{stepLabel(step)}</li>)}</ol>}
+  {!!plan.warnings?.length&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('计划影响','Plan impact')} description={<ul className="lm-machine-uninstall-steps">{plan.warnings.map((warning,index)=><li key={index}>{warningLabel(warning)}</li>)}</ul>}/>}
+  <Descriptions size="small" layout="vertical" column={1} items={[
+   {key:'removed',label:t('移除内容','Removed paths'),children:plan.removed_paths?.map(path=><Typography.Text code key={path} className="lm-machine-path">{path}</Typography.Text>)},
+   {key:'retained',label:t('保留内容','Retained paths'),children:plan.retained_paths?.map(path=><Typography.Text code key={path} className="lm-machine-path">{path}</Typography.Text>)},
+  ]}/>
+ </>:null;
+ const receiptDetails=receipt?<Descriptions className="lm-machine-form-notice" size="small" layout="vertical" column={1} items={[
+  {key:'removed',label:t('远端移除核验','Remote removal verification'),children:receipt.remote_removed===true?t('已确认移除','Removal confirmed'):t('尚未确认','Not confirmed')},
+  ...(typeof receipt.service_stopped==='boolean'?[{key:'service',label:t('Agent 服务状态','Agent service state'),children:receipt.service_stopped?t('已停止，请在重新执行前核对服务状态','Stopped. Check the service state before another reviewed operation.'):t('仍在运行','Still running')}]:[]),
+  {key:'data',label:t('配置与缓存','Configuration and cache'),children:receipt.data_removed===true?t('已清除 Agent 配置、身份与缓存','Agent configuration, identity, and cache purged'):receipt.data_retained===true?t('已保留','Retained'):t('尚未确认','Not confirmed')},
+  {key:'scope',label:t('平台凭据撤销范围','Platform credential revocation scope'),children:scopeText(receipt.credential_revocation_scope||scope)},
+  {key:'revoked',label:t('节点凭据撤销','Agent credential revocation'),children:receipt.credentials_revoked===true?t(`已撤销（${receipt.revoked_credentials??0} 条）`,`Revoked (${receipt.revoked_credentials??0})`):(receipt.credential_revocation_scope||scope)?.eligible===false?t('不适用：没有已证明属于本主机的可撤销凭据','Not applicable: no revocable credentials are proven to belong to this host'):t('尚未完成','Not completed')},
+  {key:'verified',label:t('核验时间','Verified at'),children:time(receipt.verified_at)},
+ ]}/>:null;
  const actions=record?<>
   {error&&<Alert role="alert" className="lm-machine-form-notice" type="error" showIcon title={error}/>}
   {pollError&&<Alert type="warning" showIcon title={pollError}/>}
    <Space wrap className="lm-machine-uninstall-actions">
     {record.status==='awaiting_approval'&&!refreshNeeded&&<><Popconfirm title={t('确认按此固定计划卸载 Agent？','Uninstall Agent using this fixed plan?')} description={<>{dataPolicy(!!record.plan?.purge)}。{scopeText(scope)}。</>} okText={t('确认卸载','Confirm uninstall')} cancelText={t('返回审阅','Back to review')} okButtonProps={{danger:true}} onConfirm={()=>action('apply')} disabled={busy||expired||applyAttempted}><Button type="primary" danger disabled={busy||expired||applyAttempted}>{t('我已审阅，卸载 Agent','I have reviewed the plan; uninstall Agent')}</Button></Popconfirm><Button disabled={busy} onClick={()=>void action('cancel')}>{t('取消卸载计划','Cancel uninstall plan')}</Button></>}
     {record.status==='unknown'&&!refreshNeeded&&<Button type="primary" aria-label={t('只读核对远端状态','Verify remote state (read-only)')} loading={busy} disabled={!credential||!keys.some(key=>key.id===credential)} onClick={()=>void action('reconcile')}>{t('只读核对远端状态','Verify remote state (read-only)')}</Button>}
+    {record.status==='succeeded'&&<Button type="primary" aria-label={t('完成','Done')} onClick={onClose}>{t('完成','Done')}</Button>}
     <Button aria-label={t('刷新操作状态','Refresh operation status')} disabled={busy} onClick={()=>void refresh()}>{t('刷新操作状态','Refresh operation status')}</Button>
    </Space>
  </>:null;
  return <><Modal className="lm-agent-uninstall-dialog" title={<><span>{t(`卸载 LightMoni Agent · ${machine.name}`,`Uninstall LightMoni Agent · ${machine.name}`)}</span>{record&&<Alert className="lm-machine-form-notice" showIcon type={succeeded?'success':record.status==='unknown'?'warning':record.status==='failed'?'error':'info'} title={status} description={statusDescription}/>}</>} open style={{top:24}} onCancel={()=>{if(!busy)onClose()}} closable={!busy} maskClosable={false} footer={actions} width={820} destroyOnHidden>
   {!record&&<>
    <Radio.Group aria-label={t('卸载方式','Uninstall method')} value={mode} disabled={busy||planUncertain} onChange={event=>{setMode(event.target.value);setError('');setCheck(undefined)}} className="lm-machine-form-notice">
-    <Radio.Button value="standard" disabled={!standardAllowed}>{t('标准卸载','Standard uninstall')}</Radio.Button><Radio.Button value="recovery" disabled={!recoveryAllowed}>{t('SSH 恢复卸载（强制）','SSH recovery uninstall (forced)')}</Radio.Button><Radio.Button value="manual">{t('离线脚本','Offline script')}</Radio.Button>
+    <Radio.Button value="standard" disabled={!standardAllowed}>{t('标准卸载','Standard uninstall')}</Radio.Button><Radio.Button value="recovery" disabled={!recoveryAllowed}>{t('SSH 恢复卸载','SSH recovery uninstall')}</Radio.Button><Radio.Button value="manual">{t('离线脚本','Offline script')}</Radio.Button>
    </Radio.Group>
    {mode==='manual'?<AgentUninstallManual/>:<>
     <Alert type={mode==='recovery'?'warning':'info'} showIcon title={mode==='recovery'?t('恢复处理残留或登记不完整的 Agent','Recover a partial or incompletely registered Agent'):t('标准卸载先严格核对 Agent 归属','Standard uninstall strictly verifies Agent ownership')} description={mode==='recovery'?t('恢复模式允许缺失或损坏身份，但仍校验 SSH 指纹、远端实际状态、服务归属、固定路径、未完成任务和生命周期锁；不会越过其他主机的身份或强行杀任务。','Recovery allows missing or invalid identity, while still checking the SSH fingerprint, actual remote state, service ownership, fixed paths, unfinished tasks, and lifecycle locks. It cannot take another host’s identity or force-kill tasks.'):t('通过只读 SSH 检查生成持久计划，审阅实际远端状态后再确认。此步骤不会卸载 Agent。','Create a persistent plan through read-only SSH checks, then review the actual remote state before confirming. This step does not uninstall Agent.')}/>
@@ -201,46 +242,15 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
    {(planUncertain||refreshNeeded)&&<Button disabled={busy} onClick={()=>void refresh()}>{t('刷新并恢复原计划','Refresh and recover original plan')}</Button>}
   </>}
   {record&&<>
-   <AgentOperationProgress kind='uninstall' machineID={machine.id} record={record} submitting={busy&&applyAttempted} refreshError={pollError}/>
-   {record.plan&&<>
-    <Descriptions size="small" layout="vertical" column={1} items={[
-     {key:'target',label:t('目标主机','Target host'),children:sshEndpoint(record.plan.machine.address,record.plan.machine.port,record.plan.ssh_account.username)},
-     {key:'mode',label:t('卸载方式','Uninstall method'),children:record.plan.mode==='recovery'?t('SSH 恢复卸载（强制）','SSH recovery uninstall (forced)'):t('标准卸载','Standard uninstall')},
-     ...(record.plan.reason?[{key:'reason',label:t('恢复原因','Recovery reason'),children:record.plan.reason}]:[]),
-     {key:'policy',label:t('已固定的数据策略','Pinned data policy'),children:dataPolicy(!!record.plan.purge)},
-     {key:'agent',label:t('已核对的节点身份','Verified Agent identity'),children:record.plan.agent_id?<Typography.Text code>{record.plan.agent_id}</Typography.Text>:t('未取得有效身份','No valid identity observed')},
-     {key:'scope',label:t('平台凭据撤销范围','Platform credential revocation scope'),children:scopeText(scope)},
-     ...(scope?.reason?[{key:'ownership',label:t('归属核验说明','Ownership evidence'),children:localizeMessage(scope.reason)}]:[]),
-     {key:'credential',label:t('SSH 凭据 ID','SSH credential ID'),children:record.plan.credential.id},
-     {key:'expiry',label:t('计划有效期','Plan expires at'),children:time(record.plan.expires_at)},
-    ]}/>
-    {observation&&<><h3>{t('实际远端快照（执行前会再次核验）','Actual remote snapshot (rechecked before execution)')}</h3><Descriptions size="small" layout="vertical" column={{xs:1,sm:2}} items={[
-     {key:'identity-state',label:t('身份文件','Identity file'),children:({valid:t('有效','Valid'),missing:t('缺失','Missing'),invalid:t('损坏','Invalid'),unsafe:t('路径不安全','Unsafe path')})[observation.identity_state]},
-     {key:'runtime',label:t('运行程序','Runtime'),children:observation.installation==='absent'?t('已缺失','Absent'):observation.program_complete?t('完整','Complete'):t('部分残留','Partial runtime')},
-     {key:'unit',label:t('受管服务文件','Managed service file'),children:observation.unit_managed?t('已核验','Verified'):t('不存在或未归属','Absent or unowned')},
-     {key:'running',label:t('服务运行状态','Service running state'),children:observation.service_running?t('运行中','Running'):t('已停止','Stopped')},
-     {key:'config',label:t('配置目录','Configuration directory'),children:observation.config_present?t('存在','Present'):t('不存在','Absent')},
-     {key:'data',label:t('缓存目录','Cache directory'),children:observation.data_present?t('存在','Present'):t('不存在','Absent')},
-     {key:'paths',label:t('固定路径检查','Fixed path checks'),children:observation.paths_safe?t('通过','Passed'):t('未通过','Failed')},
-     {key:'locks',label:t('生命周期锁 / 操作标记','Lifecycle lock / operation marker'),children:observation.lifecycle_locked||observation.operation_lock?t('存在，执行将受阻','Present; execution is blocked'):t('未发现','None observed')},
-     {key:'identity-sha',label:t('身份文件 SHA256','Identity file SHA256'),span:2,children:<Typography.Text code className="lm-machine-path">{observation.identity_sha256}</Typography.Text>},
-     {key:'runtime-sha',label:t('程序快照 SHA256','Runtime snapshot SHA256'),span:2,children:<Typography.Text code className="lm-machine-path">{observation.program_sha256}</Typography.Text>},
-    ]}/></>}
-    {!!record.plan.steps?.length&&<ol className="lm-machine-uninstall-steps">{record.plan.steps.map((step,index)=><li key={index}>{stepLabel(step)}</li>)}</ol>}
-    {!!record.plan.warnings?.length&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('计划影响','Plan impact')} description={<ul className="lm-machine-uninstall-steps">{record.plan.warnings.map((warning,index)=><li key={index}>{warningLabel(warning)}</li>)}</ul>}/>}
-    <Descriptions size="small" layout="vertical" column={1} items={[
-     {key:'removed',label:t('移除内容','Removed paths'),children:record.plan.removed_paths?.map(path=><Typography.Text code key={path} className="lm-machine-path">{path}</Typography.Text>)},
-     {key:'retained',label:t('保留内容','Retained paths'),children:record.plan.retained_paths?.map(path=><Typography.Text code key={path} className="lm-machine-path">{path}</Typography.Text>)},
-    ]}/>
-   </>}
-   {record.receipt&&<Descriptions className="lm-machine-form-notice" size="small" layout="vertical" column={1} items={[
-    {key:'removed',label:t('远端移除核验','Remote removal verification'),children:record.receipt.remote_removed===true?t('已确认移除','Removal confirmed'):t('尚未确认','Not confirmed')},
-    ...(typeof record.receipt.service_stopped==='boolean'?[{key:'service',label:t('Agent 服务状态','Agent service state'),children:record.receipt.service_stopped?t('已停止，请在重新执行前核对服务状态','Stopped. Check the service state before another reviewed operation.'):t('仍在运行','Still running')}]:[]),
-    {key:'data',label:t('配置与缓存','Configuration and cache'),children:record.receipt.data_removed===true?t('已清除 Agent 配置、身份与缓存','Agent configuration, identity, and cache purged'):record.receipt.data_retained===true?t('已保留','Retained'):t('尚未确认','Not confirmed')},
-    {key:'scope',label:t('平台凭据撤销范围','Platform credential revocation scope'),children:scopeText(record.receipt.credential_revocation_scope||scope)},
-    {key:'revoked',label:t('节点凭据撤销','Agent credential revocation'),children:record.receipt.credentials_revoked===true?t(`已撤销（${record.receipt.revoked_credentials??0} 条）`,`Revoked (${record.receipt.revoked_credentials??0})`):(record.receipt.credential_revocation_scope||scope)?.eligible===false?t('不适用：没有已证明属于本主机的可撤销凭据','Not applicable: no revocable credentials are proven to belong to this host'):t('尚未完成','Not completed')},
-    {key:'verified',label:t('核验时间','Verified at'),children:time(record.receipt.verified_at)},
+   <AgentOperationProgress kind='uninstall' machineID={machine.id} record={record} submitting={busy&&applyAttempted} refreshError={pollError} showStatus={false}/>
+   {!succeeded&&planDetails}
+   {succeeded&&plan&&<Descriptions className="lm-machine-form-notice" size="small" layout="vertical" column={1} items={[
+    {key:'target',label:t('目标主机','Target host'),children:sshEndpoint(plan.machine.address,plan.machine.port,plan.ssh_account.username)},
+    {key:'mode',label:t('卸载方式','Uninstall method'),children:plan.mode==='recovery'?t('SSH 恢复卸载','SSH recovery uninstall'):t('标准卸载','Standard uninstall')},
+    {key:'policy',label:t('已固定的数据策略','Pinned data policy'),children:dataPolicy(!!plan.purge)},
    ]}/>}
+   {receiptDetails}
+   {succeeded&&plan&&<details className="lm-agent-update-technical lm-agent-uninstall-original-plan"><summary>{t('查看原卸载计划','View original uninstall plan')}</summary>{planDetails}</details>}
    <Typography.Paragraph type="secondary">{t('卸载计划 ID：','Uninstall plan ID: ')}<Typography.Text code>{record.id}</Typography.Text></Typography.Paragraph>
    {record.status==='awaiting_approval'&&expired&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('卸载计划已过期，请先取消再重新检查','Uninstall plan expired. Cancel it before running a new check.')}/>}
    {record.status==='awaiting_approval'&&applyAttempted&&<Alert type="warning" showIcon className="lm-machine-form-notice" title={t('原计划执行请求已发送，请只读刷新确认结果','The original execution request was sent. Refresh read-only to confirm its outcome')}/>}
