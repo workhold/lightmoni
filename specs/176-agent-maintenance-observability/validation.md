@@ -25,4 +25,5 @@
 - 新增测试：`keep_current resolution terminalizes a drifted unknown only with verified evidence`（覆盖漂移 409 保持、resolution/reason 校验 400、目标发行闸拒绝、服务状态闸拒绝、成功终结与证据/事件/围栏释放、终态不可再核对）；`busy lane reports holder and since, and an admin release with confirm and reason clears it`；`maintenance blockers expose actionable detail without changing the fence`。
 - 已知主干既有失败：`managed-machines.test.ts` 的 `unbound host must prove registered remote node and cannot uninstall a different or busy node`（state=queued 断言 201≠409）——经 `git stash` 在未修改工作树上复现同一失败（85 pass/1 fail），与本次改动无关，与 SDD172 记录的主干既有失败一致。
 - 生产构建 `npm run build`（sdk/typescript、runtime、ai-runtime、web）通过；`npm run version:check` 46/46 通过（当前 0.1.2）；`git diff --check` 通过。
+- 变基后完整 Runtime 回归 1909 项：1836 通过、38 失败、35 跳过。以 `git worktree` 于纯 main `1fd62be9` 复跑同名 9 个失败文件（agent-host-admission/http-lifecycle/install-release/machine-service-addresses/machine-terminal/managed-machines/node-lifecycle/sdk-release-scope/workload-readiness），失败总数（38）与失败用例清单逐一相同（`diff` 为空）——全部为主干既有失败，本分支零新增回归。
 - 恢复投影 `job_id/observed_at` 为既有行对象的列追加（类型检查覆盖），端到端断言依赖 publish 时机未在单测中固化，留待发行部署后线上核对（应用实例 recovery 字段出现 job_id/observed_at）。
