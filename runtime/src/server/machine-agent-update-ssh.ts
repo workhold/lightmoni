@@ -38,6 +38,43 @@ export const AGENT_HELPER_SERVICE_SHA256 = 'e1616a6c930450c27af71d23bab66fd64b4a
 const sha = /^[a-f0-9]{64}$/, op = /^[a-f0-9]{32}$/;
 const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
 const privileged = (script: string) => `if test "$(id -u)" = 0; then /bin/sh -c ${quote(script)}; else sudo -n /bin/sh -c ${quote(script)}; fi`;
+/** A broken current symlink must not make the reviewed recovery runner
+ * unreachable. This selects only a checksummed runtime from a managed release;
+ * the runner still performs all operation, identity and snapshot validation. */
+export const agentRecoveryNodeSelector = String.raw`safe_recovery_path() {
+  stat -c '%u:%a' -- "$1" 2>/dev/null | LC_ALL=C awk -F: 'BEGIN { safe=0 } $1=="0" && $2 ~ /^([0-7])?[0-7][0145][0145]$/ { safe=1 } END { exit !safe }'
+}
+runtime_node=''
+for candidate in /opt/lightmoni-agent/current /opt/lightmoni-agent/releases/*; do
+  [ -e "$candidate" ] || continue
+  directory=$candidate
+  if [ "$candidate" = /opt/lightmoni-agent/current ]; then
+    [ -L "$candidate" ] || continue
+    link=$(readlink "$candidate") || continue
+    case "$link" in
+      /opt/lightmoni-agent/releases/*/*) continue;;
+      /opt/lightmoni-agent/releases/*) directory=$link;;
+      *) continue;;
+    esac
+    base=$(basename "$link") || continue
+    case "$base" in ''|.|..|*[!A-Za-z0-9._-]*) continue;; esac
+  else
+    [ ! -L "$candidate" ] || continue
+  fi
+  [ -d "$directory" ] && [ ! -L "$directory" ] || continue
+  safe_recovery_path "$directory" || continue
+  [ -f "$directory/node" ] && [ ! -L "$directory/node" ] && [ -x "$directory/node" ] || continue
+  [ -f "$directory/release.json" ] && [ ! -L "$directory/release.json" ] || continue
+  safe_recovery_path "$directory/node" || continue
+  safe_recovery_path "$directory/release.json" || continue
+  expected=$(sed -n 's/.*"node_binary_sha256": *"\([0-9a-f]\{64\}\)".*/\1/p' "$directory/release.json") || continue
+  [ -n "$expected" ] || continue
+  actual=$(sha256sum -- "$directory/node" | awk '{print $1}') || continue
+  [ "$actual" = "$expected" ] || continue
+  if "$directory/node" -e 'process.exit(0)' >/dev/null 2>&1; then runtime_node=$directory/node; break; fi
+done
+if [ -z "$runtime_node" ]; then printf '%s\n' 'agent_recovery_runtime_unavailable' >&2; exit 127; fi`;
+const withRecoveryNode = (script: string) => privileged(`set -eu\n${agentRecoveryNodeSelector}\n${script}`);
 const operation = (value: string) => { if (!op.test(value)) throw Error("invalid operation ID"); return value; };
 const parseJSON = (value: string) => {
   if (Buffer.byteLength(value) > 32768) throw new SSHError("invalid_response");
@@ -108,7 +145,7 @@ function run(f,a){return cp.execFileSync(f,a,{encoding:'utf8',timeout:10000,maxB
 function sys(unit,v){return run('systemctl',['show',unit,'--property='+v,'--value']);}
 function helper(mode,generation){const file='/etc/systemd/system/lightmoni-agent-helper.service',load=sys('lightmoni-agent-helper.service','LoadState'),fragment=sys('lightmoni-agent-helper.service','FragmentPath');if(mode==='user'){if(load!=='not-found'||fragment||fs.existsSync('/etc/lightmoni-agent-helper')||fs.existsSync('/var/lib/lightmoni-agent-helper'))throw Error();return false;}if(load!=='loaded'||fragment!==file||sys('lightmoni-agent-helper.service','ActiveState')!=='active'||sys('lightmoni-agent-helper.service','DropInPaths'))throw Error();if(fileHash(file)!=='${AGENT_HELPER_SERVICE_SHA256}')throw Error();const config=json(safe('/etc/lightmoni-agent-helper/helper.json'),16384),managed=json(safe('/etc/lightmoni-agent-helper/managed.json'),16384);if(config.permission_generation!==generation||managed.agent_id!==config.agent_id)throw Error();const m=JSON.parse(run('/usr/local/bin/lightmoni-agent',['helper-status']));if(!/^[A-Za-z0-9._:-]{1,128}$/.test(m.executor_id||'')||!Number.isSafeInteger(m.install_generation)||m.install_generation<1||m.permission_generation!==generation||m.fenced!==null||m.pending_results!==0||m.ordinary_task_identity?.account!=='lightmoni-agent'||m.ordinary_task_runner?.active!==false||m.ordinary_task_runner?.state!=='idle')throw Error();return true;}
 try{safe('/opt/lightmoni-agent',true);const id=json('/var/lib/lightmoni-agent/identity.json',4096);if(!/^[A-Za-z0-9._:-]{1,128}$/.test(id.agent_id||''))throw Error();const sy=fs.lstatSync('/opt/lightmoni-agent/current'),r=fs.realpathSync('/opt/lightmoni-agent/current');if(!sy.isSymbolicLink()||sy.uid!==0||p.dirname(r)!=='/opt/lightmoni-agent/releases')throw Error();const state=sys('lightmoni-agent.service','ActiveState');if(sys('lightmoni-agent.service','LoadState')!=='loaded'||sys('lightmoni-agent.service','FragmentPath')!=='/etc/systemd/system/lightmoni-agent.service'||!['active','inactive','failed'].includes(state))throw Error();const config=json('/etc/lightmoni-agent/config.json'),mode=config.runtime_mode??'user',generation=config.permission_generation??1,serviceHash=sha(fs.readFileSync(safe('/etc/systemd/system/lightmoni-agent.service')));if(${JSON.stringify(LEGACY_AGENT_SERVICE_SHA256)}.includes(serviceHash))throw Object.assign(Error(),{code:'legacy_agent_installation'});if(!['root','user'].includes(mode)||!Number.isSafeInteger(generation)||generation<1||serviceHash!=='${USER_AGENT_SERVICE_SHA256}')throw Error();const helperActive=helper(mode,generation);let local={};try{local=JSON.parse(run('/usr/local/bin/lightmoni-agent',['status','--config','/etc/lightmoni-agent/config.json']));}catch{}if(!Number.isSafeInteger(local.runtime?.uid)||local.runtime.uid<=0||!Number.isSafeInteger(local.runtime?.gid)||local.runtime.gid<=0||local.runtime.mode!==mode||local.runtime.permission_generation!==generation)throw Error();const current=fp(r);current.boot_id=local.agent_id===id.agent_id&&/^[a-f0-9-]{36}$/.test(local.boot_id||'')?local.boot_id:'';let previous=null,previousUnavailable='';try{const x=json(safe('/opt/lightmoni-agent/previous.json'));if(x.schema!==1||!OP.test(x.operation_id||''))throw Error();const d='/opt/lightmoni-agent/updates/'+x.operation_id;safe(d,true);const candidate=fp(x.release_path,p.join(d,'previous-launcher'),p.join(d,'previous-service'),p.join(d,'previous-helper-service'));if(candidate.fingerprint===x.fingerprint&&fileHash(p.join(d,'previous-service'))==='${USER_AGENT_SERVICE_SHA256}'){if(mode==='root')try{safe(p.join(d,'previous-helper-service'));}catch(e){if(e.code==='ENOENT')previousUnavailable='previous_helper_snapshot_missing';throw e;}previous=candidate;}}catch(e){if(e.code!=='ENOENT')throw e;}let busy=fs.existsSync('/var/lib/lightmoni-agent/operations/execution.lock');for(const f of ['/var/lib/lightmoni-agent/agent-job-state.json','/var/lib/lightmoni-agent/task-run-state.json','/var/lib/lightmoni-agent-helper/managed/task-run-state.json','/var/lib/lightmoni-agent-helper/managed/task-run-ssh-state.json'])try{const x=json(f);busy ||=typeof x.id==='string'&&!!x.id;}catch(e){if(e.code!=='ENOENT')busy=true;}const arch=process.arch==='x64'?'amd64':process.arch;process.stdout.write(JSON.stringify({schema:1,runtime_mode:mode,permission_generation:generation,helper_active:helperActive,ready:current.arch===arch,agent_id:id.agent_id,arch,service_active:state==='active',lifecycle_locked:fs.existsSync('/run/lightmoni-agent-lifecycle.lock'),operation_lock:busy,current,previous,...(previousUnavailable?{previous_unavailable_reason:previousUnavailable}:{})})+'\n');}catch(e){const legacy=e.code==='legacy_agent_installation';process.stdout.write(JSON.stringify({error_code:legacy?'legacy_agent_installation':'unmanaged_installation'})+'\n');process.exitCode=0;}`;
-export function agentUpdateProbeCommand() { return privileged(`set -eu\n/opt/lightmoni-agent/current/node -e ${quote(agentUpdateProbeSource)}`); }
+export function agentUpdateProbeCommand() { return withRecoveryNode(`"$runtime_node" -e ${quote(agentUpdateProbeSource)}`); }
 
 export function agentUpdateStartCommand(input: {
   endpoint: string; machineID: string; operationID: string;
@@ -131,11 +168,12 @@ ${files.map(([file, hash]) => `curl --fail --silent --show-error --proto '=https
 sh "$tmp_dir/update.sh" start < "$tmp_dir/request.json"`;
   return privileged(script);
 }
-function helper(command: string, request: Record<string, string>) {
+function helper(command: string, request: Record<string, string>, recoveryRuntime = false) {
   operation(request.operation_id);
-  return privileged(`set -eu\nprintf '%s' ${quote(JSON.stringify(request))} | /opt/lightmoni-agent/current/node /opt/lightmoni-agent/update-runner.mjs ${command}`);
+  const script = `printf '%s' ${quote(JSON.stringify(request))} | ${recoveryRuntime ? '"$runtime_node"' : "/opt/lightmoni-agent/current/node"} /opt/lightmoni-agent/update-runner.mjs ${command}`;
+  return recoveryRuntime ? withRecoveryNode(script) : privileged(`set -eu\n${script}`);
 }
-export const agentUpdateStatusCommand = (operationID: string) => helper("status", { operation_id: operationID });
+export const agentUpdateStatusCommand = (operationID: string) => helper("status", { operation_id: operationID }, true);
 export const agentUpdateCommitCommand = (operationID: string, expectedBootID: string, targetSHA: string) => {
   if (!/^[a-f0-9-]{36}$/.test(expectedBootID) || !sha.test(targetSHA)) throw Error("invalid commit");
   return helper("commit", { operation_id: operationID, expected_boot_id: expectedBootID, expected_target_sha256: targetSHA });
@@ -156,9 +194,9 @@ export function agentUpdateRecoveryBootstrapSource(operationID:string,runnerSHA:
 }
 export function agentUpdateRecoveryBootstrap(operationID:string,runnerSHA:string) {
   const bootstrap=agentUpdateRecoveryBootstrapSource(operationID,runnerSHA);
-  return privileged(`set -eu
+  return withRecoveryNode(`
 umask 077
 recovery_dir=$(mktemp -d /run/lightmoni-agent-recovery.XXXXXX)
 trap 'rm -rf "$recovery_dir"' EXIT HUP INT TERM
-/opt/lightmoni-agent/current/node -e ${quote(bootstrap)} "$recovery_dir"`);
+"$runtime_node" -e ${quote(bootstrap)} "$recovery_dir"`);
 }

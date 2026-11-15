@@ -989,7 +989,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
         if (error instanceof InstallationReadinessError && error.code === 'installation_record_changed')
           throw new HTTPError(409, '安装记录已进入恢复流程，请只读核对，不覆盖已保存结果');
         const diagnostic=error instanceof SSHError?error.remoteFailure:undefined;
-        const reasons={agent_service_override_not_allowed:"远端检测到禁止的 Agent 服务覆盖配置，请先核对并人工结束本次记录，再通过恢复卸载清理残留后重新检查；不要放开服务权限限制",ordinary_agent_privilege_violation:"远端检测到普通 Agent 账户拥有禁止的高权限，请检查其附加组、capabilities 和 Docker socket 访问",agent_account_invalid:"远端检测到 Agent 运行账户不符合安装要求",ordinary_task_identity_check_failed:"远端无法核实普通任务的完整降权，请检查 setpriv 与内核能力兼容性",remote_command_failed:"远端安装命令非零退出"};
+        const reasons={agent_service_override_not_allowed:"远端检测到禁止的 Agent 服务覆盖配置，请先核对并人工结束本次记录，再通过恢复卸载清理残留后重新检查；不要放开服务权限限制",ordinary_agent_privilege_violation:"远端检测到普通 Agent 账户拥有禁止的高权限，请检查其附加组、capabilities 和 Docker socket 访问",agent_account_invalid:"远端检测到 Agent 运行账户不符合安装要求",ordinary_task_identity_check_failed:"远端无法核实普通任务的完整降权，请检查 setpriv 与内核能力兼容性",agent_recovery_runtime_unavailable:"Agent 当前及保留发行均没有可校验的恢复运行时",remote_command_failed:"远端安装命令非零退出"};
         const confirmationReasons = {
           activation_pending: '等待中心激活回执超时',
           runtime_heartbeat_pending: '等待符合运行身份和权限代次的新鲜心跳超时',

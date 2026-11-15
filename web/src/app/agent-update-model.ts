@@ -60,6 +60,7 @@ export const updateMessageText=(message:string,t:(zh:string,en:string)=>string)=
  'agent_update_recovery_verification_required':t('上次恢复结果尚未核对，请先使用“只读核对结果”，不要重复提交恢复。','The previous recovery outcome has not been verified. Use Verify outcome (read-only) before submitting another recovery.'),
  'agent_update_recovery_identity_changed':t('Agent 身份、运行模式或权限代次已变化，不能按原审批恢复；请核对主机现场。','The Agent identity, runtime mode, or permission generation changed. Recovery cannot use the original approval. Inspect the host evidence.'),
  'agent_update_recovery_runner_unavailable':t('平台恢复维护器不可用，请修复发行包后刷新原记录。','The platform recovery maintainer is unavailable. Fix the release artifact, then refresh the original record.'),
+ 'agent_recovery_runtime_unavailable':t('当前及保留发行均没有可校验的恢复运行时，未执行恢复；请检查 Agent 程序现场。','No verifiable recovery runtime remains in the current or retained releases. Recovery was not run; inspect the Agent installation.'),
  'reconciliation_credential_changed':t('核验使用的 SSH 账户或凭据已变化，请重新选择并检查。','The SSH account or credential used for verification changed. Select and check it again.'),
  '恢复结果待核对；请先只读核对，不要重复派发恢复':t('恢复结果待核对；请先只读核对，不要重复派发恢复','The recovery outcome needs verification. Verify it read-only before dispatching another recovery.'),
  '平台在 Agent 维护期间重启，请先只读核对；进程已停止时可审阅恢复，不会自动重放维护':t('平台在 Agent 维护期间重启，请先只读核对；进程已停止时可审阅恢复，不会自动重放维护','The platform restarted during Agent maintenance. Verify the outcome read-only; review recovery once its process has stopped. Maintenance is never replayed automatically.'),

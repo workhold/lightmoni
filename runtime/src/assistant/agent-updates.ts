@@ -35,7 +35,7 @@ export function agentUpdateTools(store: AgentUpdateAssistantStore): Tool[] {
     },
     {
       name: "get_agent_update", effect: "read",
-      description: "Read a sanitized Agent upgrade/rollback plan and result. Only succeeded proves a confirmed target; rolled_back means the update failed and the previous program was restored. Unknown requires human reconciliation and must never be reported as success. No SSH output, control/data credentials, tickets or raw logs are returned.",
+      description: "Read a sanitized Agent upgrade/rollback plan and result. Only succeeded proves a confirmed target; rolled_back means the update failed and the previous program was restored. Unknown requires human reconciliation and must never be reported as success. The admin UI card provides read-only reconciliation and, only when the current record permits, revision-bound human recovery; the model never approves or recovers autonomously. No SSH output, control/data credentials, tickets or raw logs are returned.",
       schema: schema({ machine_id: string, update_id: string }, ["machine_id", "update_id"]),
       execute: async (input, _signal, user) => { admin(user); object(input, ["machine_id", "update_id"], ["machine_id", "update_id"]); return store.assistantGet(text(input.machine_id), text(input.update_id)); },
     },

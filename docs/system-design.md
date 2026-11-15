@@ -1362,6 +1362,10 @@ AI 工具 list_agent_releases、propose_agent_update、get_agent_update 只返�
 
 助手更新卡片对 `running/verifying` 只轮询同一原生记录 ID，每实例最多一个进行中的读取，终态或卸载后停止。只有 `succeeded` 显示“更新成功，已核验目标发行”；`rolled_back`、`failed`、`unknown`、`cancelled` 分别展示，读取失败保留最后已知状态并允许重试。主机列表对运行中的 Agent 更新复用 2.5 秒只读快速刷新，终态后按 Agent 心跳和原生状态投影展示当前发行，不能用卡片终态伪造主机发行。主机离线、Agent 是否存在和 unknown 维护是独立事实：离线不等于未安装，unknown 继续构成更新/卸载围栏，只能只读核对或走恢复卸载，不能盲目重装或重复派发。
 
+SDD 173 处理 current 内置 Node 已损坏导致的恢复启动死锁。只读 probe/status 和已审批恢复可从 current 的合法受管目标或 releases 直接子目录选择恢复运行时；目录和文件必须 root 所有且组/其他用户不可写，Node 必须与同发行 release.json 的 node_binary_sha256 匹配并通过无副作用启动检查。该运行时只启动平台当前固定 SHA 的维护器，不证明 Agent 健康；操作 ID、身份、原/目标指纹、进程停止和恢复快照仍由原维护器完整验证。正常 commit、主动 rollback 和升级启动不切换到此回退路径，无合格运行时返回固定安全错误。
+
+同一 SDD 的 unknown 助手卡片向管理员提供原记录只读核对；只有当前 recovery_revision 存在且上次恢复已核对时才可勾选恢复影响。恢复 POST 前重新 GET 并复验 machine/update ID、unknown、revision 和核对围栏，使用原审批凭据；更换凭据和完整证据仍在原主机窗口。卡片不增加模型/MCP 写工具，不自动恢复、重试或清除 unknown。
+
 ### 28.7 任务中心的统一演进方向
 
 后续将任务中心作为外部 API、平台界面与 AI 共用的任务提交和执行记录入口。任务定义描述动作及参数，执行实例固定目标主机/Agent、代码或结构化参数摘要、来源、发起人、审批、幂等键、状态和结果。自定义脚本与平台内置结构化能力并存；结构化文件、服务、部署等能力应显式声明 capability、参数 schema、影响级别和验证策略。AI、外部客户端和平台页面复用相同权限、审批、目标解析与执行服务，不能创建绕开记录的 Agent 命令通道。
