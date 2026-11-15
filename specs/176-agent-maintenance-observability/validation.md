@@ -4,7 +4,8 @@
 
 ## 对照上游
 
-- 分支基于 main `b051140f`（含 PR #234 `889f0be8` SDD173 恢复运行时选择与助手内联审批、PR #235/#236 0.1.2 发行）。经 `git show 889f0be8` 逐文件比对：SDD173 范围为恢复运行时选择、probe/status 的恢复启动、助手卡片与 409 `agent_recovery_runtime_unavailable` 文案；与本 SDD 四个用户场景（keep_current 终结、busy 车道可观测、围栏 409 细分、恢复投影补全）无重叠。
+- 开发自 main `b051140f`（含 PR #234 `889f0be8` SDD173 恢复运行时选择与助手内联审批、PR #235/#236 0.1.2 发行）。经 `git show 889f0be8` 逐文件比对：SDD173 范围为恢复运行时选择、probe/status 的恢复启动、助手卡片与 409 `agent_recovery_runtime_unavailable` 文案；与本 SDD 四个用户场景（keep_current 终结、busy 车道可观测、围栏 409 细分、恢复投影补全）无重叠。
+- 提交前远端推进至 `1fd62be9`（PR #238 SDD175 stale-agent-enrollment-recovery，改 `machine-state-recovery.ts` 与设计文档）；本分支已变基合入，两处改动共存于同一文件（其恢复计划改动不涉及 busy 车道），无冲突；规格编号顺延为 176。变基后定向回归 309 项中 308 通过，唯一失败为主干既有 `unbound host…` 用例（state=queued 断言 201≠409，未修改树上同样复现）。
 
 ## 实现
 
