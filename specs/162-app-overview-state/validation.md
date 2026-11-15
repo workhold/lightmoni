@@ -33,3 +33,9 @@
 - 在线基线：[Doca《LightMoni 系统设计基线》](https://doca.heyphp.com/#/r/2902a80f-c592-414e-9aed-64fe19f2ed53)的 SDD162 章节。保留原章节标题、段落及原生流程图块，在其现有段落和图块内同步新证据路径及门禁，未改动无关内容。
 - 保存回执：`rich_text_edit` 成功，内容 `seq=1813`；随后对 `sdd162-overview`、`sdd162-control`、`sdd162-readonly-flow` 逐块回读，三块均为最新 `seq=1813`、文档版本 `1815`。文字核对包含 `status.instances[].unresolved_run_id`、零副本与 2→1 缩容、无启用发布集群时的待核实边界、退休/移除实例与登记删除保护、历史上限外的 `GET /ops/runs/:id`、恢复阻塞抽屉优先历史 unknown、手选记录不被轮询抢占及 `deploy|stop|remove|reconcile` 写入前拒绝且原意图不变。
 - 原生图回读：11 个节点、11 条连线；确认“未核对 unknown 运行记录 → 实例公开摘要 → 应用卡片”、“卡片 → 核对状态 → 既有抽屉 → 资源/执行记录 → 原运行记录”、“历史列表 → 列表缺失时按 ID 补读 → 原运行记录”及“卡片 → 用户写操作 → 写意图前 409”四条路径。既有图块身份保留，节点和连线均来自最新回读。
+
+## 2026-11-15 Runtime 遗留回归修正
+
+基线为含 PR #225 的 `origin/main` `7724f7c7`。运行 `cd runtime && node --import tsx --test test/application-install.test.ts test/application-list-filter.test.ts`，原样结果为 2 通过、2 失败：安装夹具缺少 SDD 162 应用展示态所需的资源类型、部署目标和实例就绪证据；筛选断言仍把 `configured` 算入 `pending`。两处均是测试样例或期望过时，未修改产品逻辑。
+
+本次仅更新这两个测试文件：夹具补齐托管部署的目标副本、当前实例与就绪计数，覆盖失败、未知、待核实、缺副本、不健康和退休实例；筛选断言使 `pending` 排除 `configured` 与 `unverified`，并检查独立的 `unverified` 筛选和 `all` 的全量结果。修正后同一命令 4 通过、0 失败；`git diff --check` 通过。此回归修正不改变接口、状态投影、存储或控制路径，架构同步不适用；上节架构同步记录属于原 SDD 162 功能实现。
