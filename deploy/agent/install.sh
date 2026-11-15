@@ -2,7 +2,7 @@
 set -eu
 umask 077
 
-version="0.1.4"
+version="0.1.5"
 fresh="no"
 release_url=""
 release_dir=""
