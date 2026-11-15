@@ -31,3 +31,11 @@ test('members and malformed results get no approval action', () => {
   const invalid = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: { error: 'target changed' }, canApprove: true }));
   assert.equal(invalid, '');
 });
+
+test('unknown native record renders read-only reconciliation and reviewed recovery only for administrators', () => {
+  const unknown = { ...record, status: 'unknown', recovery_revision: 'c'.repeat(64), recovery_requires_verification: false };
+  const admin = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: unknown, canApprove: true }));
+  assert.match(admin, /只读核对结果/); assert.match(admin, /恢复中断维护/); assert.match(admin, /我已核对目标主机/);
+  const member = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: unknown, canApprove: false }));
+  assert.doesNotMatch(member, /只读核对结果/); assert.doesNotMatch(member, /恢复中断维护/);
+});

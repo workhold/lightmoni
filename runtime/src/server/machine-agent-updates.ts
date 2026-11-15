@@ -12,7 +12,7 @@ import { assertAgentActive } from "./agent-lifecycle.js";
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import type { MachineSummary, SSHMachineTarget } from "./managed-machines.js";
 import type { PrivilegedExecutorStore } from "./privileged-executors.js";
-import { assertSSHAccount, sshAccountSnapshot, sshCredentialRevision, type SSHRunner } from "./machine-ssh.js";
+import { assertSSHAccount, SSHError, sshAccountSnapshot, sshCredentialRevision, type SSHRunner } from "./machine-ssh.js";
 import { AgentReleaseCatalog, type AgentRelease, type PinnedAgentFile } from "./machine-agent-updates-catalog.js";
 import { NodeStore } from "./nodes-model.js";
 import { agentUpdateProbeCommand, parseAgentUpdateProbe, agentUpdateStartCommand, agentUpdateStatusCommand, agentUpdateCommitCommand,
@@ -156,8 +156,14 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     const selected = access.credential(machine.id, credential.id);
     if ("account_id" in machine) assertSSHAccount(selected.machine, sshAccountSnapshot(machine));
     if (sshCredentialRevision(selected.credential) !== sshCredentialRevision(credential)) fail(409, "ssh_credential_changed");
-    const output = await access.runner({ machine: selected.machine, credentialID: credential.id, ...access.authentication(machine.id, credential), command, signal: AbortSignal.any([signal, controller.signal]),
-      port: machine.port, timeoutMs, ...(stdin == null ? {} : { stdin }) });
+    let output: Awaited<ReturnType<SSHRunner>>;
+    try { output = await access.runner({ machine: selected.machine, credentialID: credential.id, ...access.authentication(machine.id, credential), command, signal: AbortSignal.any([signal, controller.signal]),
+      port: machine.port, timeoutMs, ...(stdin == null ? {} : { stdin }) }); }
+    catch (error) {
+      if (error instanceof SSHError && error.remoteFailure?.remote_reason_code === "agent_recovery_runtime_unavailable")
+        fail(409, "agent_recovery_runtime_unavailable");
+      throw error;
+    }
     access.markCredentialUsed(credential.id);
     const verified = access.credential(machine.id, credential.id);
     assertSSHAccount(verified.machine, sshAccountSnapshot(selected.machine));
