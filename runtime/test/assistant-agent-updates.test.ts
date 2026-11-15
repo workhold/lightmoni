@@ -12,6 +12,8 @@ test("AI update tools only draft a pinned review and query receipts; no executio
   const tools = agentUpdateTools(store), admin = { id: "alice", role: "admin" };
   assert.deepEqual(tools.map(t => [t.name, t.effect]), [["list_agent_releases", "read"], ["propose_agent_update", "draft"], ["get_agent_update", "read"]]);
   assert.equal((await tools[0].execute({}, signal, admin)).releases[0].sha256, sha);
+  assert.match(tools[1].description, /Before every update batch/);
+  assert.match(tools[1].description, /existing maintenance or host-task conflicts are not retryable/);
   const proposal = await tools[1].execute({ machine_id: "m1", action: "upgrade", target_sha256: sha }, signal, admin);
   assert.equal(proposal.status, "awaiting_approval");
   assert.deepEqual(calls[0], ["m1", { action: "upgrade", target_sha256: sha }, "alice", signal]);

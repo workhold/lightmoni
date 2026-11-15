@@ -61,7 +61,7 @@ import { ExecutionGrantRegistry } from "../capabilities/execution-grants.js";
 import { DashboardReadService } from "../domains/dashboard-read.js";
 import { InstrumentationService } from "../assistant/instrumentation.js";
 import { Store as AssistantUsageStore } from "../assistant/usage.js";
-import { McpAccess, registerMcpAccess, isMcpExternalURL } from "../mcp/access.js";
+import { McpAccess, registerMcpAccess, registerMcpServiceAccounts, isMcpExternalURL } from "../mcp/access.js";
 import { registerMcpTransport } from "../mcp/transport.js";
 export interface Config {
   dataDir: string;
@@ -221,6 +221,7 @@ export async function createApp(cfg: Config) {
         put: (key, value) => store.put(key, deps.encrypt(JSON.stringify(value))) };
     })() }) : undefined;
     const capabilities = new CapabilityDispatcher(deps, capabilityAccess, {taskCenter, alerts:alertCapabilities, alertProposals, telemetry, logs:logReads, traces:traceReads, deployments:serviceDeployments, operations, operationSchedules, machines:managedMachines, dashboards:dashboardReads, instrumentation, executionGrants});
+    if (mcpAccess) registerMcpServiceAccounts(deps, mcpAccess, capabilities.definitions);
     registerCapabilities(deps, capabilities, capabilityAccess, mcpAccess);
     if (mcpAccess) modules.push(registerMcpTransport(deps, mcpAccess, capabilities));
     modules.push(

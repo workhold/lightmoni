@@ -158,6 +158,7 @@ async function run(input: Input) {
   const system = input.system + context;
   let summary = input.summary ?? "",
     through = input.summary_through ?? 0;
+  let degraded = false;
   const plan = compactionPlan(
     input.messages,
     through,
@@ -183,6 +184,12 @@ async function run(input: Input) {
     );
     let cursor = through,
       rounds = 0;
+    const fallbackSummary = (previous: string) => {
+      const note = "Model history summary was truncated or empty. Earlier rounds remain in the original checkpoint but may not be restated here. Continue with the latest user request and verify current state through tools.";
+      degraded = true;
+      if (previous.includes(note)) return previous;
+      return previous && estimate(previous + "\n" + note) <= 2048 ? previous + "\n" + note : note;
+    };
     try {
       while (cursor < plan.through) {
         if (++rounds > 12) throw Error("context_limit");
@@ -208,22 +215,21 @@ async function run(input: Input) {
             abortSignal: signal,
             maxSteps: 1,
             modelSettings: {
-              maxOutputTokens: Math.min(1024, input.config.max_output_tokens),
+              maxOutputTokens: Math.min(2048, input.config.max_output_tokens),
               maxRetries: 0,
-              ...(reasoning ? { reasoning } : {}),
+              reasoning: reasoning ?? "low",
             },
           },
         );
         signal.throwIfAborted();
-        if (
-          !response.text ||
-          response.finishReason === "length" ||
-          estimate(response.text) > 2048
-        )
-          throw Error("summary_failed");
-        summary = response.text;
+        if (!response.text.trim() || response.finishReason === "length" || estimate(response.text) > 2048)
+          summary = fallbackSummary(summary);
+        else summary = response.text;
         cursor = end;
       }
+      // A later summarization round cannot silently erase an earlier degraded
+      // round: the persisted summary must carry that limitation next turn.
+      if (degraded) summary = fallbackSummary(summary);
       through = plan.through;
       if (
         estimate(system) +
@@ -233,11 +239,12 @@ async function run(input: Input) {
         input.config.max_input_tokens
       )
         throw Error("context_limit");
-      write({ type: "compacted", summary, through });
+      write({ type: "compacted", summary, through, degraded });
       event("context.compacted", {
         rounds: input.messages
           .slice(0, through)
           .filter((m) => m.role === "user").length,
+        degraded,
       });
     } catch (error) {
       if (error instanceof Error && error.message === "context_limit")

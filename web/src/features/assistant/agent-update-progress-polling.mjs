@@ -1,0 +1,48 @@
+// Isolated assistant update-card polling acceptance. No real host or production API.
+import {createServer} from 'node:http';
+import {mkdir,readFile,writeFile,rm,stat} from 'node:fs/promises';
+import {dirname,extname,join,resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {build} from 'vite';
+import {chromium,expect} from '@playwright/test';
+
+const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
+const source=join(root,'.local-agent-update-polling'),output=join(root,'../.local-dev/evidence/170-assistant-lifecycle-fixes/polling'),bundle=join(source,'bundle');
+await mkdir(source,{recursive:true});await mkdir(output,{recursive:true});
+await writeFile(join(source,'index.html'),'<div id="root"></div><script type="module" src="./main.tsx"></script>');
+await writeFile(join(source,'main.tsx'),`import React,{useState} from 'react';import{createRoot}from'react-dom/client';import{BrowserRouter}from'react-router-dom';import{App,Button,ConfigProvider}from'../shared/ui';import{I18nProvider}from'../shared/i18n';import AgentUpdateProgress from'../features/assistant/AgentUpdateProgress';import'../app/style.css';import'../app/theme.css';
+const record={id:'update-1',machine_id:'machine-1',agent_id:'agent-1',action:'upgrade',status:'running',created_at:'2026-11-15T00:00:00Z',review_url:'/machines?machine=machine-1&agent_update=update-1',plan:{machine:{id:'machine-1',name:'host-one',address:'192.0.2.1',port:22},ssh_account:{id:'account-1',username:'root',revision:1},current:{version:'0.1.0',source_revision:'old',fingerprint:'abc'},target:{version:'0.1.1',source_revision:'new',arch:'amd64',sha256:'a'.repeat(64),build_id:'build-new'},expires_at:'2099-11-15T00:00:00Z',steps:['verify'],warnings:['pause']}};
+function Harness(){const[visible,setVisible]=useState(true);return <><Button onClick={()=>setVisible(false)}>Unmount fixture</Button>{visible&&<AgentUpdateProgress value={record} canApprove={true}/>}</>}
+createRoot(document.getElementById('root')).render(<I18nProvider><BrowserRouter><ConfigProvider><App><Harness/></App></ConfigProvider></BrowserRouter></I18nProvider>);`);
+await build({root:source,configFile:false,base:'/',logLevel:'silent',build:{outDir:bundle,emptyOutDir:true},resolve:{dedupe:['react','react-dom']}});
+const server=createServer(async(req,res)=>{
+ try{
+  let file=resolve(bundle,decodeURIComponent(new URL(req.url,'http://fixture').pathname).replace(/^\//,''));
+  if(!file.startsWith(bundle+'/'))file=join(bundle,'index.html');
+  try{if(!(await stat(file)).isFile())file=join(bundle,'index.html')}catch{file=join(bundle,'index.html')}
+  res.setHeader('content-type',({'.html':'text/html','.js':'text/javascript','.css':'text/css'}[extname(file)]||'application/octet-stream'));
+  res.end(await readFile(file));
+ }catch{res.writeHead(404);res.end()}
+});
+await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));const base=`http://127.0.0.1:${server.address().port}`;
+let browser;try{browser=await chromium.launch({headless:true})}catch{browser=await chromium.launch({headless:true,channel:'chrome'})}
+const checks=[];
+async function run(name,fn){
+ const page=await browser.newPage({viewport:{width:1280,height:900},reducedMotion:'reduce'});
+ const state={status:'running',calls:0,failures:0};
+ await page.route('**/api/v1/machines/machine-1/agent-updates/update-1',async route=>{
+  state.calls++;
+  if(state.failures>0){state.failures--;return route.fulfill({status:503,json:{error:'fixture read failure'}})}
+  const record={id:'update-1',machine_id:'machine-1',agent_id:'agent-1',action:'upgrade',status:state.status,created_at:'2026-11-15T00:00:00Z',review_url:'/machines?machine=machine-1&agent_update=update-1',plan:{machine:{id:'machine-1',name:'host-one',address:'192.0.2.1',port:22},ssh_account:{id:'account-1',username:'root',revision:1},current:{version:'0.1.0',source_revision:'old',fingerprint:'abc'},target:{version:'0.1.1',source_revision:'new',arch:'amd64',sha256:'a'.repeat(64),build_id:'build-new'},expires_at:'2099-11-15T00:00:00Z',steps:['verify'],warnings:['pause']}};
+  return route.fulfill({json:record});
+ });
+ await fn(page,state);checks.push({name,passed:true});console.log('PASS '+name);await page.close();
+}
+try{
+ await run('running card reaches real succeeded and stops polling',async(page,state)=>{await page.goto(base);await expect(page.getByText('执行请求已接受，正在更新或核验；这不代表升级成功',{exact:true})).toBeVisible();state.status='succeeded';await expect(page.getByText('Agent 更新成功，已核验目标发行',{exact:true})).toBeVisible({timeout:10000});await page.waitForTimeout(3500);expect(state.calls).toBe(1)});
+ await run('failed state is never presented as success',async(page,state)=>{state.status='failed';await page.goto(base);await expect(page.getByText('Agent 更新失败',{exact:true})).toBeVisible();await expect(page.getByText('Agent 更新成功，已核验目标发行',{exact:true})).toHaveCount(0)});
+ await run('unknown state requires read-only verification',async(page,state)=>{state.status='unknown';await page.goto(base);await expect(page.getByText('更新结果未知，请打开原记录只读核对',{exact:true})).toBeVisible();await expect(page.getByText('Agent 更新成功，已核验目标发行',{exact:true})).toHaveCount(0)});
+ await run('read failure retains state and a later read succeeds',async(page,state)=>{state.failures=1;await page.goto(base);await expect(page.getByText('暂时无法刷新更新状态，保留最后记录，稍后重试',{exact:true})).toBeVisible();state.status='succeeded';await expect(page.getByText('Agent 更新成功，已核验目标发行',{exact:true})).toBeVisible({timeout:12000})});
+ await run('unmount aborts future reads',async(page,state)=>{await page.goto(base);await page.getByRole('button',{name:'Unmount fixture',exact:true}).click();await page.waitForTimeout(3500);expect(state.calls).toBe(0)});
+ await writeFile(join(output,'results.json'),JSON.stringify({passed:checks.length,checks},null,2));console.log(JSON.stringify({passed:checks.length,output}));
+}finally{await browser.close();await new Promise(resolve=>server.close(resolve));await rm(source,{recursive:true,force:true})}
