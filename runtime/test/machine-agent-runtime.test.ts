@@ -29,7 +29,7 @@ async function fixture(t: any, mode: "user" | "root" = "user", login = "root") {
     calls: any[] = [],
     logs: any[] = [],
     checks: any[] = [],
-    busy = new Set<string>(),
+    busy = new Map<string,{holder:string;since:number}>(),
     user = { id: "admin", name: "Admin", role: "admin" };
   let clock = new Date("2026-11-02T00:00:00Z");
   const deps = {

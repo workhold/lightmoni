@@ -4,13 +4,14 @@ import type { Dependencies, Handler } from '../shared/types.js';
 import { agentRemovalProbeCommand, parseAgentRemovalProbe, type AgentRemovalObservation } from './machine-agent-lifecycle.js';
 import { assertSSHAccount, sshAccountSnapshot, sshCredentialRevision, type SSHRunner } from './machine-ssh.js';
 import type { MachineSummary, SSHMachineTarget } from './managed-machines.js';
+import { holdBusy, type BusyLane } from './machine-busy-lane.js';
 
 type Row = Record<string, any>;
 interface Access {
   get(id: string): MachineSummary; idle(id: string): void; revision(machine: MachineSummary): string;
   credential(machine: string, credential?: string): { machine: SSHMachineTarget; credential: any };
   authentication(machine: string, credential: any): { privateKey: string; password?: string };
-  markCredentialUsed(id: string): void; busy: Set<string>; runner: SSHRunner; safe(handler: Handler): Handler;
+  markCredentialUsed(id: string): void; busy: BusyLane; runner: SSHRunner; safe(handler: Handler): Handler;
 }
 export function createMachineStateRecoverySchema(deps: Dependencies) {
   deps.db.exec(`CREATE TABLE IF NOT EXISTS machine_state_recoveries(
@@ -170,7 +171,7 @@ export function registerMachineStateRecovery(deps: Dependencies, access: Access)
     access.idle(ctx.params.id);
     if (db.get("SELECT id FROM machine_state_recoveries WHERE machine_id=? AND status='awaiting_approval' AND expires_at>?", ctx.params.id, at())) fail(409, '已有待审阅状态修正计划，请继续审阅或取消');
     const { machine, credential } = access.credential(ctx.params.id, input.credential_id), revision = access.revision(machine);
-    access.busy.add(machine.id);
+    holdBusy(access.busy, machine.id, "state-recovery", deps.now().getTime());
     try {
       const observed = await probe(machine, credential, ctx.signal), current = access.get(machine.id);
       if (access.revision(current) !== revision || current.agent_id !== machine.agent_id || current.name !== machine.name) fail(409, 'recovery_target_changed');
@@ -204,7 +205,7 @@ export function registerMachineStateRecovery(deps: Dependencies, access: Access)
         || sshCredentialRevision(live.credential) !== plan.credential_revision) fail(409, 'recovery_target_changed');
       if (JSON.stringify(snapshot(machine.id, saved.agent_id)) !== JSON.stringify(plan.effects)) fail(409, '修正影响清单已变化，请取消原计划后重新核对');
     };
-    unchanged(); access.busy.add(machine.id);
+    unchanged(); holdBusy(access.busy, machine.id, "state-recovery", deps.now().getTime());
     try {
       const observed = await probe(machine, credential, ctx.signal);
       if (JSON.stringify(observed) !== JSON.stringify(plan.observation)) fail(409, '远端 Agent 证据已变化，请重新核对');

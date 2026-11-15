@@ -258,6 +258,23 @@ test('cancelled plans are idempotent, block members and permit complete host cle
  }
 });
 
+test('busy lane reports holder and since, and an admin release with confirm and reason clears it',async t=>{
+ const f=await fixture(t),h=await host(f,'busy-lane');
+ const lease=f.machines.acquireTerminal(h.id,h.credential,()=>{});
+ const busy=await f.request(`/machines/${h.id}/busy`);
+ assert.equal(busy.status,200,busy.raw);assert.equal(busy.data.busy,true);assert.equal(busy.data.holder,'terminal');assert.match(busy.data.since,/T/);
+ const blocked=await f.request(`/machines/${h.id}/deployments/plan`,'POST',{});
+ assert.equal(blocked.status,409,blocked.raw);assert.match(blocked.raw,/终端操作进行中/);
+ assert.equal((await f.request(`/machines/${h.id}/busy/release`,'POST',{})).status,400);
+ assert.equal((await f.request(`/machines/${h.id}/busy/release`,'POST',{confirm:true})).status,400);
+ const released=await f.request(`/machines/${h.id}/busy/release`,'POST',{confirm:true,reason:'terminal process confirmed dead'});
+ assert.equal(released.status,200,released.raw);assert.equal(released.data.released,true);assert.equal(released.data.holder,'terminal');
+ const idle=await f.request(`/machines/${h.id}/busy`);assert.equal(idle.data.busy,false);
+ const again=await f.request(`/machines/${h.id}/busy/release`,'POST',{confirm:true,reason:'repeat'});
+ assert.equal(again.status,200);assert.equal(again.data.released,false);
+ lease.release();
+});
+
 test('completed deployment plans cannot be cancelled and an active terminal blocks cancellation',async t=>{
  const f=await fixture(t),h=await host(f,'cancel-guard');
  const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});

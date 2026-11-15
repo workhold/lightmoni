@@ -17,6 +17,7 @@ import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 import { assertNoPendingMachineUninstallation } from "./machine-uninstallations-guard.js";
 import { assertNoDockerInstallation } from "./machine-docker-guard.js";
+import { holdBusy, type BusyLane } from './machine-busy-lane.js';
 import {
   pendingAgentRuntime,
   assertNoPendingAgentRuntime,
@@ -581,7 +582,7 @@ export function registerMachineAgentRuntime(
         selected.machine.name !== machine.name
       )
         fail(409, "agent_runtime_target_changed");
-      access.busy.add(machine.id);
+      holdBusy(access.busy, machine.id, "agent-runtime", d.now().getTime());
       try {
         const observed = parseRuntimeProbe(
           (
@@ -762,7 +763,7 @@ export function registerMachineAgentRuntime(
         };
       recheck();
       audit(r.machine_id, r.id, c.user.id, "runtime_reconciliation_started", { approved_ssh_account: target.p.ssh_account, verification_ssh_account: verifyingAccount, credential_id: selected.credential.id, credential_revision: selectedRevision });
-      access.busy.add(r.machine_id);
+      holdBusy(access.busy, r.machine_id, "agent-runtime", d.now().getTime());
       try {
         const receipt = parseRuntimeReceipt(
           (
@@ -905,7 +906,7 @@ export function registerMachineAgentRuntime(
         { c.json({ error:"root_or_sudo_ssh_required",preflight:check },409); return; }
       target = assertTarget(r);
       idle(r.machine_id, r.agent_id, r.id);
-      access.busy.add(r.machine_id);
+      holdBusy(access.busy, r.machine_id, "agent-runtime", d.now().getTime());
       let dispatched = false;
       try {
         const observation = parseRuntimeProbe(

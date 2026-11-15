@@ -77,7 +77,7 @@ async function dockerInstallationFenceFixture(t:import('node:test').TestContext,
  const {dockerFixture}=await import('./fixtures/docker-control-fixture.js');
  const {registerMachineDocker}=await import('../src/server/machine-docker.js');
  const {fail}=await import('../src/shared/http.js');
- const f=await dockerFixture(),busy=new Set<string>(),calls:any[]=[];let credentialReads=0,sessionActive=true;
+ const f=await dockerFixture(),busy=new Map<string,{holder:string;since:number}>(),calls:any[]=[];let credentialReads=0,sessionActive=true;
  const originalUser=f.deps.auth.user;
  f.deps.auth.user=(request:any)=>sessionActive?originalUser(request):undefined;
  f.db.exec(`CREATE TABLE task_runs(id TEXT PRIMARY KEY,host_id TEXT,agent_id TEXT,execution_principal TEXT,state TEXT,resolved_at TEXT DEFAULT '',superseded_by TEXT DEFAULT '');
