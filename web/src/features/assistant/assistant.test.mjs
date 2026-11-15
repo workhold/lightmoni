@@ -83,3 +83,10 @@ test('missing token counts remain unavailable', () => {
  const [turn] = assistantTimeline([event(0,'turn.usage',{phase:'execute',output_tokens:8,total_tokens:'unknown'}),event(1,'turn.completed')]);
  assert.deepEqual(turn.usage,{output_tokens:8});
 });
+
+test('degraded history compaction remains explicit in the timeline', () => {
+ const [turn] = assistantTimeline([event(0,'context.compacting'),event(1,'context.compacted',{degraded:true}),event(2,'turn.completed')]);
+ assert.equal(turn.compacted,true);
+ assert.equal(turn.degraded,true);
+ assert.equal(turn.compacting,false);
+});

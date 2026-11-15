@@ -815,6 +815,8 @@ AI 的查询必须走目录和统一 Query，SQL 只读、有时间范围和结�
 
 每个真实模型请求使用稳定 request ID 幂等写入账本，记录 started、usage 和终态，区分 complete、partial、unpriced、failed、cancelled。缺失 token 不能猜成零，模型输入、Key 和回复正文不写入用量统计。未来网关只返回真实可获得的用量与价格事实；网关没有提供时仍保持未知，中心不重复计费。
 
+历史整理按完整用户轮次和上下文预算进行。空文本、`length` 或超过摘要上限的响应属于不合格摘要，不再冒充完整摘要或终止整个会话；摘要请求使用低推理开销，优先保留已有摘要并追加不含秘密的固定降级说明，预算不足时至少保留固定降级说明，`context.compacted.data.degraded=true`，页面明确显示“历史整理已降级，原始记录仍保留”。原 checkpoint、当前用户消息和 `summary_through` 规则不变。供应商网络或鉴权失败仍为 `summary_failed`，上下文超限仍为 `context_limit`，不能用降级掩盖这些故障。
+
 ### 14.4 平台开放能力与 MCP：目标架构（SDD 046）
 
 平台开放能力的总体目标覆盖完整业务，任务只是其中一个领域。采用“统一应用能力层 + MCP/Web HTTP/内置 AI 三种适配器”：外部 Codex、Claude 通过 Streamable HTTP MCP 调用，平台助手在进程内调用相同 Dispatcher，页面和普通程序通过 HTTP 复用同一领域服务。MCP 负责协议与工具发现，能力层统一真实主体、role/scope/资源交集、参数校验、审批、幂等、审计和安全结果；不直接包装助手 execute 并伪造 session/admin。首期同进程模块部署，不新增微服务或队列。SDD 047 已实现首批主机/任务工具、专用 PAT、OAuth 与接入管理；SDD 134～151 已扩展多领域读取以及任务、告警、部署、运维和 Agent 首装提案，但不等于全部目标已完成。
@@ -1357,6 +1359,8 @@ unknown 不自动重跑。核对读取原操作 receipt、真实 Agent 身份和
 发行目录使用 GET /api/v1/agent-releases；管理员单机直达升级使用 POST /api/v1/machines/:id/agent-updates/start，请求 `{}`，中心自动选择目标并在同一请求中准备和派发。单机计划、历史、审批、取消、核对仍使用 /api/v1/machines/:id/agent-updates，历史回读增加固定阶段与时间事件；批次使用 /api/v1/agent-rollouts。平台写操作仅管理员；成员只读安全版本和状态。接口不接受用户任意维护脚本、远程路径或 sudo 命令；阶段事件不存储 SSH 原始输出或凭据。下载接口独立验证操作 scope，不接受 SDK Key 替代。
 
 AI 工具 list_agent_releases、propose_agent_update、get_agent_update 只返回安全 metadata、计划、结果和审阅链接。准备计划可执行固定只读 SSH probe；助手不能 apply、commit、执行回退或读取下载票据、原始 SSH 输出和主机秘密。rolled_back 表示本次更新未成功但原程序已恢复；unknown 需要核对，不能被助手改写为完成。
+
+助手更新卡片对 `running/verifying` 只轮询同一原生记录 ID，每实例最多一个进行中的读取，终态或卸载后停止。只有 `succeeded` 显示“更新成功，已核验目标发行”；`rolled_back`、`failed`、`unknown`、`cancelled` 分别展示，读取失败保留最后已知状态并允许重试。主机列表对运行中的 Agent 更新复用 2.5 秒只读快速刷新，终态后按 Agent 心跳和原生状态投影展示当前发行，不能用卡片终态伪造主机发行。主机离线、Agent 是否存在和 unknown 维护是独立事实：离线不等于未安装，unknown 继续构成更新/卸载围栏，只能只读核对或走恢复卸载，不能盲目重装或重复派发。
 
 ### 28.7 任务中心的统一演进方向
 

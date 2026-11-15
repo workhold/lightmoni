@@ -37,7 +37,7 @@ import {runtimeCapabilityText,runtimeObservation} from './agent-runtime-model';
 import MachineBatchDialog,{type BatchAction,type BatchTarget} from './MachineBatchDialog';
 import MachineAgentUpdateDialog,{AgentUpdateHistory} from './MachineAgentUpdateDialog';
 import MachineAgentRolloutDialog,{type AgentRolloutTarget} from './MachineAgentRolloutDialog';
-import {shortIdentity,type AgentInstalledRelease,type AgentUpdate} from './agent-update-model';
+import {shortIdentity,updateIsActive,type AgentInstalledRelease,type AgentUpdate} from './agent-update-model';
 
 const HostContainersDialog=lazy(()=>import('./HostContainersDialog'));
 const HostFilesDialog=lazy(()=>import('./HostFilesDialog'));
@@ -251,7 +251,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   if(fresh.machine.id!==machineID)throw Error(t('主机详情与原升级目标不匹配，请刷新后重试','The host details do not match the original upgrade target. Refresh and retry.'));
   if(mounted.current&&allowed.current&&!removedMachineIDs.current.has(machineID))setMachines(previous=>previous.map(machine=>machine.id===machineID?fresh.machine:machine));
  };
- const hasRunningAgentOperation=admin&&machines.some(machine=>agentOperationRunning(machine.agent_operation));
+ const hasRunningAgentOperation=admin&&machines.some(machine=>agentOperationRunning(machine.agent_operation)||updateIsActive(machine.agent_update?.last_status));
  useEffect(()=>{
   const refresh=()=>{void load(true,true,hasRunningAgentOperation?6000:15_000);if(admin)for(const id of new Set([detail?.machine.id,checkDetail?.machine.id,planMachine?.id,uninstallDetail?.machine.id,updateDetail?.machine.id].filter((id):id is string=>!!id)))void refreshMachine(id,false,true)};
   const timer=setInterval(refresh,hasRunningAgentOperation?2500:15_000);window.addEventListener('focus',refresh);return()=>{clearInterval(timer);window.removeEventListener('focus',refresh)};

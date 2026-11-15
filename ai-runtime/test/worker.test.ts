@@ -32,23 +32,31 @@ function reply(p:Protocol,tool:boolean,stream:boolean,usage=true){
  const value={candidates:[{index:0,content:{role:'model',parts:[tool?{functionCall:{name:'list_tables',args:{}},thoughtSignature:'opaque-gemini-signature'}:{text,thoughtSignature:'opaque-text-signature'}]},finishReason:'STOP'}],usageMetadata:usage?{promptTokenCount:10,candidatesTokenCount:3,thoughtsTokenCount:2,totalTokenCount:15}:undefined};
  return stream?[value]:value;
 }
-async function worker(p:Protocol,mode:'tool'|'tool-budget'|'summary'|'missing'|'error'|'cancel'|'length', replay?:any[], reasoning_effort?:'provider-default'|'none'|'minimal'|'low'|'medium'|'high'|'xhigh',options:{connectionTest?:boolean;model?:string;maxOutputTokens?:number;maxSteps?:number}={}){
+async function worker(p:Protocol,mode:'tool'|'tool-budget'|'summary'|'summary-length'|'summary-error'|'missing'|'error'|'cancel'|'length', replay?:any[], reasoning_effort?:'provider-default'|'none'|'minimal'|'low'|'medium'|'high'|'xhigh',options:{connectionTest?:boolean;model?:string;maxOutputTokens?:number;maxSteps?:number}={}){
  const requests:any[]=[];let child:ReturnType<typeof spawn>;
  const server=createServer(async(req,res)=>{
  let raw='';for await(const chunk of req)raw+=chunk;
  const body=JSON.parse(raw);requests.push({url:req.url,headers:req.headers,body});
  if(mode==='cancel'){res.writeHead(200,{'content-type':'text/event-stream'});res.write(': waiting\n\n');setTimeout(()=>child.kill('SIGTERM'),20);return;}
- if(mode==='error'){res.writeHead(401,{'content-type':'application/json'});res.end('{"error":{"message":"secret fixture error"}}');return;}
+ if(mode==='error'||mode==='summary-error'){res.writeHead(401,{'content-type':'application/json'});res.end('{"error":{"message":"secret fixture error"}}');return;}
  const streaming=body.stream===true||req.url!.includes('streamGenerateContent');
  const disabled=/(?:\"none\"|\"NONE\")/.test(JSON.stringify(body.tool_choice??body.toolChoice??body.toolConfig??{}))||!Array.isArray(body.tools)||body.tools.length===0;
  const tool=(mode==='tool'&&requests.length===1)||(mode==='tool-budget'&&!disabled);
  const includeUsage=mode!=='missing'&&(p!=='openai-chat-completions'||!streaming||body.stream_options?.include_usage===true);
  const result=reply(p,tool,streaming,includeUsage);
- if(mode==='length'){
-  if(p==='openai-chat-completions')(result as any[]).at(-1).choices[0].finish_reason='length';
-  if(p==='openai-responses'){const last=(result as any[]).at(-1);last.type='response.incomplete';last.response.status='incomplete';last.response.incomplete_details={reason:'max_output_tokens'};}
-  if(p==='anthropic-messages')(result as any[]).find(x=>x.type==='message_delta').delta.stop_reason='max_tokens';
-  if(p==='google-generative-ai')(result as any[])[0].candidates[0].finishReason='MAX_TOKENS';
+ if((mode==='length'||mode==='summary-length')&&requests.length===1){
+  const values=Array.isArray(result)?result:[result];
+  if(p==='openai-chat-completions')values.at(-1).choices[0].finish_reason='length';
+  if(p==='openai-responses'){
+   const last=values.at(-1);
+   if(streaming){last.type='response.incomplete';last.response.status='incomplete';last.response.incomplete_details={reason:'max_output_tokens'};}
+   else{last.status='incomplete';last.incomplete_details={reason:'max_output_tokens'};}
+  }
+  if(p==='anthropic-messages'){
+   if(streaming)values.find(x=>x.type==='message_delta').delta.stop_reason='max_tokens';
+   else values[0].stop_reason='max_tokens';
+  }
+  if(p==='google-generative-ai')values[0].candidates[0].finishReason='MAX_TOKENS';
  }
 
  res.writeHead(200,{'content-type':streaming?'text/event-stream':'application/json'});
@@ -60,9 +68,9 @@ async function worker(p:Protocol,mode:'tool'|'tool-budget'|'summary'|'missing'|'
  const frames:any[]=[];let buffer='',stderr='';
  child.stdout!.on('data',chunk=>{buffer+=chunk;let index;while((index=buffer.indexOf('\n'))>=0){const line=buffer.slice(0,index);buffer=buffer.slice(index+1);const f=JSON.parse(line);frames.push(f);if(f.type==='tool.request')child.stdin!.write(JSON.stringify({type:'tool.response',id:f.id,value:{tables:['fixture']}})+'\n');}});
  child.stderr!.on('data',chunk=>stderr+=chunk);
- const messages=replay??(mode==='summary'?[{role:'user',content:'old '.repeat(350)},{role:'assistant',content:'old answer'},{role:'user',content:'older '.repeat(250)},{role:'assistant',content:'older answer'},{role:'user',content:'new question'}]:[{role:'user',content:'previous question'},{role:'assistant',content:'previous answer'},{role:'user',content:'current question'}]);
+ const messages=replay??(['summary','summary-length','summary-error'].includes(mode)?[{role:'user',content:'old '.repeat(350)},{role:'assistant',content:'old answer'},{role:'user',content:'older '.repeat(250)},{role:'assistant',content:'older answer'},{role:'user',content:'new question'}]:[{role:'user',content:'previous question'},{role:'assistant',content:'previous answer'},{role:'user',content:'current question'}]);
  const model = options.model ?? (p === 'google-generative-ai' ? 'models/gemini-fixture' : p === 'openai-responses' && reasoning_effort ? 'gpt-5' : 'fixture');
- child.stdin!.write(JSON.stringify({type:'start',input:{system:'monitoring',...(options.connectionTest?{connection_test:true}:{}),config:{protocol:p,base_url:`http://127.0.0.1:${port}/tenant/v1`,api_key:'fixture',model,max_input_tokens:mode==='summary'?4096:20000,max_output_tokens:options.maxOutputTokens??1024,max_steps:options.maxSteps??4,...(reasoning_effort?{reasoning_effort}: {})},messages,tools:[{name:'list_tables',description:'list',schema:{type:'object',properties:{}}}]}})+'\n');
+ child.stdin!.write(JSON.stringify({type:'start',input:{system:'monitoring',...(options.connectionTest?{connection_test:true}:{}),config:{protocol:p,base_url:`http://127.0.0.1:${port}/tenant/v1`,api_key:'fixture',model,max_input_tokens:['summary','summary-length','summary-error'].includes(mode)?4096:20000,max_output_tokens:options.maxOutputTokens??1024,max_steps:options.maxSteps??4,...(reasoning_effort?{reasoning_effort}: {})},messages,tools:[{name:'list_tables',description:'list',schema:{type:'object',properties:{}}}]}})+'\n');
  const timer=setTimeout(()=>child.kill('SIGKILL'),15000);
  await new Promise<void>(r=>child.on('exit',()=>r()));clearTimeout(timer);server.closeAllConnections();await new Promise<void>(r=>server.close(()=>r()));
  return {frames,requests,stderr};
@@ -76,6 +84,23 @@ for(const p of protocols)test(`${p} reserves the final step for a no-tool answer
  assert.ok(!frames.some(f=>f.type==='error'&&f.code==='step_limit'),JSON.stringify(frames));
  assert.ok(frames.some(f=>f.name==='assistant.delta'&&f.data.text.includes('verified fixture answer')));
  assert.ok(!Array.isArray(requests.at(-1).body.tools)||requests.at(-1).body.tools.length===0,JSON.stringify(requests.at(-1).body));
+});
+
+for(const p of protocols)test(`${p} truncated history summary degrades without losing the session`,async()=>{
+ const {frames,requests}=await worker(p,'summary-length',[{role:'user',content:'old '.repeat(350)},{role:'assistant',content:'old answer'},{role:'user',content:'older '.repeat(250)},{role:'assistant',content:'older answer'},{role:'user',content:'new question'}]);
+ assertRequestLifecycle(frames,requests.length,'succeeded');
+ assert.ok(frames.some(f=>f.type==='compacted'&&f.degraded===true),JSON.stringify(frames));
+ assert.ok(frames.some(f=>f.type==='event'&&f.name==='context.compacted'&&f.data.degraded===true),JSON.stringify(frames));
+ assert.ok(frames.some(f=>f.type==='done'),JSON.stringify(frames));
+ assert.ok(!frames.some(f=>f.type==='error'&&f.code==='summary_failed'),JSON.stringify(frames));
+ assert.ok(JSON.stringify(requests.at(-1).body).includes('new question'));
+ assert.ok(JSON.stringify(requests.at(-1).body).includes('Model history summary was truncated or empty'),JSON.stringify({body:requests.at(-1).body,frames}));
+});
+
+test('provider failures still report summary_failed instead of a degraded checkpoint',async()=>{
+ const {frames}=await worker('openai-chat-completions','summary-error');
+ assert.ok(frames.some(f=>f.type==='error'&&f.code==='summary_failed'),JSON.stringify(frames));
+ assert.ok(!frames.some(f=>f.type==='compacted'),JSON.stringify(frames));
 });
 
 for(const p of protocols)test(`${p} a single-step budget is answer-only`,async()=>{
