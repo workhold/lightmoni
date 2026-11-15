@@ -1,0 +1,11 @@
+{
+  "revision": "0b4568316cb99f66a3c7e50d8284bf53901c7a6a",
+  "archive_sha256": "87217f6de330d871e75d35b8b74adec81064dc9fcc7d65c5b4c1bc59e4e3b073",
+  "feature_prs": [
+    88,
+    89,
+    90
+  ],
+  "context": "git archive of merged main, no workspace credentials or ignored files",
+  "superseded_unpublished_candidate": "a69074d"
+}

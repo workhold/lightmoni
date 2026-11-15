@@ -1,0 +1,14 @@
+[
+  {
+    "legacy_image_env_present": false,
+    "image": "docker.heyphp.com/lightmoni/lightmoni:20261103-0b45683",
+    "services_and_volumes_preserved": true,
+    "clickhouse_has_no_host_port": true
+  },
+  {
+    "legacy_image_env_present": true,
+    "image": "docker.heyphp.com/lightmoni/lightmoni:20261103-0b45683",
+    "services_and_volumes_preserved": true,
+    "clickhouse_has_no_host_port": true
+  }
+]

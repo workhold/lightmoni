@@ -1,0 +1,11 @@
+{
+  "operation_id": "503b627f206c3b57a2914689388b31f2",
+  "machine_id": "9473f8974462e85d",
+  "agent_id": "cf27568ec2d1217867197be3ebbe9a12",
+  "source_revision": "0b4568316cb99f66a3c7e50d8284bf53901c7a6a",
+  "package_sha256": "bcc7c5186d2ad4d10da8cd118744d7030a2d0769a112dcee3d638cf5aa848c52",
+  "state": "succeeded",
+  "identity_preserved": true,
+  "run_mode": "root",
+  "ui_readback": "更新成功、Agent在线、当前发行0b4568316cb9"
+}
