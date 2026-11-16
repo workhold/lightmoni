@@ -25,4 +25,4 @@
 ## 管理员操作记录
 
 - zz-bj-1 unknown managed 检查作业（744bb152…，系统镜像仓库 plan）经管理员批准后于 2026-11-16T00:00:10Z 执行 `POST /api/v1/privileged-execution/jobs/744bb1524ae115c3f1ffc97a8c416aea/reconcile`（confirm+reason 已入审计）；决议后该机 `unknown_execution_result` 资源 4→0，恢复循环重跑，小猪绘本实例回到 healthy 且 recovery=in_sync，四应用保持 active。改进 #4 的 job_id/observed_at 投影正是本次定位阻塞源的手段。
-- zsw-hk8c8g 生命周期锁 `/run/lightmoni-agent-lifecycle.lock` 待管理员经 moni 平台终端确认无维护进程后清理并重启 lightmoni-agent；随后经中心重发升级（0.1.4）。
+- zsw-hk8c8g 生命周期锁已闭环（2026-11-16）：锁目录内 `owner.json` 属主为 `79ee3b2c…`，与该机已终结的旧升级记录精确对应；确认无维护进程后按 update-runner unlock 同款步骤（删 owner.json → rmdir）由管理员经 moni 平台终端清理并重启 lightmoni-agent（active）。期间平台的终端占用曾以改进 #2 的新 409 文案（持有者+起始时间）精确提示，关闭终端后重发升级：操作 `58b241ac…` `succeeded`，目标 0.1.4（build `0.1.4-d540ecede203-838921d27132`），服务/执行通道/身份/发行四项健康确认通过；升级后主机忙状态为 false，全舰队 5 主机在线、4 应用 active。
