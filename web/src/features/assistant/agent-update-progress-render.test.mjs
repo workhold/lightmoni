@@ -18,6 +18,14 @@ const record = {
 test('awaiting native plan renders its summary and administrator approval actions', () => {
   const html = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: record, canApprove: true }));
   assert.match(html, /host-one/); assert.match(html, /确认升级/); assert.match(html, /取消计划/); assert.match(html, /原更新记录/); assert.match(html, /目标包 SHA256/);
+  assert.match(html, /等待管理员审批/); assert.match(html, /确认后开始执行/); assert.match(html, /aria-valuenow="0"/);
+});
+
+test('expired native plan stays at zero and asks for a fresh plan', () => {
+  const expired = { ...record, plan: { ...record.plan, expires_at: '2000-01-01T00:00:00Z' } };
+  const html = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: expired, canApprove: true }));
+  assert.match(html, /计划已过期/); assert.match(html, /请让助手重新准备/); assert.match(html, /aria-valuenow="0"/);
+  assert.doesNotMatch(html, /确认后开始执行/);
 });
 
 test('running plan only reports accepted execution, not approval or success', () => {

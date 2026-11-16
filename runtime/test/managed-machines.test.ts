@@ -898,7 +898,13 @@ test('unbound host must prove registered remote node and cannot uninstall a diff
  observed='node-known';const good=await uninstallPlan(f,h);assert.equal(good.status,201,good.raw);assert.equal(f.machines.get(h.id).agent_id,'');
  await f.request(`/machines/${h.id}/uninstallations/${good.data.id}/cancel`,'POST',{});
  f.db.exec("CREATE TABLE agent_jobs(id TEXT,agent_id TEXT,state TEXT)");
- for(const state of ['queued','leased','accepted','preflighting','staging','activating','verifying','unknown']){
+ // An unclaimed queued job has no side effects and is fenced when claimed;
+ // maintenance planning may proceed. Claimed/running/unknown work stays busy.
+ f.db.run('INSERT INTO agent_jobs VALUES(?,?,?)','job','node-known','queued');
+ const deferred=await uninstallPlan(f,h);assert.equal(deferred.status,201,deferred.raw);
+ assert.equal((await f.request(`/machines/${h.id}/uninstallations/${deferred.data.id}/cancel`,'POST',{})).status,200);
+ f.db.run('DELETE FROM agent_jobs');
+ for(const state of ['leased','accepted','preflighting','staging','activating','verifying','unknown']){
   f.db.run('INSERT INTO agent_jobs VALUES(?,?,?)','job','node-known',state);assert.equal((await uninstallPlan(f,h)).status,409,state);f.db.run('DELETE FROM agent_jobs');
  }
  f.db.run("UPDATE managed_machines SET agent_id='different-agent' WHERE id=?",h.id);assert.equal((await uninstallPlan(f,h)).status,409);

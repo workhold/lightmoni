@@ -61,3 +61,9 @@ test('unverified remote terminal events never claim success or restoration', asy
   assert.equal(agentUpdateStageProgress({ ...record, status: 'rolled_back', events: [{ at: '2026-11-15T00:00:03Z', stage: 'rolled_back' }] }).stage, 'rolled_back');
   assert.equal(agentUpdateStageProgress({ ...record, status: 'running', events: [{ at: '2026-11-15T00:00:03Z', stage: 'unrecognized' }] }).stage, 'starting');
 });
+
+test('awaiting approval always stays at zero even when stale events exist', async () => {
+  const { agentUpdateStageProgress } = await import('./agent-update-progress.ts');
+  const progress = agentUpdateStageProgress({ ...record, status: 'awaiting_approval', events: [{ at: '2026-11-15T00:00:03Z', stage: 'accepted' }] });
+  assert.deepEqual(progress, { percent: 0, stage: 'awaiting_approval', at: '' });
+});
