@@ -32,11 +32,11 @@ export function agentUpdateStageProgress(record: AgentUpdate): { percent: number
   const terminal = ['succeeded', 'rolled_back', 'failed', 'unknown', 'cancelled'].includes(record.status) ? record.status : '';
   const terminalEvent = terminal ? [...events].reverse().find(event => event.stage === terminal) : undefined;
   return {
-    percent: record.status === 'succeeded' ? 100 : known ? updateStagePercent[known.stage] : 0,
+    percent: record.status === 'awaiting_approval' ? 0 : record.status === 'succeeded' ? 100 : known ? updateStagePercent[known.stage] : 0,
     // A remote terminal-looking event is not success/restoration until the
     // platform's own health and identity gates accept the terminal record.
-    stage: terminal || known?.stage || (record.status === 'running' ? 'starting' : record.status),
-    at: (terminalEvent ?? known)?.at ?? ([record.finished_at, record.started_at].find(value => value && Number.isFinite(Date.parse(value))) ?? ''),
+    stage: record.status === 'awaiting_approval' ? record.status : terminal || known?.stage || (record.status === 'running' ? 'starting' : record.status),
+    at: record.status === 'awaiting_approval' ? '' : (terminalEvent ?? known)?.at ?? ([record.finished_at, record.started_at].find(value => value && Number.isFinite(Date.parse(value))) ?? ''),
   };
 }
 

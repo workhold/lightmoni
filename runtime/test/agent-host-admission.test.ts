@@ -43,8 +43,8 @@ async function fixture(t: any) {
   server.listen(0, "127.0.0.1"); await once(server, "listening");
   const base = `http://127.0.0.1:${(server.address() as any).port}`;
   t.after(async () => { ops.close?.(); jobs.close?.(); await nodes.close?.(); machines.close?.(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); db.close(); rmSync(directory, { recursive: true, force: true }); });
-  const request = async (path: string, method = "GET", body?: unknown, bearer?: string) => {
-    const result = await fetch(base + "/api/v1" + path, { method, headers: { "content-type": "application/json", ...(bearer ? { authorization: "Bearer " + bearer } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const request = async (path: string, method = "GET", body?: unknown, bearer?: string, cookie = "") => {
+    const result = await fetch(base + "/api/v1" + path, { method, headers: { "content-type": "application/json", ...(bearer ? { authorization: "Bearer " + bearer } : {}), ...(cookie ? { cookie } : {}) }, body: body === undefined ? undefined : JSON.stringify(body) });
     return { status: result.status, data: await result.json() as any };
   };
   const host = async (name = "用户主机") => {
@@ -156,7 +156,9 @@ test("orphan and revoked identities cannot receive operations resources, plans o
   const f = await fixture(t), host = await f.host(), agent = await f.enroll(host.id); assert.equal((await f.register(agent)).status, 200);
   f.db.run("INSERT INTO agents(id,host_id,hostname,version,platform,arch,last_seen,heartbeat) VALUES('orphan','same','orphan','','linux','amd64',?,'{}')", at.toISOString());
   const agents = await f.request("/operations/agents"); assert.equal(agents.status, 200); assert.deepEqual(agents.data.agents.map((value: any) => value.id), [agent.agentID]);
-  const makeResource = (agentID: string) => f.request("/operations/resources", "POST", { kind: "certificate", name: "Cert", agent_id: agentID, config: {} });
+  const makeResource = (agentID: string) => f.request("/operations/resources", "POST", { kind: "certificate", name: "Cert", agent_id: agentID, config: {} }, undefined, "lm_session=fixture-human-admin");
+  // The human-session boundary runs before resource admission; keep it intact.
+  assert.equal((await f.request("/operations/resources", "POST", { kind: "certificate", name: "Cert", agent_id: "orphan", config: {} })).status, 403);
   assert.equal((await makeResource("orphan")).status, 409);
   assert.throws(() => f.jobs.enqueue({ agentID: "orphan", deploymentID: "bad", operationID: "bad", actions: [] }), /registered_host_required/);
   const resource = await makeResource(agent.agentID); assert.equal(resource.status, 201);

@@ -31,6 +31,8 @@ export default function AgentUpdateProgress({value,canApprove}:{value:unknown;ca
  const originalRecord=record;
  const awaiting=agentUpdateReviewable(record),expired=updatePlanExpired(record);
  const progress=agentUpdateStageProgress(record),stageText=(stage:string)=>({ready:t('已核对发行与主机','Release and host verified'),starting:t('正在启动维护','Starting maintenance'),accepted:t('维护器已接收','Maintainer accepted'),preparing:t('正在准备发行包','Preparing release'),switching:t('正在切换程序','Switching runtime'),verifying:t('正在核验目标发行','Verifying target release'),waiting_confirmation:t('等待新进程健康确认','Waiting for health confirmation'),succeeded:t('更新成功','Update succeeded'),rolled_back:t('已恢复原程序','Previous runtime restored'),failed:t('更新失败','Update failed'),unknown:t('结果待核对','Outcome needs verification'),cancelled:t('已取消','Cancelled'),rollback_failed:t('自动恢复未确认','Automatic recovery unconfirmed')} as Record<string,string>)[stage]||stage;
+ const progressStage=awaiting?(expired?t('计划已过期','Plan expired'):t('等待管理员审批','Waiting for administrator approval')):stageText(progress.stage);
+ const progressHint=awaiting?(expired?t(' · 请让助手重新准备',' · Ask the assistant to prepare a new plan'):t(' · 确认后开始执行',' · Execution starts after confirmation')):t(' · 等待服务端阶段记录',' · Waiting for a server stage record');
  const failure=(problem:unknown)=>{setError(problem instanceof Error?updateMessageText(problem.message,t):t('操作失败，请重试','Operation failed. Retry.'))};
  async function apply(){
   if(!canApprove||!awaiting||!reviewed||busy||expired)return;
@@ -85,10 +87,10 @@ export default function AgentUpdateProgress({value,canApprove}:{value:unknown;ca
  return <div className="lm-assistant-agent-update">
   <AgentUpdatePlanSummary record={record}/>
   <Space wrap><Tag color={updateStatusColor(record.status)}>{updateStatusText(record.status,t)}</Tag>{record.review_url&&<Typography.Link href={record.review_url} target="_blank" rel="noreferrer">{t('打开原更新记录','Open original update record')}</Typography.Link>}</Space>
-  {!awaiting&&<section className="lm-assistant-agent-update-progress" aria-label={t('Agent 更新进度','Agent update progress')}>
+  <section className="lm-assistant-agent-update-progress" aria-label={t('Agent 更新进度','Agent update progress')}>
    <Progress percent={progress.percent} status={record.status==='succeeded'?'success':['failed','unknown','rolled_back'].includes(record.status)?'exception':updateIsActive(record.status)?'active':'normal'} showInfo={false}/>
-   <small>{t('当前阶段：','Current stage: ')}{stageText(progress.stage)}{progress.at?` · ${new Date(progress.at).toLocaleString(language)}`:t(' · 等待服务端阶段记录',' · Waiting for a server stage record')}</small>
-  </section>}
+   <small>{t('当前阶段：','Current stage: ')}{progressStage}{progress.at?` · ${new Date(progress.at).toLocaleString(language)}`:progressHint}</small>
+  </section>
   {canApprove&&awaiting&&<div className="lm-assistant-code-approval">
    {expired&&<Alert type="warning" showIcon title={t('计划已过期，请让助手重新准备','The plan expired. Ask the assistant to prepare it again.')}/>}
    <Checkbox checked={reviewed} disabled={!!busy||expired} onChange={event=>setReviewed(event.target.checked)}>{t('我已审阅目标主机、当前/目标发行、执行步骤和影响','I have reviewed the host, current/target releases, steps, and impact')}</Checkbox>
