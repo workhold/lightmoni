@@ -11,8 +11,11 @@ const render = role => renderToStaticMarkup(createElement(I18nProvider,null,crea
 test('cluster management is a first-class operations link before applications',()=>{
  const html=render('admin');
  assert.match(html,/集群管理/);
+ assert.match(html,/镜像与仓库/);
+ assert.ok(html.indexOf('href="/image-management"')<html.indexOf('href="/clusters"'));
  assert.ok(html.indexOf('href="/clusters"')<html.indexOf('href="/applications"'));
- assert.ok(html.indexOf('href="/private-images"')<html.indexOf('href="/clusters"'));
+ assert.doesNotMatch(html,/href="\/private-images"/);
+ assert.doesNotMatch(html,/href="\/image-sources"/);
 });
 
 test('members keep the host link but not admin-only cluster management',()=>{
