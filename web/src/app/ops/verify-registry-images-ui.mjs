@@ -6,7 +6,7 @@ const browser=await chromium.launch({headless:true,channel:'chrome'});
 try{
  for(let pass=1;pass<=3;pass++){
   await fetch(base+'/__qa/reset');const page=await browser.newPage({viewport:{width:1440,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.goto(base+'/private-images');await expect(page.getByRole('heading',{name:'私有镜像管理',exact:true})).toBeVisible();
+  await page.goto(base+'/image-management?tab=images');await expect(page.getByRole('heading',{name:'镜像与版本',exact:true})).toBeVisible();
   const panel=page.locator('.lm-registry-images');await expect(panel.getByText('仓库中暂无镜像',{exact:true})).not.toBeVisible();
   const selectImage=async(name)=>{await panel.getByRole('combobox',{name:'镜像',exact:true}).click();await page.getByTitle(name,{exact:true}).click();};
   await selectImage('lightmoni/api');await expect(panel.getByText('v1.0',{exact:true})).toBeVisible();await expect(panel.getByRole('link',{name:'监控 API'})).toBeVisible();await expect(panel.getByText('未使用',{exact:true})).toBeVisible();

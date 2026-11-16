@@ -26,7 +26,7 @@ await page.route('**/api/v1/*',async route=>{
 const checks=[];
 try{
  await page.goto(base);await expect(page.getByRole('link',{name:'集群管理',exact:true})).toBeVisible();
- const links=await page.locator('nav a').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('href')));expect(links.indexOf('/private-images')).toBeLessThan(links.indexOf('/clusters'));expect(links.indexOf('/clusters')).toBeLessThan(links.indexOf('/applications'));
+ const links=await page.locator('nav a').evaluateAll(nodes=>nodes.map(node=>node.getAttribute('href')));expect(links.indexOf('/image-management')).toBeLessThan(links.indexOf('/clusters'));expect(links.indexOf('/clusters')).toBeLessThan(links.indexOf('/applications'));
  const cluster=page.getByRole('link',{name:'生产集群',exact:true});await expect(cluster).toHaveAttribute('href','/clusters?resource=prod');await expect(page.getByText('未分配集群',{exact:true})).toBeVisible();await expect(page.getByText('Host A',{exact:true})).toBeVisible();await expect(page.getByText('Host B',{exact:true})).toBeVisible();checks.push('sidebar order, cluster detail link and unassigned display');
  await page.goto(base+'/?cluster=unassigned');await expect(page.getByText('Host B',{exact:true})).toBeVisible();await expect(page.getByText('Host A',{exact:true})).toHaveCount(0);checks.push('unassigned deep-link filter');
  await page.goto(base+'/?cluster=prod');await expect(page.getByText('Host A',{exact:true})).toBeVisible();await expect(page.getByText('Host B',{exact:true})).toHaveCount(0);checks.push('cluster ID deep-link filter');

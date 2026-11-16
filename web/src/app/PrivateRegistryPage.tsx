@@ -29,7 +29,7 @@ import "./operations.css";
 import ApplicationPortFields from "./ops/ApplicationPortFields";
 import ApplicationInstallDrawer from "./ops/ApplicationInstallDrawer";
 
-export default function PrivateRegistryPage() {
+export default function PrivateRegistryPage({view='all'}:{view?:'all'|'images'|'registry'}) {
   const { t } = useI18n(),
     { message } = App.useApp();
   const [data, setData] = useState<Spec>(),
@@ -49,7 +49,7 @@ export default function PrivateRegistryPage() {
     [defaults, setDefaults] = useState<Spec>({}),
     [form] = Form.useForm();
   const clusterID = Form.useWatch("cluster_id", form);
-  const clusters = overview.resources.filter((r) => r.kind === "cluster"),
+  const clusters = (overview.resources ?? []).filter((r) => r.kind === "cluster"),
     site = data?.external?.website;
   const load = useCallback(async (quiet = false) => {
     if (!quiet) setLoading(true);
@@ -226,7 +226,7 @@ export default function PrivateRegistryPage() {
   );
   const refreshAction = <Button icon={<ReloadOutlined aria-hidden />} onClick={() => void load()} loading={loading}>{t("刷新", "Refresh")}</Button>;
   return (
-    <div className="lm-page lm-operations-page lm-registry-page">
+    <div className={view==='all'?"lm-page lm-operations-page lm-registry-page":"lm-registry-page"}>
 
       {error && (
         <Alert
@@ -371,7 +371,8 @@ export default function PrivateRegistryPage() {
               )}
             </p>
           </div>
-          <RegistryImagesPanel registry={data} machineName={id=>overview.machines?.find(m=>m.id===id)?.name??id} clusterName={clusterName} onChange={()=>void load(true)}/>
+          {view!=='registry'&&<RegistryImagesPanel registry={data} machineName={id=>overview.machines?.find(m=>m.id===id)?.name??id} clusterName={clusterName} onChange={()=>void load(true)}/>}
+          {view!=='images'&&
           <div className="lm-ops-panel">
             <div className="lm-ops-subheading">
               <h3>{t("对外发布入口", "Publishing endpoint")}</h3>
@@ -420,10 +421,10 @@ export default function PrivateRegistryPage() {
                 )}
               </Typography.Text>
             )}
-          </div>
+          </div>}
         </>
       )}
-      <ApplicationInstallDrawer resourceId={installID} resources={overview.resources} machines={overview.machines??[]} onClose={()=>setInstallID(undefined)} onManage={()=>{setInstallID(undefined);open("deploy",data?.deployments?.[0])}}/>
+      <ApplicationInstallDrawer resourceId={installID} resources={overview.resources ?? []} machines={overview.machines??[]} onClose={()=>setInstallID(undefined)} onManage={()=>{setInstallID(undefined);open("deploy",data?.deployments?.[0])}}/>
       <Modal
         title={
           dialog === "deploy"
@@ -547,7 +548,7 @@ export default function PrivateRegistryPage() {
                 }
               >
                 <Select
-                  options={overview.resources
+                  options={(overview.resources ?? [])
                     .filter((r) => r.kind === "certificate")
                     .map((r) => ({ value: r.id, label: r.name }))}
                 />
