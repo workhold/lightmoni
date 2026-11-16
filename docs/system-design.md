@@ -1471,7 +1471,7 @@ flowchart TB
 
 ### 42.1 集群与稳定机器归属
 
-公开运行资源为cluster、全局application和全局website。一台稳定managed_machines.id只属于一个cluster，ops_platform_cluster_members以machine_id主键在资源保存事务内约束唯一。Agent重装不改变归属；agents.group_id继续表示采集标签。运行实例使用中的机器不能直接移出，仍属集群的主机不能从主机目录删除，非空集群不能删除。
+公开运行资源为cluster、全局application和全局website。一台稳定managed_machines.id只属于一个cluster，ops_platform_cluster_members以machine_id主键在资源保存事务内约束唯一。Agent重装不改变归属；agents.group_id继续表示采集标签。运行实例使用中的机器不能直接移出，仍属集群的主机不能从主机目录删除，非空集群不能删除。左侧运维导航在应用管理前提供集群管理入口；主机安全投影只读附加cluster_id/cluster_name，列表展示所属/未分配集群并支持按集群筛选和现有cluster深链，普通主机标签不参与成员判定，也不能绕过原资源保存与迁移约束。
 
 ### 42.2 全局应用与集群部署
 

@@ -137,6 +137,8 @@ export interface MachineSummary {
   network: MachineNetwork;
   label_ids: string[];
   labels: {id:string;name:string}[];
+  cluster_id: string;
+  cluster_name: string;
   address: string;
   port: number;
   connection_method: ConnectionMethod;
@@ -391,6 +393,14 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const labels = available ? db.all<{id:string;name:string}>("SELECT l.id,l.name FROM machine_host_labels h JOIN agent_task_labels l ON l.id=h.label_id WHERE h.machine_id=? ORDER BY l.id", machineID) : [];
     return { label_ids: labels.map(label => label.id), labels };
   };
+  const hostCluster = (machineID: string) => {
+    if (!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ops_platform_cluster_members'")) return { cluster_id: "", cluster_name: "" };
+    const membership = db.get<{cluster_id:string}>("SELECT cluster_id FROM ops_platform_cluster_members WHERE machine_id=?", machineID);
+    if (!membership) return { cluster_id: "", cluster_name: "" };
+    const cluster = db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name='ops_platform_resources'")
+      ? db.get<{name?:string}>("SELECT name FROM ops_platform_resources WHERE id=? AND kind='cluster'", membership.cluster_id) : undefined;
+    return { cluster_id: membership.cluster_id, cluster_name: cluster?.name || membership.cluster_id };
+  };
   const agentOperation = (machineID: string): MachineAgentOperation | null => {
     // Read only the progress fields: plans, credentials and command output never
     // enter this projection. Active records remain visible ahead of newer history.
@@ -438,6 +448,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       capacity: currentAgentCapacity(db,value.id,value.agent_id,now()),
       docker_environment: machineDockerEnvironment(executorStore?.getStatus(value.id),now()),
       ...hostLabels(value.id),
+      ...hostCluster(value.id),
       address: value.address, port: Number(value.port),
       connection_method: value.connection_method, host_key_fingerprint: value.host_key_fingerprint, ssh_target_generation: Number(value.ssh_target_generation || 0),
       host_key_public_key: value.host_key_public_key || "", host_key_observed_at: value.host_key_observed_at || "",

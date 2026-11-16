@@ -1193,3 +1193,14 @@ test('install plans inherit verified historical runtime mode without changing ne
  const freshPlan=await f.request(`/machines/${fresh.id}/deployments/plan`,'POST',{check_id:freshCheck.data.id,credential_id:fresh.credential,version:'0.1.0',arch:'amd64'});
  assert.equal(freshPlan.data.plan.runtime_mode,'root');
 });
+
+test('host projections expose existing cluster membership without resource secrets',async t=>{
+ const f=await fixture(t),clustered=await host(f,'clustered-host'),unassigned=await host(f,'unassigned-host');
+ f.db.exec("CREATE TABLE ops_platform_cluster_members(machine_id TEXT PRIMARY KEY,cluster_id TEXT NOT NULL);CREATE TABLE ops_platform_resources(id TEXT,kind TEXT,name TEXT,spec_cipher TEXT)");
+ f.db.run("INSERT INTO ops_platform_resources VALUES('cluster-prod','cluster','生产集群','not-for-host-projection')");
+ f.db.run("INSERT INTO ops_platform_cluster_members VALUES(?,?)",clustered.id,'cluster-prod');
+ const assigned=f.machines.get(clustered.id);
+ assert.equal(assigned.cluster_id,'cluster-prod');assert.equal(assigned.cluster_name,'生产集群');
+ assert.equal(Object.hasOwn(assigned,'spec_cipher'),false);
+ const empty=f.machines.get(unassigned.id);assert.equal(empty.cluster_id,'');assert.equal(empty.cluster_name,'');
+});
