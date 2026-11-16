@@ -22,7 +22,7 @@
   - zsw-hk8c8g 发起升级返回新 409 文案，精确指出生命周期锁未释放并给出处置建议（此前合并为一句的不可行动提示）。
   - 应用实例恢复投影透出 `job_id` 与 `observed_at`（小猪绘本实例 recovery 字段可见），据此定位到 zz-bj-1 阻塞源。
 
-## 待记录（需管理员操作）
+## 管理员操作记录
 
-- zz-bj-1 存在 2026-11-15T16:19Z 的 unknown managed 检查作业（744bb152…，系统镜像仓库 plan），其特权根未决议，阻塞该机恢复；需管理员按既有协议执行 `POST /api/v1/privileged-execution/jobs/744bb1524ae115c3f1ffc97a8c416aea/reconcile {confirm:true, reason}`。本次自动模式未获生产写授权，未执行。
-- zsw-hk8c8g 生命周期锁 `/run/lightmoni-agent-lifecycle.lock` 需在确认无维护进程后经 moni 平台终端清理并重启 lightmoni-agent，然后经中心重发升级（0.1.4）。
+- zz-bj-1 unknown managed 检查作业（744bb152…，系统镜像仓库 plan）经管理员批准后于 2026-11-16T00:00:10Z 执行 `POST /api/v1/privileged-execution/jobs/744bb1524ae115c3f1ffc97a8c416aea/reconcile`（confirm+reason 已入审计）；决议后该机 `unknown_execution_result` 资源 4→0，恢复循环重跑，小猪绘本实例回到 healthy 且 recovery=in_sync，四应用保持 active。改进 #4 的 job_id/observed_at 投影正是本次定位阻塞源的手段。
+- zsw-hk8c8g 生命周期锁 `/run/lightmoni-agent-lifecycle.lock` 待管理员经 moni 平台终端确认无维护进程后清理并重启 lightmoni-agent；随后经中心重发升级（0.1.4）。
