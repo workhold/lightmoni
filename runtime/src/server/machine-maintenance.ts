@@ -39,15 +39,17 @@ export function pendingMaintenancePreparation(db: Dependencies['db'], agent: str
 }
 
 /** A short persisted gate covers only read-only SSH planning, never remote mutation. */
-export function prepareMachineMaintenance(deps: Pick<Dependencies,'db'|'decrypt'>, machine: string, agent: string) {
+export function prepareMachineMaintenance(deps: Pick<Dependencies,'db'|'decrypt'>, machine: string, agent: string, waitForActiveWork=false) {
   const {db}=deps,token=randomUUID();
   db.exec('CREATE TABLE IF NOT EXISTS machine_maintenance_preparations(machine_id TEXT PRIMARY KEY,agent_id TEXT NOT NULL,token TEXT NOT NULL,expires_ms INTEGER NOT NULL)');
   db.transaction(()=>{
     if(db.get<any>('SELECT agent_id FROM managed_machines WHERE id=?',machine)?.agent_id!==agent)fail(409,'maintenance_binding_changed');
     if(pendingMaintenancePreparation(db,agent,machine))fail(409,'maintenance_preparation_pending');
-    if(maintenanceWorkBusy(deps,agent,machine))fail(409,'maintenance_execution_pending');
+    if(!waitForActiveWork&&maintenanceWorkBusy(deps,agent,machine))fail(409,'maintenance_execution_pending');
     db.run('DELETE FROM machine_maintenance_preparations WHERE machine_id=? AND expires_ms<=?',machine,Date.now());
     db.run('INSERT INTO machine_maintenance_preparations VALUES(?,?,?,?)',machine,agent,token,Date.now()+120000);
   });
-  return {token,release:()=>db.run('DELETE FROM machine_maintenance_preparations WHERE machine_id=? AND token=?',machine,token)};
+  return {token,
+    renew:()=>{if(!db.run('UPDATE machine_maintenance_preparations SET expires_ms=? WHERE machine_id=? AND token=? AND expires_ms>?',Date.now()+120000,machine,token,Date.now()).changes)fail(409,'maintenance_preparation_expired');},
+    release:()=>db.run('DELETE FROM machine_maintenance_preparations WHERE machine_id=? AND token=?',machine,token)};
 }

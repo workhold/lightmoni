@@ -46,7 +46,7 @@ export interface AgentUpdateAccess {
   executionStatus?(machineID: string): ReturnType<PrivilegedExecutorStore["getStatus"]> | undefined;
   busy: BusyLane; runner: SSHRunner; safe(handler: Handler): Handler;
 }
-interface Options { downloadsDir: string; dataDir: string; credentials?: AgentCredentialStore; pollIntervalMs?: number; healthTimeoutMs?: number }
+interface Options { downloadsDir: string; dataDir: string; credentials?: AgentCredentialStore; pollIntervalMs?: number; healthTimeoutMs?: number; drainTimeoutMs?: number }
 const ACTIVE = "('awaiting_approval','running','verifying','unknown')";
 const WORKING = new Set(["running", "verifying"]);
 const SHA = /^[a-f0-9]{64}$/;
@@ -216,12 +216,25 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     try { endpoint = new URL(deps.externalURL); } catch { fail(409, "请先配置有效的平台 HTTPS 外部地址"); }
     if (endpoint.protocol !== "https:" || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== "/")
       fail(409, "Agent 维护需要无凭据的平台 HTTPS 根地址，请先更新平台外部地址");
-    access.idle(machineID); assertFree(machineID);
+    assertFree(machineID);
     const { machine, credential } = access.credential(machineID, input.credential_id);
-    assertTarget(machine);
-    const preparation=prepareMachineMaintenance(deps,machine.id,machine.agent_id);
-    holdLane(machine.id);
+    const preparation=prepareMachineMaintenance(deps,machine.id,machine.agent_id,automaticTarget);
+    let laneHeld=false;
     try {
+      if (automaticTarget) {
+        const deadline=Date.now()+(options.drainTimeoutMs??90_000);
+        for (;;) {
+          signal.throwIfAborted();
+          const blockers=maintenanceBlockers(deps,machine.agent_id,machine.id);
+          if (blockers.some(blocker=>blocker.state==='unknown')) fail(409,taskBusyNote(machine.id,machine.agent_id));
+          if (!access.busy.has(machine.id)&&!taskBusy(machine.id,machine.agent_id)) break;
+          if (Date.now()>=deadline) fail(409,'等待主机现有任务结束超时，未启动 Agent 升级；请检查主机任务后重试');
+          await new Promise<void>(resolve=>setTimeout(resolve,250));
+        }
+      }
+      access.idle(machine.id);assertTarget(machine);
+      preparation.renew();
+      holdLane(machine.id);laneHeld=true;
       const observed = await probe(machine, credential, signal); validateProbe(machine, observed, input.action !== "rollback");
       access.credential(machine.id, credential.id); assertFree(machine.id); assertTarget(access.get(machine.id));
       if (access.revision(access.get(machine.id)) !== access.revision(machine)) fail(409, "主机连接在检查期间变化，请重新生成计划");
@@ -263,7 +276,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         event(operationID,"ready");
       });
       return view(row(machine.id, operationID));
-    } finally { preparation.release();access.busy.delete(machine.id); }
+    } finally { preparation.release();if(laneHeld)access.busy.delete(machine.id); }
   };
   const assertPlan = (operation: any, beforeStart = false, requireCredential = true) => {
     const machine = access.get(operation.machine_id), body = JSON.parse(operation.plan_json);

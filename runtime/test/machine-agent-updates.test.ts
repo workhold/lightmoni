@@ -36,7 +36,7 @@ function releaseFiles(directory: string) {
   writeFileSync(join(directory, "agent-releases.json"), JSON.stringify({ schema: 1, releases: [release] }));
   return release;
 }
-async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean) {
+async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean, drainTimeoutMs?: number) {
   const directory = mkdtempSync(join(tmpdir(), "lightmoni-agent-updates-")), downloads = join(directory, "downloads"), release = releaseFiles(downloads);
   const db = new DB(":memory:"), router = new Router(), user = { id: "admin", name: "Admin", role: "admin" };
   let clock = new Date("2026-10-30T00:00:00Z"), origin = "";
@@ -117,7 +117,7 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     throw Error("unexpected fixture SSH command");
   };
   const machines = registerManagedMachines(deps, { sshRunner: runner, agentCredentials: credentials, downloadsDir: downloads,
-    dataDir: directory, updatePollIntervalMs: 5, updateHealthTimeoutMs: healthTimeout });
+    dataDir: directory, updatePollIntervalMs: 5, updateHealthTimeoutMs: healthTimeout, updateDrainTimeoutMs: drainTimeoutMs });
   // Domain tests inject the trusted store's signed-observation view. JWS
   // authentication of that view is covered in privileged-executors.test.ts.
   machines.registerExecutorBootstrap({getStatus:(machineID:string)=>({executor:helpers.get(machineID)??null,capabilities:{}})} as any);
@@ -201,6 +201,39 @@ test('Agent upgrade planning reserves the host while an unclaimed platform inspe
  f.setProbeHook(undefined);const applied=await f.apply(h.id,planned.data.id);assert.equal(applied.status,202,applied.raw);
  assert.equal((await f.settle(h.id,planned.data.id)).status,'succeeded');
  assert.equal(hasPendingAgentUpdate(f.db,h.agent,h.id),false);
+});
+
+test('one-click upgrade reserves the host and waits for an active inspection to finish',async t=>{
+ const f=await fixture(t),h=await f.host(),at=f.deps.now().toISOString();
+ f.db.run("INSERT INTO agent_jobs(id,agent_id,execution_principal,deployment_id,operation_id,state,lease_id,actions_json,target_json,issued_at,expires_at,created_at,updated_at) VALUES(?,?,'privileged_executor','platform-app','inspection','running','leased',?,?,?,?,?,?)",
+   'running-inspection',h.agent,JSON.stringify([{kind:'operations',domain:'platform',operation_id:'inspection'}]),'{}',at,new Date(f.deps.now().getTime()+900000).toISOString(),at,at);
+ const lease=f.machines.acquireTerminal(h.id,undefined,()=>{});
+ assert.equal(f.machines.get(h.id).capabilities.update_agent.available,true);
+ assert.equal(f.machines.get(h.id).capabilities.rollback_agent.available,false);
+ assert.equal((await f.plan(h.id)).status,409,'ordinary review plans still require immediate idle');
+ const pending=f.request(`/machines/${h.id}/agent-updates/start`,'POST',{});
+ await new Promise(resolve=>setTimeout(resolve,50));
+ assert.equal(hasPendingAgentUpdate(f.db,h.agent,h.id),true,'new work is fenced during drain');
+ assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_agent_updates')!.n,0,'maintenance has not started');
+ f.db.run("UPDATE agent_jobs SET state='succeeded',lease_id='' WHERE id='running-inspection'");
+ lease.release();
+ const started=await pending;assert.equal(started.status,202,started.raw);
+ assert.equal((await f.settle(h.id,started.data.id)).status,'succeeded');
+});
+
+test('unknown and timed-out active work release the upgrade preparation without starting maintenance',async t=>{
+ const f=await fixture(t,300,undefined,20),h=await f.host(),at=f.deps.now().toISOString();
+ f.db.run("INSERT INTO agent_jobs(id,agent_id,execution_principal,deployment_id,operation_id,state,lease_id,actions_json,target_json,issued_at,expires_at,created_at,updated_at) VALUES(?,?,'privileged_executor','platform-app','inspection','unknown','leased',?,?,?,?,?,?)",
+   'unknown-inspection',h.agent,JSON.stringify([{kind:'operations',domain:'platform',operation_id:'inspection'}]),'{}',at,new Date(f.deps.now().getTime()+900000).toISOString(),at,at);
+ assert.equal(f.machines.get(h.id).capabilities.update_agent.available,false);
+ assert.equal((await f.request(`/machines/${h.id}/agent-updates/start`,'POST',{})).status,409);
+ assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_maintenance_preparations')!.n,0);
+ f.db.run("UPDATE agent_jobs SET state='running' WHERE id='unknown-inspection'");
+ const expired=await f.request(`/machines/${h.id}/agent-updates/start`,'POST',{});
+ assert.equal(expired.status,409,expired.raw);
+ assert.match(expired.raw,/等待主机现有任务结束超时/);
+ assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_maintenance_preparations')!.n,0);
+ assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_agent_updates')!.n,0);
 });
 
 test('one request chooses the probed architecture, starts upgrade and retains stage events',async t=>{
