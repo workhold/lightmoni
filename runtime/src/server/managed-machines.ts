@@ -16,6 +16,7 @@ import { NodeStore } from "./nodes-model.js";
 import { join } from "node:path";
 import { createAgentUpdatesSchema, registerMachineAgentUpdates, type AgentUpdateStore } from "./machine-agent-updates.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
+import { maintenanceBlockers } from "./machine-maintenance.js";
 import type { PrivilegedExecutorStore } from "./privileged-executors.js";
 import type { ExecutionGrantRegistry } from "../capabilities/execution-grants.js";
 import { createAgentRuntimeSchema, preferredAgentRuntimeMode, recordAgentRuntime, registerMachineAgentRuntime, validAgentRuntimeMode, validAgentRuntimeObservation } from './machine-agent-runtime.js';
@@ -209,6 +210,7 @@ export interface ManagedMachinesOptions {
   dataDir?: string;
   updatePollIntervalMs?: number;
   updateHealthTimeoutMs?: number;
+  updateDrainTimeoutMs?: number;
   installationReadinessTimeoutMs?: number;
   installationReadinessPollIntervalMs?: number;
 }
@@ -436,12 +438,22 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (uninstallCapability.available && uninstallReason) { uninstallCapability.available = false; uninstallCapability.reason = uninstallReason; }
     const deployCapability = capability(true);
     if (deployCapability.available && uninstallReason) { deployCapability.available = false; deployCapability.reason = uninstallReason; }
-    const updateCapability = capability(true);
+    const updateCapability = capability(true), rollbackCapability = capability(true);
+    // One-click upgrade reserves maintenance first, then waits for an active
+    // SSH inspection to drain. Static SSH and lifecycle requirements still gate it.
+    if (updateCapability.reason === "host_busy" && value.connection_method === "direct_ssh" && reusableSSH
+      && !pendingDockerInstallation(db,value.id,value.agent_id)) {
+      updateCapability.available = true; updateCapability.reason = "";
+    }
+    const unresolvedWork = value.agent_id && maintenanceBlockers(deps,value.agent_id,value.id).some(blocker=>blocker.state==='unknown');
     const updateReason: MachineCapabilityReason = pendingUpdate ? "agent_update_pending" : !value.agent_id ? "agent_not_linked"
-      : uninstallations.taskBusy(value.agent_id) ? "agent_task_busy" : pendingUninstall ? uninstallReason : "";
+      : pendingUninstall ? uninstallReason : unresolvedWork ? "agent_task_busy" : "";
     if (updateCapability.available && updateReason) { updateCapability.available = false; updateCapability.reason = updateReason; }
+    const rollbackReason: MachineCapabilityReason = pendingUpdate ? "agent_update_pending" : !value.agent_id ? "agent_not_linked"
+      : uninstallations.taskBusy(value.agent_id) ? "agent_task_busy" : pendingUninstall ? uninstallReason : "";
+    if (rollbackCapability.available && rollbackReason) { rollbackCapability.available = false; rollbackCapability.reason = rollbackReason; }
     if (pendingUpdate) for (const current of [uninstallCapability, deployCapability]) { current.available = false; current.reason = "agent_update_pending"; }
-    if (pendingInstall) for (const current of [uninstallCapability,deployCapability,updateCapability]) { current.available=false; if(current.reason!=="host_busy")current.reason=pendingInstall.status==="unknown"?"installation_unknown":"installation_pending"; }
+    if (pendingInstall) for (const current of [uninstallCapability,deployCapability,updateCapability,rollbackCapability]) { current.available=false; if(current.reason!=="host_busy")current.reason=pendingInstall.status==="unknown"?"installation_unknown":"installation_pending"; }
     return {
       id: value.id, name: value.name, default_account_id: value.default_account_id || "", accounts:accountRows(value.id), observed_hostname: currentAgentHostname(db, value.id, value.agent_id),
       network: {...network,service_addresses:machineServiceAddressSettings(db,value.id,{host:value,network})},
@@ -459,7 +471,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       active_ssh_credential_count: activeSSH, active_ssh_key_count: activeKeys,
       active_reusable_ssh_credential_count: reusableSSH,
       ssh_recovery_available: value.connection_method === "direct_ssh" && activeSSH > 0,
-      capabilities: { terminal: pendingUpdate ? { available: false, reason: "agent_update_pending" } : capability(), ssh_check: capability(), deploy_agent: deployCapability, uninstall_agent: uninstallCapability, recovery_uninstall_agent: { ...uninstallCapability }, update_agent: updateCapability, rollback_agent: { ...updateCapability } },
+      capabilities: { terminal: pendingUpdate ? { available: false, reason: "agent_update_pending" } : capability(), ssh_check: capability(), deploy_agent: deployCapability, uninstall_agent: uninstallCapability, recovery_uninstall_agent: { ...uninstallCapability }, update_agent: updateCapability, rollback_agent: rollbackCapability },
       ...agentUpdates.machineState(value.id, value.agent_id),
       agent_runtime_mode: preferredAgentRuntimeMode(db, value.id),
       agent_operation: agentOperation(value.id),
@@ -882,7 +894,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   const uninstallations = registerMachineUninstallations(deps, { get, idle, revision: targetRevision, checked, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe, revokeUnifiedRuntime(machineID,actor,operationID){if(!executorStore)fail(409,'agent_execution_store_unavailable');executorStore.revokeUnifiedRuntime(machineID,actor,operationID,true);} });
   const agentUpdates = registerMachineAgentUpdates(deps, { get, idle, revision: targetRevision, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe, executionStatus: machineID => executorStore?.getStatus(machineID) }, {
     credentials: options.agentCredentials, downloadsDir: options.downloadsDir ?? join(process.cwd(), "downloads"), dataDir: options.dataDir ?? join(process.cwd(), ".local-dev"),
-    pollIntervalMs: options.updatePollIntervalMs, healthTimeoutMs: options.updateHealthTimeoutMs,
+    pollIntervalMs: options.updatePollIntervalMs, healthTimeoutMs: options.updateHealthTimeoutMs, drainTimeoutMs: options.updateDrainTimeoutMs,
   });
   registerMachineStateRecovery(deps, { get, idle, revision: targetRevision, credential: sshCredential, authentication, markCredentialUsed, busy, runner: runSSH, safe });
   const createPlan = (machineID: string, input: InstallPlanInput, actorID: string) => {

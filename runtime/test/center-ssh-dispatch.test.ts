@@ -59,6 +59,22 @@ test('an unsupported old release fails a queued job before opening SSH',async t=
   }
 });
 
+test('maintenance preparation leaves queued SSH work untouched until the fence is released',async t=>{
+  for(const kind of ['ordinary','privileged'] as const){
+    let invoked=0;
+    const f=fixture(t,kind,async()=>{invoked++;f.db.run(`UPDATE ${kind==='ordinary'?'agent_jobs':'privileged_jobs'} SET state='succeeded' WHERE id=?`,f.jobID);return{stdout:'',stderr:'',stages:[]};});
+    f.db.exec('CREATE TABLE machine_maintenance_preparations(machine_id TEXT,agent_id TEXT,token TEXT,expires_ms INTEGER)');
+    f.db.run("INSERT INTO machine_maintenance_preparations VALUES('host','agent','preparing',?)",Date.now()+120000);
+    f.dispatcher.tick();await pause();
+    assert.equal(invoked,0,kind);
+    assert.equal(f.failureCode(),'',kind);
+    assert.equal(f.db.get<any>(`SELECT state FROM ${kind==='ordinary'?'agent_jobs':'privileged_jobs'} WHERE id=?`,f.jobID)?.state,'queued');
+    f.db.run('DELETE FROM machine_maintenance_preparations');
+    f.dispatcher.tick();await pause();
+    assert.equal(invoked,1,kind);
+  }
+});
+
 test('manual tasks use the root SSH entrypoint while scheduler runs stay with the helper',async t=>{
   const db=new DB(':memory:');t.after(()=>db.close());
   db.exec(`CREATE TABLE task_runs(id TEXT PRIMARY KEY,host_id TEXT,state TEXT,execution_principal TEXT,trigger TEXT,requested_by TEXT,created_at TEXT);
