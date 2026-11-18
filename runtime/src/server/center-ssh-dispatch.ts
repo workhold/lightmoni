@@ -6,6 +6,7 @@ import type {TaskRunStore} from './task-center.js';
 import {defaultSSHRunner,SSHError,type SSHRunner} from './machine-ssh.js';
 import {HTTPError} from '../shared/http.js';
 import type {ExecutionGrantRegistry} from '../capabilities/execution-grants.js';
+import {hasPendingAgentUpdate} from './machine-agent-updates-guard.js';
 
 type Candidate={id:string;machine_id:string;kind:'privileged'|'ordinary'|'task'};
 const JOB_ID=/^[a-f0-9-]{32,36}$/;
@@ -18,6 +19,7 @@ export function registerCenterSSHDispatch(deps:Dependencies,access:MachineTermin
   let timer:ReturnType<typeof setInterval>|undefined,closed=false;
   jobs.setSSHOnly?.();executors.setSSHOnly();if(taskRuns){taskRuns.sshOnceReady=machineID=>executors.supportsSSHOnce(machineID,'task-once');taskRuns.setSSHOnly();}
   const pending=(job:Candidate)=>db.get<{state:string}>(`SELECT state FROM ${job.kind==='privileged'?'privileged_jobs':job.kind==='task'?'task_runs':'agent_jobs'} WHERE id=?`,job.id)?.state==='queued';
+  const maintenancePending=(machineID:string)=>hasPendingAgentUpdate(db,db.get<{agent_id:string}>('SELECT agent_id FROM managed_machines WHERE id=?',machineID)?.agent_id??'',machineID);
   const failQueued=(job:Candidate,code:string)=>{
     if(!pending(job))return;
     if(job.kind==='privileged')executors.failQueuedSSH(job.id,code);
@@ -66,6 +68,7 @@ export function registerCenterSSHDispatch(deps:Dependencies,access:MachineTermin
     if(closed)return;
     for(const row of db.all<{id:string}>(`SELECT DISTINCT m.id FROM agent_jobs j JOIN managed_machines m ON m.agent_id=j.agent_id
       WHERE j.state='queued' AND j.execution_principal='privileged_executor' LIMIT 100`)){
+      if(maintenancePending(row.id))continue;
       try{executors.prepareSSH(row.id);}catch(error){deps.logger.warn('ssh_managed_prepare_failed',error);}
     }
     const candidates:Candidate[]=[
@@ -79,6 +82,9 @@ export function registerCenterSSHDispatch(deps:Dependencies,access:MachineTermin
         ORDER BY created_at,id LIMIT 100`).map(row=>({...row,kind:'task' as const})):[]),
     ];
     for(const job of candidates){
+      // A preparation keeps unclaimed work queued until the update record
+      // takes over; attempting SSH here would incorrectly fail that work.
+      if(maintenancePending(job.machine_id))continue;
       if(active.has(job.machine_id))continue;
       const controller=new AbortController(),promise=run(job,controller).catch(error=>deps.logger.error('center_ssh_dispatch_failed',error))
         .finally(()=>active.delete(job.machine_id));

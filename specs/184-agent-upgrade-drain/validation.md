@@ -11,7 +11,7 @@
 
 | 检查 | 结果 |
 | --- | --- |
-| `runtime` 定向测试：`machine-maintenance`、`machine-agent-updates`、`managed-machines` | 182/182 通过。新增运行检查排空、SSH 车道占用、unknown 拒绝、超时释放、普通计划保持即刻空闲与回退入口门禁断言。 |
+| `runtime` 定向测试：`machine-maintenance`、`machine-agent-updates`、`managed-machines`、`center-ssh-dispatch` | 189/189 通过。新增运行检查排空、SSH 车道占用、预约期间排队作业保留、unknown 拒绝、超时释放、普通计划保持即刻空闲与回退入口门禁断言。 |
 | `runtime` 与 `web` typecheck | 均通过。 |
 | `runtime` 与 `web` build | 均通过；Web 构建含依赖包既有指令警告。 |
 | `npm run version:check` | 46 项通过。 |
