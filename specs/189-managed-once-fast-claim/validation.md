@@ -15,6 +15,9 @@
 - `center-ssh-dispatch.test.ts` 与 `managed-executor-jobs.test.ts` 共 42 项通过：覆盖 SSH 固定入口、未知结果围栏、回执及常驻 helper 应用观测。
 - `npm run typecheck`、`npm run build`（runtime）和 `git diff --check` 通过。
 - 本次没有部署生产发行包；上述生产观察均来自变更前版本，不能作为修复后验收。
+- PR 已补齐 0.1.8 统一版本与固定 Compose 标签；发布镜像、中心部署及目标 Agent 升级仍须在合入后进行。
+- `npm run version:check`：0.1.8 的 46 项版本一致性检查通过；根目录 `npm run build` 通过（SDK、runtime、AI runtime、Web）。
+- `docker compose config --quiet` 在注入仅用于本地语法验证的占位密码后通过；三组相关测试共 62 项通过，`git diff --check` 通过。
 
 ## 架构影响
 
