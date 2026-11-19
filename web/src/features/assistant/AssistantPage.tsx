@@ -3,22 +3,24 @@ import type {Translator} from '../../shared/i18n';
 import {chinese} from '../alerts/translation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {useNavigate} from 'react-router-dom';
-import { ArrowUpOutlined, CheckOutlined, CodeOutlined, CopyOutlined, HistoryOutlined, MessageOutlined, PlusOutlined, ReloadOutlined, SettingOutlined, StopOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import {MessageScroller} from '@shadcn/react/message-scroller';
+import { ArrowUpOutlined, CheckOutlined, CloseOutlined, CodeOutlined, CopyOutlined, FilePdfOutlined, HistoryOutlined, LoadingOutlined, MessageOutlined, PaperClipOutlined, PictureOutlined, PlusOutlined, ReloadOutlined, SettingOutlined, SlidersOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import XMarkdown, { type ComponentProps } from '@ant-design/x-markdown';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
 import {useAppearance} from '../../shared/appearance';
-import { App, Alert, Button, Checkbox, Collapse, Drawer, Empty, Input, Modal, Select, Space, Spin, Table, Tag, Tooltip } from '../../shared/ui';
+import { App, Alert, Button, Checkbox, Collapse, Drawer, Input, Modal, Popover, Select, Space, Spin, Table, Tag, Tooltip } from '../../shared/ui';
 import { api } from '../../shared/api';
 import {boundedMonitoringContext} from '../../shared/assistant-context';
 import type { CatalogTable, QueryResponse, TimeRange, User } from '../../shared/types';
 import { streamTurn } from './client';
+import { readAttachment } from './attachments';
 import { assistantTimeline, queryRangeFromTurn } from './timeline';
 import SSHCheckSummary,{type SSHCheckResult} from '../../shared/SSHCheckSummary';
 import AgentUpdateProgress from './AgentUpdateProgress';
 import {agentUpdateToolValue} from './agent-update-progress';
 import AlertProposalProgress from './AlertProposalProgress';
-import type { AssistantConfig, AssistantContext, AssistantEvent, AssistantSession, CodeTaskResult, DashboardDraft, DraftPanel, ToolTrace, TurnView } from './types';
+import type { AssistantConfig, AssistantContext, AssistantEvent, AssistantSession, Attachment, CodeTaskResult, DashboardDraft, DraftPanel, ToolTrace, TurnView } from './types';
 import './assistant.css';
 
 export interface AssistantPanelProps {
@@ -27,6 +29,11 @@ export interface AssistantPanelProps {
   initialPrompt?: string;
   onDashboardDraft?: (draft: DashboardDraft) => Promise<void>;
   onSQL?: (sql: string) => void;
+}
+
+interface QueuedTurn { id: string; text: string; attachments: Attachment[]; context: AssistantContext }
+function mergeEvents(previous: AssistantEvent[], incoming: AssistantEvent[]): AssistantEvent[] {
+  return [...new Map([...previous, ...incoming].map(event => [event.sequence, event])).values()].sort((a,b) => a.sequence - b.sequence);
 }
 
 
@@ -172,6 +179,12 @@ function ToolProgress({ turn, onDraft, canUseCodeTasks, canApproveAgentUpdate }:
  const {language,t}=useI18n();
  const navigate=useNavigate();
   const toolLabels: Record<string, string> = { list_managed_machines:t("查询主机","Find managed hosts"),get_managed_machine:t("读取主机信息","Read managed host"),check_managed_machine_ssh:t("SSH 安装检查","SSH installation preflight"),propose_agent_install:t("准备 Agent 部署计划","Prepare Agent deployment plan"),get_agent_installation:t("核验 Agent 部署","Verify Agent deployment"),propose_agent_update:t("准备 Agent 更新计划","Prepare Agent update plan"), list_tables: t("读取数据表目录","Read table catalog"), describe_table: t("检查表结构","Inspect table schema"), run_query: t("执行 SQL 查询","Run SQL query"), draft_dashboard: t("生成大盘草稿","Generate dashboard draft"), code_task: t("执行代码任务","Run code task"), list_alert_rules: t("查询告警规则","Find alert rules"), get_alert_rule: t("读取告警规则","Read alert rule"), list_alert_silences: t("查询静默窗口","Find silence windows"), get_alert_silence: t("读取静默窗口","Read silence window"), list_alert_groups: t("查询告警组","Find alert groups"), get_alert_proposal: t("核验告警提案","Verify alert proposal"), propose_alert_change: t("准备告警变更","Prepare alert change") };
+  Object.assign(toolLabels,{
+    list_services:t('查询服务目录','Find services'),get_service_deployment:t('读取服务部署','Read service deployment'),get_service_deployment_events:t('读取部署事件','Read deployment events'),propose_service_deployment:t('准备服务部署计划','Prepare service deployment plan'),
+    list_agent_releases:t('查询 Agent 版本','Find Agent releases'),get_agent_update:t('读取 Agent 更新','Read Agent update'),scan_sdk_instrumentation:t('扫描 SDK 插桩','Scan SDK instrumentation'),propose_sdk_instrumentation:t('准备 SDK 插桩方案','Prepare SDK instrumentation plan'),
+    list_operations_resources:t('查询运维资源','Find operations resources'),get_operations_run:t('读取运维执行','Read operations run'),propose_operations_action:t('准备运维操作','Prepare operations action'),
+    list_tasks:t('查询任务','Find tasks'),get_task:t('读取任务','Read task'),list_task_runs:t('查询任务执行','Find task runs'),get_task_run:t('读取任务执行','Read task run'),get_task_proposal:t('读取任务提案','Read task proposal'),propose_task_action:t('准备任务操作','Prepare task action'),
+  });
 
   const tools = turn.tools.filter(tool => tool.name !== 'code_task' || canUseCodeTasks);
   if (!tools.length) return null;
@@ -180,9 +193,28 @@ function ToolProgress({ turn, onDraft, canUseCodeTasks, canApproveAgentUpdate }:
     if (tool.name === 'propose_alert_change') return <AlertProposalProgress key={tool.callId} tool={tool} />;
     const agentUpdate = agentUpdateToolValue(tool.name, tool.result);
     if (agentUpdate) return <AgentUpdateProgress key={tool.callId} value={agentUpdate} canApprove={canApproveAgentUpdate} />;
-    const result = tool.result as { draft?: DashboardDraft; error?: string;id?:string;machine_id?:string;status?:string } | undefined;
-    return <Collapse key={tool.callId} size="small" ghost items={[{ key: tool.callId, label: <Space><span className={`lm-assistant-tool-dot ${tool.status}`} /><span>{toolLabels[tool.name] ?? tool.name}</span><Tag bordered={false} color={tool.status === 'error' ? 'error' : tool.status === 'success' ? 'success' : tool.status === 'cancelled' ? 'default' : 'processing'}>{tool.status === 'running' ? t("执行中","Running") : tool.status === 'error' ? t("失败","Failed") : tool.status === 'cancelled' ? t("已取消","Cancelled") : t("完成","Completed")}</Tag></Space>, children: <div><div className="lm-assistant-tool-heading">{t("调用参数","Call arguments")}</div><pre className="lm-assistant-tool-json">{readable(tool.input)}</pre>{tool.result !== undefined && <><div className="lm-assistant-tool-heading">{t("执行结果","Execution result")}</div><pre className="lm-assistant-tool-json">{readable(tool.result)}</pre></>}{tool.status==='success'&&tool.name==='check_managed_machine_ssh'&&result?.id&&<SSHCheckSummary result={tool.result as SSHCheckResult}/>} {tool.status==='success'&&tool.name==='propose_agent_install'&&result?.id&&result.machine_id&&<Button type="primary" onClick={()=>navigate(`/machines?machine=${encodeURIComponent(result.machine_id!)}&deployment=${encodeURIComponent(result.id!)}`)}>{t('审阅部署计划','Review deployment plan')}</Button>}{tool.status === 'success' && result?.draft && <Button type="primary" onClick={() => onDraft(result.draft!, queryRangeFromTurn(turn, tool.callId))}>{t("审阅大盘草稿","Review dashboard draft")}</Button>}</div> }]} />;
+    const result = tool.result as { draft?: DashboardDraft; error?: string;id?:string;machine_id?:string;status?:string;review_url?:string } | undefined;
+    const input=tool.input as {machine_id?:string;sql?:string} | undefined;
+    return <Collapse key={tool.callId} size="small" ghost items={[{ key: tool.callId, label: <Space><span className={`lm-assistant-tool-dot ${tool.status}`} /><span>{toolLabels[tool.name] ?? tool.name.replaceAll('_',' ')}</span><Tag bordered={false} color={tool.status === 'error' ? 'error' : tool.status === 'success' ? 'success' : tool.status === 'cancelled' ? 'default' : 'processing'}>{tool.status === 'running' ? t("执行中","Running") : tool.status === 'error' ? t("失败","Failed") : tool.status === 'cancelled' ? t("已取消","Cancelled") : t("完成","Completed")}</Tag></Space>, children: <div>{tool.name==='check_managed_machine_ssh'&&<div className="lm-assistant-terminal"><div className="lm-assistant-terminal-label">SSH · {t('固定只读安装检查','Fixed read-only installation check')}</div><pre><span>$</span> ssh {input?.machine_id??t('已登记主机','registered host')} <em>{t('由中心执行受限预检','restricted preflight via center')}</em></pre></div>}{tool.name==='run_query'&&input?.sql&&<div className="lm-assistant-terminal"><div className="lm-assistant-terminal-label">SQL</div><pre>{input.sql}</pre></div>}<div className="lm-assistant-tool-heading">{t("调用参数","Call arguments")}</div><pre className="lm-assistant-tool-json">{readable(tool.input)}</pre>{tool.result !== undefined && <><div className="lm-assistant-tool-heading">{t("执行结果","Execution result")}</div><pre className="lm-assistant-tool-json">{readable(tool.result)}</pre></>}{tool.status==='success'&&tool.name==='check_managed_machine_ssh'&&result?.id&&<SSHCheckSummary result={tool.result as SSHCheckResult}/>} {tool.status==='success'&&tool.name==='propose_agent_install'&&result?.id&&result.machine_id&&<Button type="primary" onClick={()=>navigate(`/machines?machine=${encodeURIComponent(result.machine_id!)}&deployment=${encodeURIComponent(result.id!)}`)}>{t('审阅部署计划','Review deployment plan')}</Button>}{tool.status==='success'&&tool.name!=='propose_agent_install'&&typeof result?.review_url==='string'&&/^\/(?!\/)/.test(result.review_url)&&<Button type="primary" onClick={()=>navigate(result.review_url!)}>{t('审阅此计划','Review this plan')}</Button>}{tool.status === 'success' && result?.draft && <Button type="primary" onClick={() => onDraft(result.draft!, queryRangeFromTurn(turn, tool.callId))}>{t("审阅大盘草稿","Review dashboard draft")}</Button>}</div> }]} />;
   })}</div>;
+}
+
+function reviewRequired(value:unknown,depth=0):boolean{
+  if(!value||typeof value!=='object'||depth>3)return false;
+  if(Array.isArray(value))return value.some(item=>reviewRequired(item,depth+1));
+  const record=value as Record<string,unknown>;
+  return record.status==='awaiting_approval'||record.state==='awaiting_approval'||['proposal','plan','result'].some(key=>reviewRequired(record[key],depth+1));
+}
+
+function ToolActivity({turn,onDraft,canUseCodeTasks,canApproveAgentUpdate}:{turn:TurnView;onDraft:(draft:DashboardDraft,range?:TimeRange)=>void;canUseCodeTasks:boolean;canApproveAgentUpdate:boolean}){
+  const {t}=useI18n();
+  const [manual,setManual]=useState<boolean>();
+  if(!turn.tools.length)return null;
+  const attention=turn.tools.some(tool=>(tool.name==='draft_dashboard'&&!!(tool.result as {draft?:unknown}|undefined)?.draft)||reviewRequired(tool.result));
+  const failedStep=turn.tools.some(tool=>tool.status==='error');
+  const open=manual??(turn.status==='running'||turn.status==='failed'||attention);
+  const label=turn.status==='running'?t(`正在执行 ${turn.tools.length} 项操作`,`Working on ${turn.tools.length} steps`):attention?t(`${turn.tools.length} 项操作需要查看`,`${turn.tools.length} steps need review`):failedStep||turn.status==='failed'?t(`${turn.tools.length} 项操作 · 含失败`,`${turn.tools.length} steps · includes a failure`):t(`已完成 ${turn.tools.length} 项操作`,`Completed ${turn.tools.length} steps`);
+  return <div className="lm-assistant-activity"><button type="button" className="lm-assistant-activity-trigger" aria-expanded={open} onClick={()=>setManual(!open)}><span className={`lm-assistant-activity-indicator ${failedStep?'failed':turn.status}`} aria-hidden="true"/><span>{label}</span><span className="lm-assistant-activity-chevron" aria-hidden="true">⌄</span></button>{open&&<div className="lm-assistant-activity-content"><ToolProgress turn={turn} onDraft={onDraft} canUseCodeTasks={canUseCodeTasks} canApproveAgentUpdate={canApproveAgentUpdate}/></div>}</div>;
 }
 
 export function AssistantPanel({ compact = false, initialContext, initialPrompt, onDashboardDraft, onSQL }: AssistantPanelProps) {
@@ -209,9 +241,14 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [events, setEvents] = useState<AssistantEvent[]>([]);
   const [text, setText] = useState(initialPrompt ?? '');
+  const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [attachmentError, setAttachmentError] = useState('');
+  const [readingAttachment, setReadingAttachment] = useState(false);
   const [context, setContext] = useState<AssistantContext>(initialContext ?? {});
   const [lookback, setLookback] = useState(1);
-  const [busy, setBusy] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [runningIds, setRunningIds] = useState<string[]>([]);
+  const [queueVersion, setQueueVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
@@ -223,12 +260,20 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const {message}=App.useApp();
   const [preview, setPreview] = useState<Record<number, QueryResponse>>({});
   const [previewing, setPreviewing] = useState(false);
-  const controller = useRef<AbortController | null>(null);
+  const activeTurns = useRef(new Map<string,AbortController>());
+  const creatingRef = useRef(false);
+  const selectionVersion = useRef(0);
+  const selectedSession = useRef<string | null>(null);
+  const eventCache = useRef(new Map<string,AssistantEvent[]>());
+  const queuedTurns = useRef(new Map<string,QueuedTurn[]>());
+  const drafts = useRef(new Map<string,{text:string;attachments:Attachment[]}>());
+  const fileInput = useRef<HTMLInputElement>(null);
   const previewController = useRef<AbortController | null>(null);
-  const feed = useRef<HTMLDivElement>(null);
-  const follow = useRef(true);
   const turns = useMemo(() => assistantTimeline(events,language), [events,language]);
   const table = tables.find(item => item.name === context.table);
+  const busy = creating || (!!sessionId && runningIds.includes(sessionId));
+  const queue = sessionId ? queuedTurns.current.get(sessionId) ?? [] : [];
+  void queueVersion;
 
   async function refreshSessions() { const data = await api<{ items: AssistantSession[] }>('/assistant/sessions'); setSessions(data.items); }
   useEffect(() => {
@@ -237,50 +282,90 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
       if (!alive) return;
       setConfig(model); setSessions(history.items); setUser(actor); setTables(Array.isArray(catalog) ? catalog : []); setCodeWorkspace(initialContext?.code_workspace ?? model.code_workspace ?? '.');
     }).catch(problem => { if (alive) setError(errorText(problem,t)); }).finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; controller.current?.abort(); previewController.current?.abort(); };
+    const timer = window.setInterval(() => { if (alive) void refreshSessions().catch(() => {}); }, 3000);
+    return () => { alive = false; window.clearInterval(timer); for (const controller of activeTurns.current.values()) controller.abort(); previewController.current?.abort(); };
   }, []);
   useEffect(()=>{if(error)void message.error(error);},[error,message]);
   useEffect(() => { if (initialPrompt !== undefined) setText(initialPrompt); }, [initialPrompt]);
   useEffect(() => { if (initialContext) { setContext(initialContext); if (initialContext.code_workspace !== undefined) setCodeWorkspace(initialContext.code_workspace); } }, [initialContext]);
-  useEffect(() => { if (follow.current && feed.current) feed.current.scrollTop = feed.current.scrollHeight; }, [events]);
 
   async function loadSession(id: string) {
+    const version=++selectionVersion.current;
+    drafts.current.set(selectedSession.current ?? 'new', {text,attachments});
     setError(''); setLoading(true);
-    try { const session = await api<AssistantSession>(`/assistant/sessions/${encodeURIComponent(id)}`); setSessionId(id); setEvents(session.events ?? []); follow.current = true; setHistoryOpen(false); }
-    catch (problem) { setError(errorText(problem,t)); } finally { setLoading(false); }
+    try { const session = await api<AssistantSession>(`/assistant/sessions/${encodeURIComponent(id)}`); if(version!==selectionVersion.current)return; selectedSession.current=id; setSessionId(id); const merged=mergeEvents(session.events ?? [],eventCache.current.get(id)??[]); eventCache.current.set(id,merged); setEvents(merged); const draft=drafts.current.get(id); setText(draft?.text??'');setAttachments(draft?.attachments??[]);setHistoryOpen(false); }
+    catch (problem) { if(version===selectionVersion.current)setError(errorText(problem,t)); } finally { if(version===selectionVersion.current)setLoading(false); }
   }
 
-  async function send(value = text) {
-    if (busy || !value.trim() || !config?.enabled) return;
-    setBusy(true); setError('');  follow.current = true;
-    const abort = new AbortController(); controller.current = abort;
-    let id = sessionId, accepted = false;
+  function updateQueue(id:string, items:QueuedTurn[]) { queuedTurns.current.set(id,items); setQueueVersion(value=>value+1); }
+  function takeNext(id:string) { const items=queuedTurns.current.get(id)??[]; const [next,...remaining]=items; if(next)updateQueue(id,remaining); return next; }
+  async function runTurn(id:string, item:QueuedTurn) {
+    if (activeTurns.current.has(id)) return;
+    const abort = new AbortController(); activeTurns.current.set(id,abort); setRunningIds(previous=>[...new Set([...previous,id])]);
+    let accepted=false, settled=false;
     try {
-      if (!id) {
-        const session = await api<AssistantSession>('/assistant/sessions', { method: 'POST', body: JSON.stringify({ title: value.trim().slice(0, 60) }), signal: abort.signal });
-        id = session.id; setSessionId(id); setEvents([]);
-      }
-      const frozenContext = boundedMonitoringContext({ ...context, range: context.range ?? rangeFor(context.query?.lookback_hours ?? lookback) });
-      delete frozenContext.code_workspace;
-      if (user?.role === 'admin' && config.code_tasks_enabled) frozenContext.code_workspace = codeWorkspace.trim() || '.';
-      await streamTurn(id, value.trim(), frozenContext, event => {
-        if (event.type === 'user.message') { accepted = true; setText(''); }
-        setEvents(previous => previous.some(item => item.sequence === event.sequence) ? previous : [...previous, event]);
-      }, abort.signal,language);
+      await streamTurn(id,item.text,item.context,event=>{
+        if(event.type==='user.message')accepted=true;
+        const merged=mergeEvents(eventCache.current.get(id)??[],[event]); eventCache.current.set(id,merged);
+        if(selectedSession.current===id)setEvents(merged);
+      },abort.signal,language,item.attachments);
+      settled=true;
     } catch (problem) {
       if (!abort.signal.aborted) setError(errorText(problem,t));
-      if (!accepted) setText(value);
+      if (!accepted && !abort.signal.aborted) updateQueue(id,[item,...(queuedTurns.current.get(id)??[])]);
     } finally {
-      controller.current = null; setBusy(false);
-      if (id) { try { const session = await api<AssistantSession>(`/assistant/sessions/${encodeURIComponent(id)}`); setEvents(session.events ?? []); } catch { /* Keep already received progress if reconnection fails. */ } }
+      try { const session = await api<AssistantSession>(`/assistant/sessions/${encodeURIComponent(id)}`); const merged=mergeEvents(session.events??[],eventCache.current.get(id)??[]); eventCache.current.set(id,merged); if(selectedSession.current===id)setEvents(merged); } catch { /* Keep received progress. */ }
       void refreshSessions().catch(problem => setError(errorText(problem,t)));
+      const next=settled?takeNext(id):undefined;
+      activeTurns.current.delete(id);
+      if(next)void runTurn(id,next);
+      else setRunningIds(previous=>previous.filter(value=>value!==id));
     }
   }
 
-  async function cancel() {
-    if (!sessionId) { controller.current?.abort(); return; }
-    try { await api(`/assistant/sessions/${encodeURIComponent(sessionId)}/cancel`, { method: 'POST', body: '{}' }); }
-    catch (problem) { setError(errorText(problem,t)); controller.current?.abort(); }
+  async function send(value = text) {
+    const prompt=value.trim()||(attachments.length?t('请分析这些附件','Analyze these attachments'):'');
+    if (!prompt || !config?.enabled || readingAttachment || creatingRef.current) return;
+    const frozenContext = boundedMonitoringContext({ ...context, range: context.range ?? rangeFor(context.query?.lookback_hours ?? lookback) });
+    delete frozenContext.code_workspace;
+    if (user?.role === 'admin' && config.code_tasks_enabled) frozenContext.code_workspace = codeWorkspace.trim() || '.';
+    const item:QueuedTurn={id:crypto.randomUUID(),text:prompt,attachments:[...attachments],context:frozenContext};
+    let id=sessionId;
+    if(!id){
+      creatingRef.current=true;
+      ++selectionVersion.current;
+      setCreating(true);
+      try { const session=await api<AssistantSession>('/assistant/sessions',{method:'POST',body:JSON.stringify({title:item.text.slice(0,60)})}); id=session.id; selectedSession.current=id;setSessionId(id);setSessions(previous=>[session,...previous]);setEvents([]);eventCache.current.set(id,[]); }
+      catch(problem){setError(errorText(problem,t));return;}
+      finally{creatingRef.current=false;setCreating(false);}
+    }
+    setText('');setAttachments([]);setAttachmentError('');drafts.current.set(id,{text:'',attachments:[]});setError('');
+    if(activeTurns.current.has(id)){updateQueue(id,[...(queuedTurns.current.get(id)??[]),item]);return;}
+    void runTurn(id,item);
+  }
+
+  async function cancel(id=sessionId):Promise<boolean> {
+    if (!id) return false;
+    try { await api(`/assistant/sessions/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}' }); return true; }
+    catch (problem) { setError(errorText(problem,t)); return false; }
+  }
+
+  async function prioritize(itemId:string){
+    if(!sessionId)return;
+    const items=queuedTurns.current.get(sessionId)??[],index=items.findIndex(item=>item.id===itemId);
+    if(index<0)return;
+    updateQueue(sessionId,[items[index],...items.filter(item=>item.id!==itemId)]);
+    if(activeTurns.current.has(sessionId))await cancel(sessionId);
+    else {const next=takeNext(sessionId);if(next)void runTurn(sessionId,next);}
+  }
+  function removeQueued(itemId:string){if(sessionId)updateQueue(sessionId,(queuedTurns.current.get(sessionId)??[]).filter(item=>item.id!==itemId));}
+  async function addFiles(files:FileList | null){
+    if(!files?.length)return;
+    const version=selectionVersion.current;
+    setReadingAttachment(true);setAttachmentError('');
+    try { const added:Attachment[]=[];for(const file of Array.from(files)){if(attachments.length+added.length>=4)throw Error(t('最多添加 4 个附件','Add up to 4 attachments'));added.push(await readAttachment(file));}if([...attachments,...added].reduce((total,item)=>total+(item.kind==='image'?(item.data?.length??0)*.75:0),0)>(1<<20))throw Error(t('图片总大小不能超过 1 MiB','Images cannot exceed 1 MiB in total'));if(version===selectionVersion.current)setAttachments(previous=>[...previous,...added]); }
+    catch(problem){if(version===selectionVersion.current)setAttachmentError(errorText(problem,t));}
+    finally{setReadingAttachment(false);if(fileInput.current)fileInput.current.value='';}
   }
 
   function openSettings() { navigate('/admin?tab=models'); }
@@ -301,19 +386,48 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
       setDraft(null); void message.success(t(`已保存大盘“${draft.title}”`,`Dashboard “${draft.title}” saved`));
     } catch (problem) { setDraftError(errorText(problem,t)); } finally { setDraftSaving(false); }
   }
-  function newConversation() { setSessionId(null); setEvents([]); setText(''); setError(''); setHistoryOpen(false); }
-  function historyContent() { return <><Button block icon={<PlusOutlined />} disabled={busy} onClick={newConversation}>{t("新对话","New conversation")}</Button><Input allowClear size="small" placeholder={t("搜索对话","Search conversations")} value={search} onChange={event => setSearch(event.target.value)} className="lm-assistant-history-search" />{sessions.filter(session => session.title.toLowerCase().includes(search.toLowerCase())).map(session => <button className={`lm-assistant-session ${sessionId === session.id ? 'active' : ''}`} key={session.id} disabled={busy} onClick={() => void loadSession(session.id)}><MessageOutlined /><span>{session.title}</span></button>)}{!sessions.length && <div className="lm-assistant-history-empty">{t("对话会保存在这里","Conversations are saved here")}</div>}</>; }
+  function newConversation() { ++selectionVersion.current;setLoading(false);drafts.current.set(selectedSession.current??'new',{text,attachments});selectedSession.current=null;setSessionId(null);setEvents([]);const draft=drafts.current.get('new');setText(draft?.text??'');setAttachments(draft?.attachments??[]);setError('');setHistoryOpen(false); }
+  function historyContent() { return <><Button block icon={<PlusOutlined />} disabled={creating} onClick={newConversation}>{t("新对话","New conversation")}</Button><Input allowClear size="small" placeholder={t("搜索对话","Search conversations")} value={search} onChange={event => setSearch(event.target.value)} className="lm-assistant-history-search" />{sessions.filter(session => session.title.toLowerCase().includes(search.toLowerCase())).map(session => { const status=runningIds.includes(session.id)?'running':session.status;return <button className={`lm-assistant-session ${sessionId === session.id ? 'active' : ''}`} key={session.id} disabled={creating} onClick={() => void loadSession(session.id)}><MessageOutlined aria-hidden="true"/><span className="lm-assistant-session-name">{session.title}</span>{status&&status!=='idle'&&<span className={`lm-assistant-session-status ${status}`} aria-label={status==='running'?t('响应中','Responding'):status==='failed'?t('失败','Failed'):t('待确认','Needs review')}>{status==='running'?<LoadingOutlined spin/>:status==='failed'?t('失败','Failed'):t('待确认','Review')}</span>}</button>})}{!sessions.length && <div className="lm-assistant-history-empty">{t("对话会保存在这里","Conversations are saved here")}</div>}</>; }
+
+  const scopeControls=<div className="lm-assistant-scope"><div className="lm-assistant-scope-heading"><strong>{t('分析范围与设置','Analysis scope and settings')}</strong>{config?.enabled&&<span>{config.model}</span>}</div><label>{t('数据表','Data table')}<Select showSearch allowClear placeholder={t('全部数据表','All data tables')} value={context.table} onChange={value => setContext(previous => ({ ...previous, table: value, service: undefined }))} options={tables.map(item => ({ value: item.name, label: item.name }))} /></label><label>{t('服务','Service')}<Select showSearch allowClear placeholder={t('全部服务','All services')} value={context.service} onChange={value => setContext(previous => ({ ...previous, service: value }))} options={(table?.services ?? [...new Set(tables.flatMap(item => item.services))]).map(service => ({ value: service, label: service }))} /></label>{context.range ? <div className="lm-assistant-scope-fixed">{t('当前页面时间范围','Current page time range')}</div> : <label>{t('时间范围','Time range')}<Select value={lookback} options={[{ value: .25, label: t('最近 15 分钟','Last 15 minutes') }, { value: 1, label: t('最近 1 小时','Last hour') }, { value: 6, label: t('最近 6 小时','Last 6 hours') }, { value: 24, label: t('最近 24 小时','Last 24 hours') }]} onChange={setLookback} /></label>}{user?.role === 'admin' && config?.code_tasks_enabled && <label>{t('代码工作区','Code workspace')}<Input aria-label={t('代码工作区','Code workspace')} value={codeWorkspace} onChange={event => setCodeWorkspace(event.target.value)} placeholder="." maxLength={512} /><small>{t('代码任务在隔离副本中运行，审批后应用修改。','Code tasks run in an isolated copy and apply changes after approval.')}</small></label>}{user?.role === 'admin' && <Button type="text" icon={<SettingOutlined/>} onClick={openSettings}>{t('模型连接设置','Model connection settings')}</Button>}</div>;
 
   return <div className={`lm-assistant ${compact ? 'is-compact' : ''}`}>
     {!compact && <aside className="lm-assistant-sidebar"><div className="lm-assistant-sidebar-title"><HistoryOutlined /><span>{t("对话历史","Conversation history")}</span></div>{historyContent()}</aside>}
-    <main className="lm-assistant-main"><header className="lm-assistant-header"><div><h2>{t("AI 助手","AI assistant")}</h2><p>{t("用自然语言查询、分析与创建大盘","Query, analyze and create dashboards in natural language")}</p></div><Space><Tooltip title={t("对话历史","Conversation history")}><Button className={compact ? undefined : 'lm-assistant-mobile-history'} icon={<HistoryOutlined />} onClick={() => setHistoryOpen(true)} aria-label={t("对话历史","Conversation history")} /></Tooltip>{config?.enabled && <Tag bordered={false} color="processing">{config.model}</Tag>}{user?.role === 'admin' && <Tooltip title={t("模型连接设置","Model connection settings")}><Button icon={<SettingOutlined />} onClick={openSettings} aria-label={t("模型连接设置","Model connection settings")} /></Tooltip>}</Space></header>
+    <main className="lm-assistant-main">
       {context.page&&<div className="lm-assistant-page-context"><span>{t("当前页面","Current page")}</span><strong>{context.dashboard_title??pageTitles[context.page.title]??context.page.title}</strong>{context.panels&&<Tag>{context.panels.length} {t("个面板"," panels")}</Tag>}{context.log_query?.keyword&&<Tag>{t("关键词：","Keyword: ")}{context.log_query.keyword}</Tag>}{!!context.selected_logs?.length&&<Tag>{t("已选日志","Selected log")}</Tag>}{context.query&&<Tag>{t("当前 SQL","Current SQL")}</Tag>}{context.context_truncated&&<Tag>{t("上下文已精简","Context trimmed")}</Tag>}</div>}
-      <div className="lm-assistant-context"><Select showSearch allowClear placeholder={t("全部数据表","All data tables")} value={context.table} onChange={value => setContext(previous => ({ ...previous, table: value, service: undefined }))} options={tables.map(item => ({ value: item.name, label: item.name }))} style={{ minWidth: 190 }} disabled={busy} /><Select showSearch allowClear placeholder={t("全部服务","All services")} value={context.service} onChange={value => setContext(previous => ({ ...previous, service: value }))} options={(table?.services ?? [...new Set(tables.flatMap(item => item.services))]).map(service => ({ value: service, label: service }))} style={{ minWidth: 150 }} disabled={busy} />{context.range ? <Tag>{t("当前页面时间范围","Current page time range")}</Tag> : <Select value={lookback} options={[{ value: .25, label: t("最近 15 分钟","Last 15 minutes") }, { value: 1, label: t("最近 1 小时","Last hour") }, { value: 6, label: t("最近 6 小时","Last 6 hours") }, { value: 24, label: t("最近 24 小时","Last 24 hours") }]} onChange={setLookback} disabled={busy} />}</div>
-
-      {user?.role === 'admin' && config?.code_tasks_enabled && <div className="lm-assistant-code-workspace"><label htmlFor="lm-assistant-code-workspace">{t("代码工作区","Code workspace")}</label><Input id="lm-assistant-code-workspace" aria-label={t("代码工作区","Code workspace")} value={codeWorkspace} onChange={event => setCodeWorkspace(event.target.value)} placeholder="." maxLength={512} disabled={busy} /><small>{t("相对于已配置的工作区根目录；代码任务在隔离副本中运行，审批后应用修改。","Relative to the configured workspace root. Code tasks run in an isolated copy and apply changes after approval.")}</small></div>}
       {!loading && !config?.enabled && <Alert type="info" showIcon title={t("连接 AI 模型后开始使用","Connect an AI model to get started")} description={user?.role === 'admin' ? t("填写模型服务地址和 API Key，自动获取模型并选择调用协议。密钥由后端保管。","Enter a model service URL and API key, fetch available models and choose the API protocol. Keys are stored by the backend.") : t("请联系管理员配置并启用 AI 模型。","Ask an administrator to configure and enable an AI model.")} action={user?.role === 'admin' ? <Button onClick={openSettings}>{t("配置模型","Configure model")}</Button> : undefined} />}
-      <div className="lm-assistant-feed" ref={feed} onScroll={() => { const element = feed.current; if (element) follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 100; }} aria-live="polite">{loading ? <div className="lm-assistant-loading"><Spin /></div> : !turns.length ? <div className="lm-assistant-welcome"><div className="lm-assistant-orb"><ThunderboltOutlined /></div><h3>{t("从一个问题开始","Start with a question")}</h3><p>{t("我会先读取数据结构，再帮助你查询与分析。","I will inspect the data schema before helping you query and analyze it.")}</p><div className="lm-assistant-ideas">{ideas.map(idea => <button key={idea.title} onClick={() => setText(idea.text)}><strong>{idea.title}<span>↗</span></strong><small>{idea.detail}</small></button>)}</div></div> : turns.map(turn => <section key={turn.id} className="lm-assistant-turn"><div className="lm-assistant-user"><span className="lm-assistant-role">{t("你","You")}</span><div>{turn.text}</div></div><div className="lm-assistant-reply"><span className="lm-assistant-role assistant">AI</span><div className="lm-assistant-reply-body">{turn.compacting && turn.status === 'running' && <div className="lm-assistant-run-meta" role="status">{t("正在整理较早的对话…","Summarizing earlier conversation…")}</div>}{turn.compacted && <div className="lm-assistant-run-meta">{turn.degraded ? t("历史整理已降级，原始记录仍保留","History summary degraded; original records are retained") : t("较早的对话已整理，原始记录仍保留","Earlier conversation summarized; original records are retained")}</div>}<ToolProgress turn={turn} onDraft={openDraft} canUseCodeTasks={user?.role === 'admin'} canApproveAgentUpdate={user?.role === 'admin'} />{turn.answer && <Answer text={turn.answer} streaming={turn.status === 'running' && busy} onSQL={onSQL} />}{turn.status === 'running' && busy && <div className="lm-assistant-thinking"><span /><span /><span />{t("正在分析","Analyzing")}</div>}{(turn.usage || turn.compactionUsage) && <div className="lm-assistant-run-meta">{turn.usage && <span>{t("模型报告用量：","Reported model usage: ")}{formatUsage(turn.usage,t)}</span>}{turn.compactionUsage && <span>{turn.usage ? ' · ' : ''}{t("历史整理：","History summary: ")}{formatUsage(turn.compactionUsage,t)}</span>}</div>}{turn.error && <Alert type={turn.status === 'cancelled' ? 'info' : 'error'} title={turn.error} showIcon />}</div></div></section>)}</div>
-      <div className="lm-assistant-composer"><Input.TextArea aria-label={t("给 AI 助手的问题","Question for the AI assistant")} placeholder={t("询问日志中的异常，或描述你想创建的大盘…","Ask about log anomalies, or describe a dashboard to create…")} value={text} onChange={event => setText(event.target.value)} autoSize={{ minRows: 2, maxRows: 7 }} maxLength={16000} disabled={busy} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} /><div className="lm-assistant-composer-actions"><small>{t("Enter 发送 · Shift + Enter 换行","Enter to send · Shift + Enter for a new line")}</small>{busy ? <Button danger icon={<StopOutlined />} onClick={() => void cancel()}>{t("停止","Stop")}</Button> : <Button type="primary" aria-label={t("发送","Send")} icon={<ArrowUpOutlined />} disabled={!text.trim() || !config?.enabled || loading} onClick={() => void send()}>{t("发送","Send")}</Button>}</div></div>
+      <MessageScroller.Provider key={sessionId??'new'} autoScroll defaultScrollPosition="end" scrollPreviousItemPeek={56}>
+        <MessageScroller.Root className="lm-assistant-scroll-root">
+          <MessageScroller.Viewport className="lm-assistant-feed" aria-label={t('对话消息','Conversation messages')}>
+            <MessageScroller.Content className="lm-assistant-thread" aria-busy={busy}>
+          {loading ? <div className="lm-assistant-loading"><Spin /></div> : !turns.length ? <div className="lm-assistant-welcome"><div className="lm-assistant-orb"><ThunderboltOutlined /></div><h3>{t("从一个问题开始","Start with a question")}</h3><p>{t("我会先读取数据结构，再帮助你查询与分析。","I will inspect the data schema before helping you query and analyze it.")}</p><div className="lm-assistant-ideas">{ideas.map(idea => <button key={idea.title} onClick={() => setText(idea.text)}><strong>{idea.title}<span aria-hidden="true">↗</span></strong><small>{idea.detail}</small></button>)}</div></div> : turns.map(turn =>
+            <MessageScroller.Item key={turn.id} messageId={turn.id} scrollAnchor><section className="lm-assistant-turn">
+              <div className="lm-assistant-user"><div className="lm-assistant-user-content"><p>{turn.text}</p>{turn.attachments.length>0&&<div className="lm-assistant-sent-attachments">{turn.attachments.map((attachment,index)=><span className="lm-assistant-attachment" key={`${index}-${attachment.name}`}>{attachment.kind==='pdf'?<FilePdfOutlined aria-hidden="true"/>:<PictureOutlined aria-hidden="true"/>}<span>{attachment.name}</span>{attachment.pages&&<small>{attachment.pages} {t('页','pages')}</small>}</span>)}</div>}</div></div>
+              <div className="lm-assistant-reply"><span className="lm-assistant-role assistant" aria-hidden="true"><ThunderboltOutlined/></span><div className="lm-assistant-reply-body">
+                {turn.compacting && turn.status === 'running' && <div className="lm-assistant-run-meta" role="status">{t("正在整理较早的对话…","Summarizing earlier conversation…")}</div>}
+                {turn.compacted && <div className="lm-assistant-run-meta">{turn.degraded ? t("历史整理已降级，原始记录仍保留","History summary degraded; original records are retained") : t("较早的对话已整理，原始记录仍保留","Earlier conversation summarized; original records are retained")}</div>}
+                <ToolActivity turn={turn} onDraft={openDraft} canUseCodeTasks={user?.role === 'admin'} canApproveAgentUpdate={user?.role === 'admin'} />
+                {turn.answer && <Answer text={turn.answer} streaming={turn.status === 'running' && busy} onSQL={onSQL} />}
+                {turn.status === 'running' && busy && <div className="lm-assistant-thinking" role="status"><span /><span /><span />{t("正在分析","Analyzing")}</div>}
+                {(turn.usage || turn.compactionUsage) && <div className="lm-assistant-run-meta">{turn.usage && <span>{t("模型报告用量：","Reported model usage: ")}{formatUsage(turn.usage,t)}</span>}{turn.compactionUsage && <span>{turn.usage ? ' · ' : ''}{t("历史整理：","History summary: ")}{formatUsage(turn.compactionUsage,t)}</span>}</div>}
+                {turn.error && <Alert type={turn.status === 'cancelled' ? 'info' : 'error'} title={turn.error} showIcon />}
+              </div></div>
+            </section></MessageScroller.Item>)}
+            </MessageScroller.Content>
+          </MessageScroller.Viewport>
+          <MessageScroller.Button className="lm-assistant-jump-latest" aria-label={t('跳转到最新消息','Jump to latest message')}>{t('最新消息','Latest')}</MessageScroller.Button>
+        </MessageScroller.Root>
+      </MessageScroller.Provider>
+      <div className="lm-assistant-composer-wrap">
+        {queue.length>0&&<div className="lm-assistant-queue" aria-label={t('待发送消息','Queued messages')}><div className="lm-assistant-queue-heading">{t(`待发送 · ${queue.length}`,`Queued · ${queue.length}`)}</div>{queue.map(item=><div className="lm-assistant-queue-item" key={item.id}><span>{item.text}{item.attachments.length>0&&<small> · {item.attachments.length} {t('个附件','attachments')}</small>}</span><Button size="small" onClick={()=>void prioritize(item.id)}>{t('立即发送','Send now')}</Button><Button size="small" type="text" icon={<CloseOutlined/>} aria-label={t('移除待发消息','Remove queued message')} onClick={()=>removeQueued(item.id)}/></div>)}</div>}
+        <div className="lm-assistant-composer">
+          <input ref={fileInput} type="file" className="lm-assistant-file-input" accept="image/jpeg,image/png,image/webp,application/pdf,.pdf" multiple aria-label={t('选择图片或 PDF','Choose images or PDFs')} onChange={event=>void addFiles(event.target.files)}/>
+          {attachments.length>0&&<div className="lm-assistant-attachments">{attachments.map((attachment,index)=><span className="lm-assistant-attachment" key={`${index}-${attachment.name}`}>{attachment.kind==='pdf'?<FilePdfOutlined aria-hidden="true"/>:<PictureOutlined aria-hidden="true"/>}<span>{attachment.name}</span><button type="button" aria-label={t(`移除 ${attachment.name}`,`Remove ${attachment.name}`)} onClick={()=>setAttachments(previous=>previous.filter((_,i)=>i!==index))}><CloseOutlined/></button></span>)}</div>}
+          <Input.TextArea aria-label={t("给 AI 助手的问题","Question for the AI assistant")} placeholder={t("询问日志中的异常，或描述你想创建的大盘…","Ask about log anomalies, or describe a dashboard to create…")} value={text} onChange={event => setText(event.target.value)} autoSize={{ minRows: 2, maxRows: 7 }} maxLength={16000} disabled={!config?.enabled || loading} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
+          {attachmentError&&<div className="lm-assistant-attachment-error" role="alert">{attachmentError}</div>}
+          <div className="lm-assistant-composer-actions"><div className="lm-assistant-composer-left"><Button type="text" icon={readingAttachment?<LoadingOutlined spin/>:<PaperClipOutlined/>} aria-label={t('添加图片或 PDF','Attach image or PDF')} disabled={!config?.enabled||readingAttachment||attachments.length>=4} onClick={()=>fileInput.current?.click()}/><Popover content={scopeControls} trigger="click" placement="top"><Button type="text" icon={<SlidersOutlined/>} aria-label={t('分析范围与设置','Analysis scope and settings')}/></Popover><Button type="text" className={compact?undefined:'lm-assistant-mobile-history'} icon={<HistoryOutlined/>} aria-label={t('对话历史','Conversation history')} onClick={()=>setHistoryOpen(true)}/><small>{t("图片与文本 PDF · Enter 发送 · Shift + Enter 换行","Images and text PDFs · Enter to send · Shift + Enter for a new line")}</small></div><div className="lm-assistant-composer-send">{busy&&(text.trim()||attachments.length>0)&&<Button size="small" disabled={creating||readingAttachment} onClick={()=>void send()}>{t('加入队列','Queue')}</Button>}{sessionId&&runningIds.includes(sessionId)?<button type="button" className="lm-assistant-send-button" aria-label={t('停止当前响应','Stop current response')} onClick={()=>void cancel()}><span className="lm-assistant-stop-square"/></button>:<button type="button" className="lm-assistant-send-button" aria-label={t('发送','Send')} disabled={(!text.trim()&&!attachments.length)||!config?.enabled||loading||creating||readingAttachment} onClick={()=>void send()}><ArrowUpOutlined/></button>}</div></div>
+        </div>
+      </div>
     </main>
     <Drawer title={t("对话历史","Conversation history")} open={historyOpen} onClose={() => setHistoryOpen(false)} size="default" destroyOnHidden>{historyContent()}</Drawer>
     <Modal open={!!draft} title={t("审阅大盘草稿","Review dashboard draft")} width={880} onCancel={() => { if (!draftSaving) { previewController.current?.abort(); setDraft(null); } }} footer={<Space><Button onClick={() => void previewDraft()} loading={previewing} disabled={draftSaving}>{t("运行查询预览","Run query preview")}</Button><Button onClick={() => { previewController.current?.abort(); setDraft(null); }} disabled={draftSaving}>{t("取消","Cancel")}</Button><Button type="primary" onClick={() => void saveDraft()} loading={draftSaving} disabled={previewing || !draft?.title.trim()}>{t("确认保存大盘","Save dashboard")}</Button></Space>} destroyOnHidden>{draft && <div className="lm-assistant-draft"><Alert type="info" title={t("检查查询和面板配置，确认后保存","Review queries and panel settings, then confirm to save")} showIcon />{draft.range && <p className="lm-assistant-draft-range">{t("分析时间（UTC）：","Analysis time (UTC): ")}{draft.range.from} → {draft.range.to}</p>}<label>{t("大盘名称","Dashboard name")}<Input value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>{draft.panels.map((panel, index) => <div className="lm-assistant-draft-panel" key={panel.id ?? index}><div className="lm-assistant-draft-panel-title"><Input value={panel.title} onChange={event => updatePanel(index, { title: event.target.value })} /><Select value={panel.type} options={['timeseries', 'bar', 'pie', 'stat', 'table', 'heatmap', 'gauge'].map(type => ({ value: type, label: type }))} onChange={type => updatePanel(index, { type })} /></div>{panel.queries.map((query, queryIndex) => <div className="lm-assistant-draft-query" key={query.refId}><span>{t("查询","Query")}{query.refId}</span><Input.TextArea value={query.sql} rows={4} onChange={event => updatePanel(index, { queries: panel.queries.map((item, itemIndex) => itemIndex === queryIndex ? { ...item, sql: event.target.value } : item) })} /></div>)}{preview[index]?.results.map(result => <div key={result.refId}><Space><Tag color={result.status === 'error' ? 'error' : 'success'}>{result.refId} · {result.status}</Tag><small>{result.elapsed_ms} ms</small>{result.truncated && <Tag color="warning">{t("结果已截断","Results truncated")}</Tag>}</Space>{result.error && <Alert type="error" title={result.error} />}{result.frames.map((frame, frameIndex) => <Table key={frameIndex} size="small" scroll={{ x: true }} pagination={{ pageSize: 5, size: 'small' }} columns={frame.columns.map((column, columnIndex) => ({ title: column.name, key: column.name, render: (_: unknown, row: unknown[]) => readable(row[columnIndex]) }))} dataSource={frame.rows} rowKey={(_, rowIndex) => String(rowIndex)} />)}</div>)}</div>)}{draftError && <Alert type="error" title={draftError} showIcon />}</div>}</Modal>

@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { attachmentMetadata, hydrateAttachments, parseAttachments } from "./attachments.js";
+import { sessionStatus } from "./session-status.js";
 import type {
   Context,
   Dependencies,
@@ -574,9 +576,27 @@ export function registerAssistant(
   deps.router.get(
     route + "/sessions",
     safe((ctx) => {
+      const currentReview = (event: Event): boolean | undefined => {
+        const value = event.data.value;
+        if (!value || typeof value !== "object") return;
+        try {
+          if (event.data.tool === "propose_alert_change" && alertProposals && typeof value.proposal?.id === "string") {
+            const proposal = alertProposals.get(ctx.user, value.proposal.id);
+            return proposal.status === "awaiting_approval" && Date.parse(proposal.expires_at) > deps.now().getTime();
+          }
+          if (event.data.tool === "code_task" && codeTasks && typeof value.id === "string")
+            return codeTasks.get(value.id, ctx.user)?.status === "awaiting_approval";
+          if (event.data.tool === "propose_agent_install" && options.machines && typeof value.id === "string")
+            return options.machines.assistantDeployment(value.id).status === "awaiting_approval";
+          if (event.data.tool === "propose_agent_update" && options.machines?.agentUpdates && typeof value.id === "string" && typeof value.machine_id === "string")
+            return options.machines.agentUpdates.assistantGet(value.machine_id, value.id).status === "awaiting_approval";
+          if (event.data.tool === "propose_service_deployment" && options.deployments && typeof value.id === "string")
+            return options.deployments.assistantDeployment(value.id).status === "awaiting_approval";
+        } catch { /* Keep the stored review marker if a domain record is temporarily unavailable. */ }
+      };
       const items = store
         .sessions(`session/${ctx.user.id}/`)
-        .map((s) => ({ ...s, messages: null, events: null }));
+        .map((s) => ({ ...s, status: sessionStatus(s, active.has(key(ctx.user.id, s.id)), currentReview), messages: null, events: null }));
       ctx.json({ items });
     }, "cannot list assistant sessions"),
   );
@@ -887,7 +907,7 @@ export function registerAssistant(
   deps.router.post(
     route + "/sessions/:id/turns",
     safe(async (ctx) => {
-      const input = await body(ctx, ["text", "context"], 48 << 10),
+      const input = await body(ctx, ["text", "context", "attachments"], 2 << 20),
         message = text(input.text).trim();
       if (
         !message ||
@@ -898,6 +918,7 @@ export function registerAssistant(
           400,
           "message is empty or exceeds the size limit",
         );
+      const attachments = parseAttachments(input.attachments);
       let value = session(ctx);
       const codeWorkspace = input.context?.code_workspace;
       if (
@@ -936,6 +957,9 @@ export function registerAssistant(
       active.set(sessionKey, { controller, done });
       try {
         value = session(ctx);
+        for (const attachment of attachments) {
+          store.put(`attachment/${ctx.user.id}/${value.id}/${attachment.ref.id}`, deps.encrypt(attachment.content));
+        }
         ctx.res.writeHead(200, {
           "Content-Type": "text/event-stream",
           "Cache-Control": "no-cache, no-transform",
@@ -998,10 +1022,10 @@ export function registerAssistant(
               `id: ${event.sequence}\nevent: session-event\ndata: ${JSON.stringify(event)}\n\n`,
             );
         };
-        value.messages.push({ role: "user", content: message });
+        value.messages.push({ role: "user", content: message, ...(attachments.length ? { attachments: attachments.map(item => item.ref) } : {}) });
         let error: unknown;
         try {
-          emit("user.message", { text: message });
+          emit("user.message", { text: message, ...(attachments.length ? { attachments: attachmentMetadata(attachments.map(item => item.ref)) } : {}) });
           emit("turn.started", {});
           const base = structuredClone(value.messages);
           if (alertProposals) {
@@ -1057,7 +1081,11 @@ export function registerAssistant(
             {
               system: (options.system ?? SYSTEM) + (alertProposals ? `\nCurrent server time (UTC): ${now()}. Use this time for relative silence durations; clarify the timezone for ambiguous local times.\nHost-verified alert proposal states for the current session (latest 20; facts only). These statuses take precedence over old conversation summaries or UI claims; a completed status means the change was applied at applied_at, not that the resource has remained unchanged. Use get_alert_proposal to verify older IDs and get_alert_rule/get_alert_silence for current configuration:\n${JSON.stringify(alertProposals.recent(ctx.user, value.id))}` : ""),
               config: cfg,
-              messages: base,
+              messages: hydrateAttachments(base, attachmentId => {
+                const saved = store.get<string>(`attachment/${ctx.user.id}/${value.id}/${attachmentId}`);
+                if (!saved) throw Error("assistant attachment is unavailable");
+                return deps.decrypt(saved);
+              }),
               summary: value.summary,
               summary_through: value.summary_through,
               context: input.context,

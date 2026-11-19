@@ -1057,3 +1057,36 @@ test("code-task receipts fit the Mastra channel and later turns reload the appro
   });
   assert.equal(JSON.parse(observed.content).status, "completed");
 });
+
+test("assistant turn stores encrypted attachments and publishes metadata-only sessions and SSE", async (t) => {
+  const inputs: any[] = [];
+  const f = await fixture(t, { runtime: async (input, _signal, _tool, emit) => {
+    inputs.push(input.messages.at(-1));
+    await emit({ type: "checkpoint", messages: [{ role: "assistant", content: "received" }] });
+    await emit({ type: "event", name: "assistant.message", data: { step: 1, text: "received" } });
+    if (input.messages.at(-1)?.content === "review") await emit({ type: "event", name: "tool.result", data: { call_id: "proposal", tool: "propose_alert_change", status: "success", value: { proposal: { status: "awaiting_approval" } } } });
+  } });
+  await configure(f);
+  const sid = await session(f);
+  const image = Buffer.from([0xff, 0xd8, 0xff, 0xd9]).toString("base64");
+  const response = await f.request(`/sessions/${sid}/turns`, "POST", { text: "see attachments", attachments: [
+    { kind: "image", name: "screen.jpg", mime_type: "image/jpeg", data: image },
+    { kind: "pdf", name: "report.pdf", mime_type: "application/pdf", pages: 1, text: "report-private-text" },
+  ] });
+  assert.equal(response.status, 200, response.raw);
+  assert.match(response.raw, /turn.completed/);
+  assert.match(response.raw, /screen.jpg/);
+  assert.ok(!response.raw.includes(image) && !response.raw.includes("report-private-text"));
+  assert.equal(inputs[0].attachments[0].data, image);
+  assert.equal(inputs[0].attachments[1].text, "report-private-text");
+  const publicValue = await f.request(`/sessions/${sid}`);
+  assert.equal(publicValue.data.messages[0].attachments[0].name, "screen.jpg");
+  assert.ok(!publicValue.raw.includes(image) && !publicValue.raw.includes("report-private-text"));
+  const rows = f.db.all<{value:Uint8Array}>("SELECT value FROM assistant_records WHERE id LIKE 'attachment/%'");
+  assert.equal(rows.length, 2);
+  assert.ok(rows.every(row => !Buffer.from(row.value).toString().includes("report-private-text")));
+  assert.equal((await f.request("/sessions")).data.items[0].status, "idle");
+  assert.equal((await f.request(`/sessions/${sid}/turns`, "POST", {text:"review"})).status, 200);
+  assert.equal((await f.request("/sessions")).data.items[0].status, "needs_action");
+  assert.equal((await f.request(`/sessions/${sid}/turns`, "POST", {text:"x",attachments:[{kind:"pdf",name:"scan.pdf",mime_type:"application/pdf",pages:1,text:" "}]})).status, 400);
+});

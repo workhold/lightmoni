@@ -1,12 +1,12 @@
 import type {Language} from '../../shared/i18n';
 import {translator} from '../alerts/translation.ts';
-import type { AssistantContext, AssistantEvent } from './types';
+import type { AssistantContext, AssistantEvent, Attachment } from './types';
 
-export async function streamTurn(sessionId: string, text: string, context: AssistantContext | undefined, onEvent: (event: AssistantEvent) => void, signal: AbortSignal, language:Language='zh-CN'): Promise<void> {
+export async function streamTurn(sessionId: string, text: string, context: AssistantContext | undefined, onEvent: (event: AssistantEvent) => void, signal: AbortSignal, language:Language='zh-CN', attachments: Attachment[]=[]): Promise<void> {
  const t=translator(language);
   const response = await fetch(`/api/v1/assistant/sessions/${encodeURIComponent(sessionId)}/turns`, {
     method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-    body: JSON.stringify({ text, context }), signal,
+    body: JSON.stringify({ text, context, ...(attachments.length ? {attachments} : {}) }), signal,
   });
   if (!response.ok) {
     const body = await response.json().catch(() => ({})) as { error?: string };

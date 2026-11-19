@@ -123,7 +123,7 @@ function group(page,title){return page.getByRole('navigation',{name:'主导航'}
 let currentPage;
 try{
  const {context,page,state}=await harness();currentPage=page;
- for(const path of ['/','/login','/not-a-real-page']){await page.goto(origin+path);await destination(page,'/assistant');await expect(page.locator('.lm-assistant-header').getByRole('heading',{name:'AI 助手',exact:true})).toBeVisible()}
+ for(const path of ['/','/login','/not-a-real-page']){await page.goto(origin+path);await destination(page,'/assistant');await expect(page.locator('.lm-assistant-composer')).toBeVisible()}
  mark('root, authenticated login and unknown paths default to AI assistant');
 
  await expect(group(page,'工作台')).toHaveAttribute('aria-expanded','true');await expect(group(page,'监控分析')).toHaveAttribute('aria-expanded','false');await expect(group(page,'运维工具')).toHaveAttribute('aria-expanded','false');

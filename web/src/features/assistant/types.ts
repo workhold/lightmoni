@@ -9,8 +9,9 @@ export interface ModelDiscoveryInput { base_url: string; api_key: string; use_sa
 export interface ModelDiscoveryResult { base_url: string; protocol: ModelProtocol; protocol_options: ModelProtocol[]; protocol_source: ModelProtocolSource; requires_confirmation: boolean; capabilities_verified: false; models: {id: string; label?: string}[]; truncated: boolean }
 export interface ModelConnectionTestResult { ok: true; base_url: string; protocol: ModelProtocol; model: string; latency_ms: number }
 export interface AssistantEvent { sequence: number; session_id: string; turn_id: string; type: string; timestamp: string; data: Record<string, unknown> }
-export interface AssistantMessage { role: 'user' | 'assistant' | 'tool'; content: string; tool_calls?: unknown[]; tool_call_id?: string }
-export interface AssistantSession { id: string; user_id: string; title: string; created_at: string; updated_at: string; messages: AssistantMessage[] | null; events: AssistantEvent[] | null }
+export interface Attachment { kind: 'image' | 'pdf'; name: string; mime_type: string; pages?: number; data?: string; text?: string }
+export interface AssistantMessage { role: 'user' | 'assistant' | 'tool'; content: string; attachments?: Attachment[]; tool_calls?: unknown[]; tool_call_id?: string }
+export interface AssistantSession { id: string; user_id: string; title: string; created_at: string; updated_at: string; status?: 'running' | 'needs_action' | 'failed' | 'idle'; messages: AssistantMessage[] | null; events: AssistantEvent[] | null }
 export interface AssistantContext { table?: string; service?: string; services?: string[]; filters?: unknown[]; range?: TimeRange; dashboard_id?: string; selected_logs?: unknown[]; code_workspace?: string;
   page?: {path: string; title: string}; dashboard_title?: string;
   panels?: {id: string; title: string; type: string; queries: SQLQuery[]}[];
@@ -53,4 +54,4 @@ export interface AlertChangeProposal {
   result?: unknown;
 }
 export interface ToolTrace { callId: string; name: string; input: unknown; result?: unknown; status: 'running' | 'success' | 'error' | 'cancelled' }
-export interface TurnView { id: string; text: string; answer: string; tools: ToolTrace[]; timestamp: string; status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string; compacting?: boolean; compacted?: boolean; degraded?: boolean; usage?: {input_tokens?: number; output_tokens?: number; total_tokens?: number}; compactionUsage?: {input_tokens?: number; output_tokens?: number; total_tokens?: number} }
+export interface TurnView { id: string; text: string; attachments: Attachment[]; answer: string; tools: ToolTrace[]; timestamp: string; status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string; compacting?: boolean; compacted?: boolean; degraded?: boolean; usage?: {input_tokens?: number; output_tokens?: number; total_tokens?: number}; compactionUsage?: {input_tokens?: number; output_tokens?: number; total_tokens?: number} }

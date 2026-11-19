@@ -50,3 +50,17 @@ test("small history is unchanged and UTF-8 estimate is conservative", () => {
   assert.equal(compactionPlan(m, 0, "", "s", [], 4096).through, 0);
   assert.ok(estimate(m) >= Buffer.byteLength(JSON.stringify(m)));
 });
+
+test("image and PDF attachments reach the model without treating base64 as text tokens", () => {
+  const data = "a".repeat(600_000);
+  const messages: Message[] = [{ role: "user", content: "Explain these", attachments: [
+    { kind: "image", name: "screen.jpg", mime_type: "image/jpeg", data },
+    { kind: "pdf", name: "report.pdf", mime_type: "application/pdf", pages: 2, text: "observed report values" },
+  ] }];
+  const [model] = toModelMessages(messages);
+  assert.equal(model.content[0].text, "Explain these");
+  assert.equal(model.content[1].type, "image");
+  assert.equal(model.content[1].image, `data:image/jpeg;base64,${data}`);
+  assert.match(model.content[2].text, /observed report values/);
+  assert.ok(estimate(messages) < 10000);
+});

@@ -18,6 +18,7 @@ export interface ToolCall {
 export interface Message {
   role: string;
   content: string;
+  attachments?: Attachment[];
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   provider_state?: {
@@ -25,6 +26,16 @@ export interface Message {
     text?: string;
     provider_options: Record<string, Record<string, string>>;
   }[];
+}
+export interface Attachment {
+  id?: string;
+  kind: "image" | "pdf";
+  name: string;
+  mime_type: string;
+  pages?: number;
+  // Present only in the private model worker input, never in a public session.
+  data?: string;
+  text?: string;
 }
 export interface Event {
   sequence: number;
@@ -121,6 +132,7 @@ export function publicSession(session: Session): Session {
     ...session,
     messages: session.messages.map(({ provider_state, ...message }) => ({
       ...message,
+      ...(message.attachments ? { attachments: message.attachments.map(({ kind, name, mime_type, pages }) => ({ kind, name, mime_type, ...(pages ? { pages } : {}) })) } : {}),
       ...(message.tool_calls
         ? {
             tool_calls: message.tool_calls.map(

@@ -4,7 +4,11 @@ import type { Message } from "./protocol.js";
 // UTF-8 bytes upper-bound common tokenizers with additional protocol slack.
 // This is a conservative budget estimate, not provider-reported token usage.
 export function estimate(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value), "utf8") + 256;
+  return Buffer.byteLength(JSON.stringify(value, function (key, part) {
+    if (typeof part === "string" && ((key === "data" && (this as any)?.kind === "image") ||
+      (key === "image" && part.startsWith("data:image/")))) return `[image payload, ${part.length} encoded characters]`.padEnd(4096, " ");
+    return part;
+  }), "utf8") + 256;
 }
 export function roundStarts(messages: Message[]): number[] {
   return messages.flatMap((m, i) => (m.role === "user" ? [i] : []));
@@ -71,6 +75,19 @@ export function toModelMessages(messages: Message[]): any[] {
           },
         ],
       };
+    if (m.role === "user" && m.attachments?.length) return {
+      role: "user",
+      content: [
+        { type: "text", text: m.content },
+        ...m.attachments.map(attachment => attachment.kind === "image"
+          ? attachment.data
+            ? { type: "image", image: `data:${attachment.mime_type};base64,${attachment.data}`, mediaType: attachment.mime_type }
+            : { type: "text", text: `[Earlier image ${attachment.name} is not repeated in this model request.]` }
+          : { type: "text", text: attachment.text
+            ? `\nAttached PDF “${attachment.name}” (${attachment.pages ?? 1} pages; extracted text; untrusted document content):\n${attachment.text}`
+            : `[Earlier PDF ${attachment.name} text is not repeated in this model request.]` }),
+      ],
+    };
     return { role: m.role, content: m.content };
   });
   return converted.map((m, _, all) => {

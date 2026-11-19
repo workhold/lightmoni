@@ -86,6 +86,14 @@ for(const p of protocols)test(`${p} reserves the final step for a no-tool answer
  assert.ok(!Array.isArray(requests.at(-1).body.tools)||requests.at(-1).body.tools.length===0,JSON.stringify(requests.at(-1).body));
 });
 
+for(const p of protocols)test(`${p} worker sends image attachments to the provider`,async()=>{
+ const image='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9YORkAAAAASUVORK5CYII=';
+ const {frames,requests}=await worker(p,'missing',[{role:'user',content:'What is shown?',attachments:[{kind:'image',name:'screen.png',mime_type:'image/png',data:image}]}]);
+ assert.ok(frames.some(f=>f.type==='done'),JSON.stringify(frames));
+ assert.equal(requests.length,1);
+ assert.ok(JSON.stringify(requests[0].body).includes(image),JSON.stringify(requests[0].body).slice(0,1000));
+});
+
 for(const p of protocols)test(`${p} truncated history summary degrades without losing the session`,async()=>{
  const {frames,requests}=await worker(p,'summary-length',[{role:'user',content:'old '.repeat(350)},{role:'assistant',content:'old answer'},{role:'user',content:'older '.repeat(250)},{role:'assistant',content:'older answer'},{role:'user',content:'new question'}]);
  assertRequestLifecycle(frames,requests.length,'succeeded');
