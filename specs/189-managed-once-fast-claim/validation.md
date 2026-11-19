@@ -19,3 +19,7 @@
 ## 架构影响
 
 SSH 单次受管进程不再同步承担应用观测；常驻 helper 保留观测职责。见 `docs/system-design.md` 第 123.3 节。
+
+## Pull Request
+
+- GitHub PR [#262](https://github.com/workhold/lightmoni/pull/262)，目标 `main`。截至本记录未合入、未部署。
