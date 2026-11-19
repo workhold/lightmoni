@@ -18,26 +18,26 @@ type Observation={agent_id:string;identity_state:'valid'|'missing'|'invalid'|'un
 export type AgentUninstallation={
  id:string;machine_id:string;agent_id:string;credential_id:string;
  status:'awaiting_approval'|'running'|'succeeded'|'failed'|'unknown'|'cancelled';execution_stage?:string;started_at?:string;resolved_at?:string;
- plan?:{machine:{id:string;name:string;address:string;port:number;agent_id:string};ssh_account:{id:string;username:string;revision:number};agent_id:string;credential:{id:string;method:string;retention:string;expires_at:string};check_id:string;expires_at:string;mode?:RemovalMode;reason?:string;purge?:boolean;observation?:Observation;credential_revocation_scope?:RevocationScope;steps:string[];retained_paths:string[];removed_paths:string[];warnings:string[]};
+ plan?:{machine:{id:string;name:string;address:string;port:number;agent_id:string};ssh_account:{id:string;username:string;revision:number};agent_id:string;credential:{id:string;method:string;retention:string;expires_at:string};check_id:string;expires_at:string;mode?:RemovalMode;reason?:string;purge?:boolean;force_unknown?:{reason:string;blockers:{kind:string;id:string;state:string}[]};observation?:Observation;credential_revocation_scope?:RevocationScope;steps:string[];retained_paths:string[];removed_paths:string[];warnings:string[]};
  receipt?:{agent_id?:string;mode?:RemovalMode;purge?:boolean;remote_removed?:boolean;data_retained?:boolean;data_removed?:boolean;credential_revocation_scope?:RevocationScope;credentials_revoked?:boolean;revoked_credentials?:number;verified_at?:string;stages?:string[];service_stopped?:boolean;remote_unchanged?:boolean};
  error?:string;created_at?:string;finished_at?:string;
 };
 type Credential={name?:string;is_default?:boolean;id:string;account_id:string;username:string;account_revision:number;method:string;retention?:string;expires_at:string;secret_fingerprint:string;revoked_at?:string;secret_cleared_at?:string};
-type Props={machine:{default_account_id?:string;accounts?:SSHAccount[];id:string;name:string;capabilities?:{uninstall_agent?:{available:boolean};recovery_uninstall_agent?:{available:boolean}}};credentials:Credential[];existing?:AgentUninstallation;initialMode?:RemovalMode;onClose:()=>void;onRefresh:()=>Promise<void>};
-type PlanRecovery={checkID:string;credentialID:string;mode:RemovalMode;purge:boolean;reason:string;priorIDs:Set<string>};
+type Props={machine:{default_account_id?:string;accounts?:SSHAccount[];id:string;name:string;capabilities?:{uninstall_agent?:{available:boolean;reason?:string};recovery_uninstall_agent?:{available:boolean;reason?:string}}};credentials:Credential[];existing?:AgentUninstallation;initialMode?:RemovalMode;initialForceUnknown?:boolean;onClose:()=>void;onRefresh:()=>Promise<void>};
+type PlanRecovery={checkID:string;credentialID:string;mode:RemovalMode;purge:boolean;reason:string;forceReason:string;priorIDs:Set<string>};
 
-export default function MachineAgentUninstallDialog({machine,credentials,existing,initialMode='standard',onClose,onRefresh}:Props){
+export default function MachineAgentUninstallDialog({machine,credentials,existing,initialMode='standard',initialForceUnknown=false,onClose,onRefresh}:Props){
  const {t,language}=useI18n();
  const [record,setRecord]=useState(existing),[check,setCheck]=useState<SSHCheckResult>(),[busy,setBusy]=useState(false),[error,setError]=useState(''),[now,setNow]=useState(Date.now()),[refreshNeeded,setRefreshNeeded]=useState(false),[planUncertain,setPlanUncertain]=useState(false),[applyAttempted,setApplyAttempted]=useState(false);
- const [mode,setMode]=useState<RemovalMode|'manual'>(initialMode),[reason,setReason]=useState(''),[purge,setPurge]=useState(false),[credential,setCredential]=useState<string|undefined>(()=>defaultMachineCredential(credentials,machine,reusableMachineCredential));
+ const [mode,setMode]=useState<RemovalMode|'manual'>(initialMode),[reason,setReason]=useState(''),[forceUnknown,setForceUnknown]=useState(initialForceUnknown),[forceReason,setForceReason]=useState(''),[purge,setPurge]=useState(false),[credential,setCredential]=useState<string|undefined>(()=>defaultMachineCredential(credentials,machine,reusableMachineCredential));
  const [pollError,setPollError]=useState('');
  const pending=useRef(false),mounted=useRef(true),recordRef=useRef(record),recovery=useRef<PlanRecovery|undefined>(undefined),readVersion=useRef(0);
  recordRef.current=record;
  const prefix=`/machines/${encodeURIComponent(machine.id)}/uninstallations`;
  const [accountEditor,setAccountEditor]=useState<'add'|'manage'>();
  const keys=credentials.filter(c=>reusableMachineCredential(c));
- const standardAllowed=machine.capabilities?.uninstall_agent?.available!==false;
- const recoveryAllowed=machine.capabilities?.recovery_uninstall_agent?.available===true;
+ const standardAllowed=machine.capabilities?.uninstall_agent?.available!==false||forceUnknown&&machine.capabilities?.uninstall_agent?.reason==='agent_task_busy';
+ const recoveryAllowed=machine.capabilities?.recovery_uninstall_agent?.available===true||forceUnknown&&machine.capabilities?.recovery_uninstall_agent?.reason==='agent_task_busy';
  const localizeMessage=(value:string)=>({
   '远端 Agent 不是本平台已登记的独立凭据节点，可审阅 SSH 恢复卸载':t('远端 Agent 不是本平台已登记的独立凭据节点，可审阅 SSH 恢复卸载','The remote Agent has no independent credential registration on this platform. Review an SSH recovery uninstall.'),
   '主机或实际 Agent 有未结束任务，请先完成或核对':t('主机或实际 Agent 有未结束任务，请先完成或核对','The host or observed Agent has unfinished tasks. Complete or verify them first.'),
@@ -117,6 +117,7 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
  useEffect(()=>{setNow(Date.now());const timer=setInterval(()=>setNow(Date.now()),1000);return()=>clearInterval(timer)},[record?.plan?.expires_at]);
  const expired=!Number.isFinite(Date.parse(record?.plan?.expires_at||''))||Date.parse(record?.plan?.expires_at||'')<=now;
  const reasonValid=!!reason.trim()&&new TextEncoder().encode(reason.trim()).length<=1000&&!/[\u0000-\u001f\u007f]/u.test(reason.trim());
+ const forceReasonValid=!!forceReason.trim()&&new TextEncoder().encode(forceReason.trim()).length<=512&&!/[\u0000-\u001f\u007f]/u.test(forceReason.trim());
  const readRecord=async()=>{const saved=recordRef.current;if(!saved)throw identityError();const version=readVersion.current;const next=validate(await api<AgentUninstallation>(`${prefix}/${encodeURIComponent(saved.id)}`),saved.id);if(mounted.current&&version===readVersion.current){save(next);setRefreshNeeded(false);return recordRef.current||next}return recordRef.current||saved};
  const recoverPlan=async()=>{
   const attempt=recovery.current;if(!attempt)throw identityError();
@@ -124,20 +125,20 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
   const matches=history.filter(saved=>saved.machine_id===machine.id&&!attempt.priorIDs.has(saved.id)&&saved.plan?.check_id===attempt.checkID&&saved.plan?.credential?.id===attempt.credentialID&&(saved.plan?.mode||'standard')===attempt.mode&&!!saved.plan?.purge===attempt.purge&&(saved.plan?.reason||'')===attempt.reason);
   if(matches.length!==1)throw Error(t('无法确认原卸载记录，请刷新并核对主机卸载历史；不要重复创建计划。','The original uninstall record could not be confirmed. Refresh and check host uninstall history; do not create another plan.'));
   const saved=validate(await api<AgentUninstallation>(`${prefix}/${encodeURIComponent(matches[0].id)}`),matches[0].id);
-  if(saved.plan?.check_id!==attempt.checkID||saved.plan?.credential.id!==attempt.credentialID||(saved.plan?.mode||'standard')!==attempt.mode||!!saved.plan?.purge!==attempt.purge||(saved.plan?.reason||'')!==attempt.reason)throw identityError();
+  if(saved.plan?.check_id!==attempt.checkID||saved.plan?.credential.id!==attempt.credentialID||(saved.plan?.mode||'standard')!==attempt.mode||!!saved.plan?.purge!==attempt.purge||(saved.plan?.reason||'')!==attempt.reason||(saved.plan?.force_unknown?.reason||'')!==attempt.forceReason)throw identityError();
   save(saved);setPlanUncertain(false);setRefreshNeeded(false);return saved;
  };
  const refresh=async()=>{if(!begin())return;try{if(recordRef.current)await readRecord();else await recoverPlan();await refreshParent()}catch(e){if(mounted.current){setError(errorText(e));setRefreshNeeded(true)}}finally{finish()}};
  const makePlan=async()=>{
-  if(mode==='manual'||!credential||!keys.some(key=>key.id===credential)||planUncertain||mode==='standard'&&!standardAllowed||mode==='recovery'&&(!recoveryAllowed||!reasonValid)||!begin())return;
+  if(mode==='manual'||!credential||!keys.some(key=>key.id===credential)||planUncertain||forceUnknown&&!forceReasonValid||mode==='standard'&&!standardAllowed||mode==='recovery'&&(!recoveryAllowed||!reasonValid)||!begin())return;
   let creating=false;
   try{
    const history=await api<AgentUninstallation[]>(prefix);if(!mounted.current)return;if(!Array.isArray(history)||history.some(item=>item.machine_id!==machine.id))throw identityError();
    const result=await api<SSHCheckResult>(`/machines/${encodeURIComponent(machine.id)}/ssh-check`,{method:'POST',body:JSON.stringify({credential_id:credential})});
    if(!mounted.current)return;if(!sshCheckMatchesCredential(result,machine.id,keys.find(c=>c.id===credential)))throw identityError();if(mounted.current)setCheck(result);if(!result.ready)return;
-   recovery.current={checkID:result.id,credentialID:credential,mode,purge,reason:mode==='recovery'?reason.trim():'',priorIDs:new Set(history.map(item=>item.id))};creating=true;
-   const next=validate(await api<AgentUninstallation>(`${prefix}/plan`,{method:'POST',body:JSON.stringify({check_id:result.id,credential_id:credential,mode,purge,...(mode==='recovery'?{reason:reason.trim()}:{})})}));
-   if(next.plan?.check_id!==result.id||next.plan?.credential.id!==credential||(next.plan?.mode||'standard')!==mode||!!next.plan?.purge!==purge||(next.plan?.reason||'')!==(mode==='recovery'?reason.trim():''))throw identityError();save(next);
+   recovery.current={checkID:result.id,credentialID:credential,mode,purge,reason:mode==='recovery'?reason.trim():'',forceReason:forceUnknown?forceReason.trim():'',priorIDs:new Set(history.map(item=>item.id))};creating=true;
+   const next=validate(await api<AgentUninstallation>(`${prefix}/plan`,{method:'POST',body:JSON.stringify({check_id:result.id,credential_id:credential,mode,purge,...(mode==='recovery'?{reason:reason.trim()}:{}),...(forceUnknown?{force_unknown:true,force_reason:forceReason.trim()}:{})})}));
+   if(next.plan?.check_id!==result.id||next.plan?.credential.id!==credential||(next.plan?.mode||'standard')!==mode||!!next.plan?.purge!==purge||(next.plan?.reason||'')!==(mode==='recovery'?reason.trim():'')||(next.plan?.force_unknown?.reason||'')!==(forceUnknown?forceReason.trim():''))throw identityError();save(next);
   }catch(e){if(mounted.current){setError(errorText(e));if(creating&&!(e instanceof ApiError&&e.status<500)){setPlanUncertain(true);setRefreshNeeded(true);try{await recoverPlan();if(mounted.current)setError('')}catch(recoveryError){if(mounted.current)setError(errorText(recoveryError))}}}}finally{await refreshParent();finish()}
  };
  const action=async(operation:'apply'|'cancel'|'reconcile')=>{
@@ -184,6 +185,7 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
    {key:'credential',label:t('SSH 凭据 ID','SSH credential ID'),children:plan.credential.id},
    {key:'expiry',label:t('计划有效期','Plan expires at'),children:time(plan.expires_at)},
   ]}/>
+  {plan.force_unknown&&<Alert type="warning" showIcon title={t('强制卸载：忽略已核对的历史未知任务','Forced uninstall: ignore reviewed historical unknown tasks')} description={<><p>{plan.force_unknown.reason}</p><ul>{plan.force_unknown.blockers.map(item=><li key={`${item.kind}:${item.id}`}>{item.kind} · {item.id}</li>)}</ul></>}/>}
   {observation&&<><h3>{t('实际远端快照（执行前会再次核验）','Actual remote snapshot (rechecked before execution)')}</h3><Descriptions size="small" layout="vertical" column={{xs:1,sm:2}} items={[
    {key:'identity-state',label:t('身份文件','Identity file'),children:({valid:t('有效','Valid'),missing:t('缺失','Missing'),invalid:t('损坏','Invalid'),unsafe:t('路径不安全','Unsafe path')})[observation.identity_state]},
    {key:'runtime',label:t('运行程序','Runtime'),children:observation.installation==='absent'?t('已缺失','Absent'):observation.program_complete?t('完整','Complete'):t('部分残留','Partial runtime')},
@@ -231,8 +233,9 @@ export default function MachineAgentUninstallDialog({machine,credentials,existin
     <Form layout="vertical" onFinish={()=>void makePlan()} disabled={busy||planUncertain}>
      <Form.Item label={t('可复用 SSH 凭据','Reusable SSH credential')}>{credentialSelect}</Form.Item>
      {mode==='recovery'&&<Form.Item label={t('恢复原因（必填，最多 1000 字节）','Recovery reason (required, up to 1000 bytes)')}><Input.TextArea aria-label={t('恢复原因','Recovery reason')} rows={3} value={reason} onChange={event=>setReason(event.target.value)}/></Form.Item>}
+     <Form.Item><Checkbox checked={forceUnknown} onChange={event=>setForceUnknown(event.target.checked)}>{t('忽略已结束但结果未知的历史任务（强制卸载）','Ignore historical tasks with unknown outcomes (forced uninstall)')}</Checkbox>{forceUnknown&&<><Alert type="warning" showIcon title={t('仍会拒绝正在执行的任务和远端锁','Active tasks and remote locks still block maintenance')}/><Input.TextArea aria-label={t('强制卸载原因','Forced uninstall reason')} rows={3} maxLength={512} value={forceReason} onChange={event=>setForceReason(event.target.value)} placeholder={t('填写现场核对结果和强制卸载原因','Describe the host verification and reason for forced uninstall')}/></>}</Form.Item>
      <Form.Item><Checkbox checked={purge} onChange={event=>setPurge(event.target.checked)}>{t('同时清除 Agent 配置、身份与缓存','Also purge Agent configuration, identity, and cache')}</Checkbox><Typography.Paragraph type="secondary">{dataPolicy(purge)}{t('；业务服务、业务数据与系统用户保留。生成计划后不可更改此选项。','; business services, business data, and the system user are retained. This choice is fixed when the plan is created.')}</Typography.Paragraph></Form.Item>
-     <Button aria-label={t('核对身份并生成卸载计划','Verify identity and create uninstall plan')} type="primary" htmlType="submit" loading={busy} block disabled={!credential||!keys.some(key=>key.id===credential)||mode==='standard'&&!standardAllowed||mode==='recovery'&&(!recoveryAllowed||!reasonValid)||planUncertain}>{t('核对身份并生成卸载计划','Verify identity and create uninstall plan')}</Button>
+     <Button aria-label={t('核对身份并生成卸载计划','Verify identity and create uninstall plan')} type="primary" htmlType="submit" loading={busy} block disabled={!credential||!keys.some(key=>key.id===credential)||forceUnknown&&!forceReasonValid||mode==='standard'&&!standardAllowed||mode==='recovery'&&(!recoveryAllowed||!reasonValid)||planUncertain}>{t('核对身份并生成卸载计划','Verify identity and create uninstall plan')}</Button>
     </Form>
     {!keys.length&&<InstallationAccountRecovery recovery={missingInstallationAccount(credentials)} onAddAccount={()=>setAccountEditor('add')} onManageAccounts={()=>setAccountEditor('manage')}/>}
     <Button className="lm-machine-form-notice" disabled={busy||planUncertain} onClick={()=>setAccountEditor('manage')}>{t('管理账号与凭据','Manage accounts and credentials')}</Button>

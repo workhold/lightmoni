@@ -128,7 +128,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const [hostQuery,setHostQuery]=useState('');
  const [nodeDetail,setNodeDetail]=useState<AgentItem>(),[nodeLabels,setNodeLabels]=useState<TaskHost>();
  const [taskHost,setTaskHost]=useState<TaskHost>();
- const [uninstallGuide,setUninstallGuide]=useState(false),[uninstallMode,setUninstallMode]=useState<'standard'|'recovery'>('standard');
+ const [uninstallGuide,setUninstallGuide]=useState(false),[uninstallMode,setUninstallMode]=useState<'standard'|'recovery'>('standard'),[uninstallForce,setUninstallForce]=useState(false);
  const [stateRecoveryMachine,setStateRecoveryMachine]=useState<Pick<Machine,'id'|'name'>>();
  const [workloadRecoveryMachine,setWorkloadRecoveryMachine]=useState<Pick<Machine,'id'|'name'>>();
  useEffect(()=>{if(!admin)setWorkloadRecoveryMachine(undefined)},[admin]);
@@ -155,7 +155,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const [networkMachine,setNetworkMachine]=useState<Pick<Machine,'id'|'name'>>();
  const [terminalDetail,setTerminalDetail]=useState<Detail>();
  const [uninstallDetail,setUninstallDetail]=useState<Detail>(),[uninstallRecord,setUninstallRecord]=useState<AgentUninstallation>();
- const [updateDetail,setUpdateDetail]=useState<Detail>(),[updateRecord,setUpdateRecord]=useState<AgentUpdate>(),[updateAction,setUpdateAction]=useState<'upgrade'|'rollback'>('upgrade'),[updateDirect,setUpdateDirect]=useState(false);
+ const [updateDetail,setUpdateDetail]=useState<Detail>(),[updateRecord,setUpdateRecord]=useState<AgentUpdate>(),[updateAction,setUpdateAction]=useState<'upgrade'|'rollback'>('upgrade'),[updateDirect,setUpdateDirect]=useState(false),[updateForce,setUpdateForce]=useState(false);
  const [rollout,setRollout]=useState<{targets?:AgentRolloutTarget[];existingID?:string}>();
  useEffect(()=>{if(!admin){setUpdateDetail(undefined);setUpdateRecord(undefined);setRollout(undefined)}},[admin]);
  const [detail,setDetail]=useState<Detail>(),[detailError,setDetailError]=useState('');
@@ -290,7 +290,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   return()=>{if(requests.current.current(token))requests.current.close('update')};
  },[admin,linkedMachine,linkedUpdate]);
  useEffect(()=>{if(admin&&linkedRollout)setRollout({existingID:linkedRollout})},[admin,linkedRollout]);
- const openUpdate=async(machine:Machine,action:'upgrade'|'rollback'='upgrade',existing?:AgentUpdate,resume=false)=>{
+ const openUpdate=async(machine:Machine,action:'upgrade'|'rollback'='upgrade',existing?:AgentUpdate,resume=false,forceUnknown=false)=>{
   const token=beginEntry('update',machine.id);if(!token)return;
   try{
    const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);
@@ -308,10 +308,10 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    const record=operationID?await api<AgentUpdate>(`/machines/${encodeURIComponent(machine.id)}/agent-updates/${encodeURIComponent(operationID)}`):undefined;
    if(!current(token))return;
    if(record&&(record.machine_id!==machine.id||record.id!==operationID))throw Error(t('更新记录与目标主机或原操作不匹配，请刷新后重试','The update record does not match this host or operation. Refresh and retry.'));
-   setUpdateRecord(record);setUpdateAction(record?.action??action);setUpdateDirect(!record&&!resume&&action==='upgrade');setUpdateDetail(host);
+   setUpdateRecord(record);setUpdateAction(record?.action??action);setUpdateForce(forceUnknown);setUpdateDirect(!record&&!resume&&action==='upgrade'&&!forceUnknown);setUpdateDetail(host);
   }catch(e){if(current(token))void message.error(errorText(e))}finally{endEntry(token)}
  };
- const openUninstall=async(machine:Machine,existing?:AgentUninstallation,mode:'standard'|'recovery'='standard',resume=false)=>{
+ const openUninstall=async(machine:Machine,existing?:AgentUninstallation,mode:'standard'|'recovery'='standard',resume=false,forceUnknown=false)=>{
   const token=beginEntry('uninstall',machine.id);if(!token)return;
   try{const host=await api<Detail>(`/machines/${encodeURIComponent(machine.id)}`);if(!current(token)||host.machine.id!==machine.id)return;
    const history=host.uninstallations??[];
@@ -321,7 +321,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    const record=selected?await api<AgentUninstallation>(`/machines/${encodeURIComponent(machine.id)}/uninstallations/${encodeURIComponent(selected.id)}`):undefined;
    if(!current(token))return;
    if(record&&(record.machine_id!==machine.id||record.id!==selected?.id||record.plan?.machine.id&&record.plan.machine.id!==machine.id))throw Error(t('卸载记录与目标主机或原计划不匹配','The uninstall record does not match this host or original plan.'));
-   setUninstallMode(record?.plan?.mode??mode);setUninstallRecord(record);setUninstallDetail(host);
+   setUninstallMode(record?.plan?.mode??mode);setUninstallForce(forceUnknown);setUninstallRecord(record);setUninstallDetail(host);
   }catch(e){if(current(token))void message.error(errorText(e))}finally{endEntry(token)}
  };
  const openCheck=async(machine:Pick<Machine,'id'>)=>{
@@ -504,9 +504,11 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    {key:'deploy',label:t('部署 Agent','Deploy Agent'),disabled:!cap.deploy_agent?.available&&!accountRepairable(cap.deploy_agent),onClick:()=>void openPlan(m)},
    {key:'permission',label:t('运行模式与权限','Runtime mode & permissions'),disabled:!linked,onClick:()=>void openDetail(m,'execution')},
    {key:'upgrade',label:updatePending?updateLabel:localUpdateStart==='starting'?t('正在启动 Agent 升级','Starting Agent upgrade'):localUpdateStart==='uncertain'?t('核对升级请求','Verify upgrade request'):t('升级 Agent','Upgrade Agent'),disabled:localUpdateStart==='starting'||!cap.update_agent?.available&&!updatePending&&localUpdateStart!=='uncertain',onClick:()=>localUpdateStart==='uncertain'&&!updatePending?void openDetail(m,'history'):void openUpdate(m,'upgrade',undefined,updatePending)},
+   ...(cap.update_agent?.reason==='agent_task_busy'?[{key:'force-upgrade',label:t('强制升级 Agent','Force upgrade Agent'),danger:true,onClick:()=>void openUpdate(m,'upgrade',undefined,false,true)}]:[]),
    {key:'rollback',label:t('回退 Agent','Roll back Agent'),disabled:!cap.rollback_agent?.available,onClick:()=>void openUpdate(m,'rollback')},
    {type:'divider' as const},
    {key:'uninstall',label:t('卸载 Agent','Uninstall Agent'),danger:true,disabled:!cap.uninstall_agent?.available&&!accountRepairable(cap.uninstall_agent),onClick:()=>void openUninstall(m)},
+   ...(cap.uninstall_agent?.reason==='agent_task_busy'?[{key:'force-uninstall',label:t('强制卸载 Agent','Force uninstall Agent'),danger:true,onClick:()=>void openUninstall(m,undefined,'standard',false,true)}]:[]),
    {key:'recovery',label:t('SSH 恢复卸载','SSH recovery uninstall'),danger:true,disabled:!cap.recovery_uninstall_agent?.available&&!accountRepairable(cap.recovery_uninstall_agent),onClick:()=>void openUninstall(m,undefined,'recovery')},
    {key:'state-recovery',label:t('修正 Agent 状态','Correct Agent state'),danger:true,disabled:!m.ssh_recovery_available||!m.agent_id,onClick:()=>setStateRecoveryMachine({id:m.id,name:m.name})},
    {key:'workload-recovery',label:t('恢复重装后的应用绑定','Restore application bindings after reinstallation'),disabled:!m.agent_id||m.agent_status!=='online',onClick:()=>setWorkloadRecoveryMachine({id:m.id,name:m.name})},
@@ -571,7 +573,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    {title:t('主机标签','Host labels'),width:110,render:(_:unknown,m:FleetRow)=><Space wrap>{(m.label_ids??m.node?.label_ids??[]).map(id=><Tag key={id}>{labels.find(label=>label.id===id)?.name||id}</Tag>)}{!(m.label_ids??m.node?.label_ids??[]).length&&<Typography.Text type="secondary">{t('暂无标签','No labels')}</Typography.Text>}</Space>},
    {title:t('操作','Actions'),width:220,render:(_:unknown,m:FleetRow)=>renderActions(m)},
   ]}/></div>
-  {admin&&updateDetail&&<MachineAgentUpdateDialog key={`${updateDetail.machine.id}:${updateRecord?.id||updateAction}`} machine={updateDetail.machine} credentials={updateDetail.credentials} existing={updateRecord} initialAction={updateAction} directUpgrade={updateDirect} onRefresh={()=>refreshUpdatedHost(updateDetail.machine.id)} onStartPendingChange={onUpdateStartPendingChange} onClose={closeUpdate}/>}
+  {admin&&updateDetail&&<MachineAgentUpdateDialog key={`${updateDetail.machine.id}:${updateRecord?.id||updateAction}`} machine={updateDetail.machine} credentials={updateDetail.credentials} existing={updateRecord} initialAction={updateAction} directUpgrade={updateDirect} initialForceUnknown={updateForce} onRefresh={()=>refreshUpdatedHost(updateDetail.machine.id)} onStartPendingChange={onUpdateStartPendingChange} onClose={closeUpdate}/>}
   {admin&&rollout&&<MachineAgentRolloutDialog key={rollout.existingID||rollout.targets?.map(target=>target.id).join(',')||'history'} targets={rollout.targets} existingID={rollout.existingID} onClose={()=>{setRollout(undefined);setSelectedIDs([])}} onRefresh={()=>load(true)}/>}
   {admin&&batch&&<MachineBatchDialog key={batch.action+':'+batch.targets.map(target=>target.id).join(',')} action={batch.action} targets={batch.targets} onClose={()=>{setBatch(undefined);setSelectedIDs([])}} onRefresh={()=>load(true)} onSuccess={batchSuccess}/>}
   {admin&&nodeLabels&&<NodeLabelsDialog key={nodeLabels.id} host={nodeLabels} labels={labels} onClose={()=>setNodeLabels(undefined)} onSaved={()=>load(true)}/>}
@@ -582,7 +584,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   {inventoryMachine&&<ManagedContainerDialog machine={inventoryMachine} onClose={()=>setInventoryMachine(undefined)}/>}
   <Modal title={t('节点详情','Node details')} open={!!nodeDetail} onCancel={()=>setNodeDetail(undefined)} footer={null} width={760} destroyOnHidden>{nodeDetail&&<><NodeDetails agent={nodeDetail}/>{nodeDetail.lifecycle_state==='removed'&&<Alert type="warning" showIcon title={t('此节点已归档，旧凭据不能继续接入','This node is archived; old credentials can no longer enroll')} description={<>{time(nodeDetail.removed_at||'')} · {nodeDetail.removal_reason||t('未填写原因','No reason provided')}</>}/>}</>}</Modal>
   {admin&&uninstallGuide&&<Modal title={t('离线手动卸载 Agent','Offline manual Agent uninstall')} open onCancel={()=>setUninstallGuide(false)} footer={null} width={780} destroyOnHidden><AgentUninstallManual/></Modal>}
-  {admin&&uninstallDetail&&<MachineAgentUninstallDialog key={`${uninstallDetail.machine.id}:${uninstallRecord?.id||uninstallMode}`} initialMode={uninstallMode} machine={uninstallDetail.machine} credentials={uninstallDetail.credentials} existing={uninstallRecord} onRefresh={()=>refreshMachine(uninstallDetail.machine.id)} onClose={closeUninstall}/>}
+  {admin&&uninstallDetail&&<MachineAgentUninstallDialog key={`${uninstallDetail.machine.id}:${uninstallRecord?.id||uninstallMode}`} initialMode={uninstallMode} initialForceUnknown={uninstallForce} machine={uninstallDetail.machine} credentials={uninstallDetail.credentials} existing={uninstallRecord} onRefresh={()=>refreshMachine(uninstallDetail.machine.id)} onClose={closeUninstall}/>}
   {admin&&stateRecoveryMachine&&<MachineStateRecoveryDialog key={stateRecoveryMachine.id} machine={stateRecoveryMachine} onRefresh={()=>refreshMachine(stateRecoveryMachine.id)} onClose={()=>setStateRecoveryMachine(undefined)}/>}
   {admin&&workloadRecoveryMachine&&<MachineWorkloadRecoveryDialog key={workloadRecoveryMachine.id} machine={workloadRecoveryMachine} onRefresh={()=>refreshMachine(workloadRecoveryMachine.id)} onClose={()=>setWorkloadRecoveryMachine(undefined)}/>}
   {admin&&networkMachine&&<MachineServiceAddressesDialog key={networkMachine.id} machineID={networkMachine.id} name={networkMachine.name} onClose={()=>setNetworkMachine(undefined)} onSaved={()=>hostSaved(networkMachine.id)}/>}

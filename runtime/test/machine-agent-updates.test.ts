@@ -236,6 +236,29 @@ test('unknown and timed-out active work release the upgrade preparation without 
  assert.equal(f.db.get<any>('SELECT count(*) n FROM machine_agent_updates')!.n,0);
 });
 
+test('forced upgrade pins an old unknown job and rejects new work or remote locks',async t=>{
+ const f=await fixture(t),h=await f.host(),at=f.deps.now().toISOString(),cookie={cookie:'lm_session=fixture'};
+ const seed=(jobID:string)=>f.db.run("INSERT INTO agent_jobs(id,agent_id,execution_principal,deployment_id,operation_id,state,lease_id,actions_json,target_json,issued_at,expires_at,created_at,updated_at) VALUES(?,?,'privileged_executor','platform-app',?,'unknown','leased',?,?,?,?,?,?)",
+   jobID,h.agent,jobID,JSON.stringify([{kind:'operations',domain:'platform',operation_id:jobID}]),'{}',at,new Date(f.deps.now().getTime()+900000).toISOString(),at,at);
+ seed('old-inspection');
+ const path=`/machines/${h.id}/agent-updates/plan`,input={action:'upgrade',target_sha256:f.release.sha256,force_unknown:true,force_reason:'Checked host; original inspection process has ended'};
+ assert.equal((await f.plan(h.id)).status,409);
+ assert.equal((await f.request(path,'POST',input)).status,403,'force requires a human admin session');
+ const planned=await f.request(path,'POST',input,cookie);assert.equal(planned.status,201,planned.raw);
+ assert.deepEqual(planned.data.plan.force_unknown.blockers,[{kind:'agent_job',id:'old-inspection',state:'unknown'}]);
+ const applyPath=`/machines/${h.id}/agent-updates/${planned.data.id}/apply`;
+ assert.equal((await f.request(applyPath,'POST',{confirm:true})).status,403);
+ seed('new-inspection');
+ assert.equal((await f.request(applyPath,'POST',{confirm:true},cookie)).status,409,'new unknown work invalidates the reviewed snapshot');
+ f.db.run("DELETE FROM agent_jobs WHERE id='new-inspection'");
+ f.observations.get(h.id).operation_lock=true;
+ assert.equal((await f.request(applyPath,'POST',{confirm:true},cookie)).status,409,'a remote operation lock still blocks force');
+ f.observations.get(h.id).operation_lock=false;
+ const started=await f.request(applyPath,'POST',{confirm:true},cookie);assert.equal(started.status,202,started.raw);
+ assert.equal((await f.settle(h.id,planned.data.id)).status,'succeeded');
+ assert.equal(f.db.get<any>("SELECT state FROM agent_jobs WHERE id='old-inspection'")?.state,'unknown','historical result is preserved');
+});
+
 test('one request chooses the probed architecture, starts upgrade and retains stage events',async t=>{
  const f=await fixture(t),h=await f.host();
  const arm={...f.release,arch:'arm64',file:'lightmoni-agent_0.1.0_linux_arm64.tar.gz',build_id:'0.1.0-arm-build',build_time:'2026-10-31T00:00:00Z'};

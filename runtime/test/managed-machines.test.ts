@@ -846,6 +846,49 @@ async function uninstallHost(f:Awaited<ReturnType<typeof fixture>>,linked=true){
 }
 const uninstallPlan=(f:Awaited<ReturnType<typeof fixture>>,h:{id:string;credential:string;check:string})=>f.request(`/machines/${h.id}/uninstallations/plan`,'POST',{check_id:h.check,credential_id:h.credential});
 
+test('forced uninstall preserves historical unknown work and still rejects new work or remote locks',async t=>{
+ let removed=false,lock=false;
+ const f=await fixture(t,{},async input=>{
+  if(input.command.includes('systemctl stop'))removed=true;
+  return {stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',removed,{lock}):checkOutput,stderr:'',stages:[]};
+ },true);
+ const h=await uninstallHost(f);
+ f.db.exec('CREATE TABLE agent_jobs(id TEXT,agent_id TEXT,state TEXT)');
+ f.db.run("INSERT INTO agent_jobs VALUES('old-inspection','node-known','unknown')");
+ assert.equal((await uninstallPlan(f,h)).status,409);
+ const path=`/machines/${h.id}/uninstallations/plan`,input={check_id:h.check,credential_id:h.credential,mode:'standard',force_unknown:true,force_reason:'Checked host; inspection is no longer running'};
+ lock=true;assert.equal((await f.request(path,'POST',input)).status,409,'remote lifecycle lock blocks force planning');lock=false;
+ const planned=await f.request(path,'POST',input);assert.equal(planned.status,201,planned.raw);
+ assert.deepEqual(planned.data.plan.force_unknown.blockers,[{kind:'agent_job',id:'old-inspection',state:'unknown'}]);
+ const applyPath=`/machines/${h.id}/uninstallations/${planned.data.id}/apply`;
+ f.db.run("INSERT INTO agent_jobs VALUES('new-inspection','node-known','unknown')");
+ assert.equal((await f.request(applyPath,'POST',{confirm:true})).status,409);
+ f.db.run("DELETE FROM agent_jobs WHERE id='new-inspection'");
+ const applied=await f.request(applyPath,'POST',{confirm:true});assert.equal(applied.status,200,applied.raw);
+ assert.equal(applied.data.status,'succeeded');
+ assert.equal(f.db.get<any>("SELECT state FROM agent_jobs WHERE id='old-inspection'")?.state,'unknown');
+});
+
+test('forced uninstall reconciliation accepts later resolution of the reviewed old job',async t=>{
+ let removed=false,destructive=0;
+ const f=await fixture(t,{},async input=>{
+  if(input.command.includes('systemctl stop')){destructive++;removed=true;throw new SSHError('timed_out');}
+  return {stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};
+ },true);
+ const h=await uninstallHost(f);
+ f.db.exec('CREATE TABLE agent_jobs(id TEXT,agent_id TEXT,state TEXT)');
+ f.db.run("INSERT INTO agent_jobs VALUES('old-inspection','node-known','unknown')");
+ const planned=await f.request(`/machines/${h.id}/uninstallations/plan`,'POST',{check_id:h.check,credential_id:h.credential,mode:'standard',force_unknown:true,force_reason:'Reviewed historical inspection'});
+ assert.equal(planned.status,201,planned.raw);
+ const path=`/machines/${h.id}/uninstallations/${planned.data.id}`;
+ assert.equal((await f.request(path+'/apply','POST',{confirm:true})).status,502);
+ f.db.run("UPDATE agent_jobs SET state='failed' WHERE id='old-inspection'");
+ const reconciled=await f.request(path+'/reconcile','POST',{});
+ assert.equal(reconciled.status,200,reconciled.raw);
+ assert.equal(reconciled.data.status,'succeeded');
+ assert.equal(destructive,1);
+});
+
 test('uninstall probes and removal record use in both the host binding and shared credential library',async t=>{
  let clock=now,removed=false;
  const f=await fixture(t,{now:()=>clock},async input=>{if(input.command.includes('systemctl stop'))removed=true;return {stdout:input.command.includes('LMREMOVE')?probeOutput('node-known',removed):checkOutput,stderr:'',stages:[]};});

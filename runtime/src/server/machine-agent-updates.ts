@@ -1,11 +1,11 @@
-import {maintenanceBlockers,maintenanceWorkBusy,prepareMachineMaintenance,type MaintenanceBlocker} from './machine-maintenance.js';
+import {assertMaintenanceOverride,captureMaintenanceOverride,maintenanceBlockers,maintenanceWorkBusy,prepareMachineMaintenance,type MaintenanceBlocker,type MaintenanceOverride} from './machine-maintenance.js';
 import { holdBusy, type BusyLane } from './machine-busy-lane.js';
 import { createReadStream, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { hash, id, token } from "../shared/crypto.js";
 import { fail, HTTPError } from "../shared/http.js";
-import type { Dependencies, Handler, Module } from "../shared/types.js";
+import type { Context, Dependencies, Handler, Module } from "../shared/types.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 import { assertNoPendingAgentRuntime } from "./machine-agent-runtime-guard.js";
 import { validAgentRuntimeObservation } from "./machine-agent-runtime.js";
@@ -20,7 +20,7 @@ import { agentUpdateProbeCommand, parseAgentUpdateProbe, agentUpdateStartCommand
   parseAgentUpdateStatus, agentUpdateRecoveryBootstrap, type AgentUpdateRecoveryRequest, type AgentUpdateProbe, type AgentUpdateRemoteStatus, type AgentUpdateStartRequest } from "./machine-agent-update-ssh.js";
 
 export type AgentUpdateStatus = "awaiting_approval" | "running" | "verifying" | "succeeded" | "rolled_back" | "failed" | "unknown" | "cancelled";
-export interface AgentUpdateInput { action: "upgrade" | "rollback"; target_sha256?: string; credential_id?: string }
+export interface AgentUpdateInput { action: "upgrade" | "rollback"; target_sha256?: string; credential_id?: string; force_unknown?:boolean; force_reason?:string }
 export interface AgentUpdate {
   id: string; machine_id: string; agent_id: string; action: "upgrade" | "rollback"; status: AgentUpdateStatus;
   plan: any; receipt: any; error: string; created_at: string; created_by: string; approved_at: string; approved_by: string;
@@ -90,6 +90,7 @@ export function createAgentUpdatesSchema(deps: Dependencies) {
 
 export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpdateAccess, options: Options): AgentUpdateStore {
   const { db, router } = deps, at = () => deps.now().toISOString();
+  const human=(ctx:Context)=>{deps.auth.requireAdmin(ctx);if(ctx.req.headers.authorization||!ctx.req.headers.cookie?.split(';').some(part=>part.trim().startsWith('lm_session='))||deps.auth.user(ctx.req)?.id!==ctx.user.id)fail(403,'human_admin_session_required');};
   const catalog = new AgentReleaseCatalog(options.downloadsDir, join(options.dataDir, "agent-update-cache"));
   const controller = new AbortController(), running = new Map<string, Promise<void>>(), rolloutWorkers = new Map<string, Promise<void>>();
   const pollInterval = options.pollIntervalMs ?? 3000, healthTimeout = options.healthTimeoutMs ?? 1260_000;
@@ -141,19 +142,20 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     events: db.all<{at:string;stage:string}>("SELECT at,stage FROM machine_agent_update_events WHERE update_id=? ORDER BY sequence",value.id) };
   };
   const list = (machineID: string) => db.all<any>("SELECT * FROM machine_agent_updates WHERE machine_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100", machineID).map(view);
-  const taskBusy = (machineID: string, agentID: string) => maintenanceWorkBusy(deps,agentID,machineID);
+  const taskBusy = (machineID: string, agentID: string, override?:MaintenanceOverride) => maintenanceWorkBusy(deps,agentID,machineID,override);
   const taskBusyNote = (machineID: string, agentID: string) => {
     const blockers = maintenanceBlockers(deps,agentID,machineID);
     return blockers.length ? `主机存在待执行、运行中或结果未知的任务，请先处理（${blockers.map((b:MaintenanceBlocker)=>`${b.kind} ${b.id.slice(0,8)} ${b.state}`).join('、')}）` : "主机存在待执行、运行中或结果未知的任务，请先处理";
   };
   const holdLane = (machineID: string) => holdBusy(access.busy, machineID, "agent-update", deps.now().getTime());
-  const assertTarget = (machine: MachineSummary) => {
+  const assertTarget = (machine: MachineSummary, override?:MaintenanceOverride, verifyOverride=true) => {
     assertNoPendingAgentRuntime(db,machine.id,machine.agent_id);
     assertNoPendingMachineInstallation(db,machine.id,machine.agent_id,true);
     if (!machine.agent_id) fail(409, "主机尚未安装 Agent，请先部署");
     assertAgentActive(db, machine.agent_id);
     if (!options.credentials?.has(machine.agent_id, "control")) fail(409, "主机没有有效的 Agent 控制凭据");
-    if (taskBusy(machine.id, machine.agent_id)) fail(409, taskBusyNote(machine.id, machine.agent_id));
+    if(verifyOverride)assertMaintenanceOverride(deps,machine.agent_id,machine.id,override);
+    if (taskBusy(machine.id, machine.agent_id,override)) fail(409, taskBusyNote(machine.id, machine.agent_id));
     if (db.get("SELECT id FROM machine_deployments WHERE machine_id=? AND status IN ('awaiting_approval','running') LIMIT 1", machine.id)
       || db.get("SELECT id FROM machine_uninstallations WHERE machine_id=? AND status IN ('awaiting_approval','running','unknown') LIMIT 1", machine.id))
       fail(409, "主机存在安装或卸载流程，请先结束");
@@ -207,9 +209,12 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       && Number.isSafeInteger(identity.uid) && identity.uid > 0 && Number.isSafeInteger(identity.gid) && identity.gid > 0
       ? helper : null;
   };
-  const plan = async (machineID: string, input: AgentUpdateInput, actorID: string, signal: AbortSignal, automaticTarget = false): Promise<AgentUpdate> => {
-    fields(input, ["credential_id", "target_sha256", "action"]);
+  const plan = async (machineID: string, input: AgentUpdateInput, actorID: string, signal: AbortSignal, automaticTarget = false, allowForce = false): Promise<AgentUpdate> => {
+    fields(input, ["credential_id", "target_sha256", "action", "force_unknown", "force_reason"]);
     if (!["upgrade", "rollback"].includes(input.action)) fail(400, "action must be upgrade or rollback");
+    if(input.force_unknown!==undefined&&typeof input.force_unknown!=='boolean')fail(400,'invalid force_unknown');
+    if(input.force_unknown&&(input.action!=='upgrade'||automaticTarget||!allowForce||typeof input.force_reason!=='string'))fail(400,'force_unknown_requires_reviewed_upgrade');
+    if(!input.force_unknown&&input.force_reason!==undefined)fail(400,'force_reason_without_override');
     if (input.action === "upgrade" && !automaticTarget && !SHA.test(input.target_sha256 ?? "")) fail(400, "升级必须指定完整的目标 SHA256");
     if (input.action === "rollback" && input.target_sha256 != null) fail(400, "回退目标必须来自主机保留的上一发行");
     let endpoint: URL;
@@ -218,7 +223,8 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       fail(409, "Agent 维护需要无凭据的平台 HTTPS 根地址，请先更新平台外部地址");
     assertFree(machineID);
     const { machine, credential } = access.credential(machineID, input.credential_id);
-    const preparation=prepareMachineMaintenance(deps,machine.id,machine.agent_id,automaticTarget);
+    const override=input.force_unknown?captureMaintenanceOverride(deps,machine.agent_id,machine.id,input.force_reason!):undefined;
+    const preparation=prepareMachineMaintenance(deps,machine.id,machine.agent_id,automaticTarget,override);
     let laneHeld=false;
     try {
       if (automaticTarget) {
@@ -232,11 +238,11 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
           await new Promise<void>(resolve=>setTimeout(resolve,250));
         }
       }
-      access.idle(machine.id);assertTarget(machine);
+      access.idle(machine.id);assertTarget(machine,override);
       preparation.renew();
       holdLane(machine.id);laneHeld=true;
       const observed = await probe(machine, credential, signal); validateProbe(machine, observed, input.action !== "rollback");
-      access.credential(machine.id, credential.id); assertFree(machine.id); assertTarget(access.get(machine.id));
+      access.credential(machine.id, credential.id); assertFree(machine.id); assertTarget(access.get(machine.id),override);
       if (access.revision(access.get(machine.id)) !== access.revision(machine)) fail(409, "主机连接在检查期间变化，请重新生成计划");
       let target: any, files: Record<string, PinnedAgentFile>;
       if (input.action === "upgrade") {
@@ -262,6 +268,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         ssh_account: sshAccountSnapshot(machine), credential_revision: sshCredentialRevision(credential),
         credential: { id: credential.id, method: credential.method, retention: credential.retention, expires_at: credential.expires_at },
         action: input.action, runtime_mode:observed.runtime_mode??'user',permission_generation:observed.permission_generation??1,
+        ...(override?{force_unknown:override}:{}),
         ...(helper ? { helper: { executor_id: helper.id, install_generation: helper.install_generation, activation_id: helper.activation_id } } : {}),
         current: { ...observed.current, service_active: observed.service_active, release: { ...observed.current } }, target, files,
         target_revision: access.revision(machine), expires_at: expires,
@@ -270,7 +277,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       db.transaction(() => {
         const selected = access.credential(machine.id, credential.id); assertSSHAccount(selected.machine, planBody.ssh_account);
         if (sshCredentialRevision(selected.credential) !== planBody.credential_revision) fail(409, "ssh_credential_changed");
-        assertFree(machine.id); assertTarget(access.get(machine.id));
+        assertFree(machine.id); assertTarget(access.get(machine.id),override);
         db.run("INSERT INTO machine_agent_updates(id,machine_id,agent_id,credential_id,action,status,plan_json,created_at,created_by) VALUES(?,?,?,?,?,'awaiting_approval',?,?,?)",
           operationID, machine.id, machine.agent_id, credential.id, input.action, JSON.stringify(planBody), at(), actorID);
         event(operationID,"ready");
@@ -281,7 +288,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   const assertPlan = (operation: any, beforeStart = false, requireCredential = true) => {
     const machine = access.get(operation.machine_id), body = JSON.parse(operation.plan_json);
     if (machine.agent_id !== operation.agent_id || access.revision(machine) !== body.target_revision) fail(409, "主机连接或 Agent 身份已变化，原维护计划不可执行");
-    assertTarget(machine);
+    assertTarget(machine,body.force_unknown,beforeStart);
     const selected = requireCredential ? access.credential(machine.id, operation.credential_id) : undefined;
     if (selected) { assertSSHAccount(selected.machine, body.ssh_account); if (sshCredentialRevision(selected.credential) !== body.credential_revision) fail(409, "ssh_credential_changed"); }
     if (body.runtime_mode === "root") {
@@ -635,7 +642,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   router.get("/api/v1/agent-releases", access.safe(ctx => ctx.json({ releases: catalog.list() })));
   router.get(prefix, access.safe(ctx => { access.get(ctx.params.id); ctx.json(list(ctx.params.id)); }));
   router.get(prefix + "/:updateId", access.safe(ctx => { access.get(ctx.params.id); ctx.json(view(row(ctx.params.id, ctx.params.updateId))); }));
-  router.post(prefix + "/plan", access.safe(async ctx => { deps.auth.requireAdmin(ctx); ctx.json(await plan(ctx.params.id, await ctx.body() as AgentUpdateInput, ctx.user.id, ctx.signal), 201); }));
+  router.post(prefix + "/plan", access.safe(async ctx => { deps.auth.requireAdmin(ctx); const input=await ctx.body() as AgentUpdateInput;if(input?.force_unknown)human(ctx);ctx.json(await plan(ctx.params.id,input,ctx.user.id,ctx.signal,false,true), 201); }));
   router.post(prefix + "/start", access.safe(async ctx => {
     deps.auth.requireAdmin(ctx); fields(await ctx.body(), []);
     const proposed=await plan(ctx.params.id,{action:"upgrade"},ctx.user.id,ctx.signal,true);
@@ -645,6 +652,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   router.post(prefix + "/:updateId/apply", access.safe(async ctx => {
     deps.auth.requireAdmin(ctx); const input = fields(await ctx.body(), ["confirm"]);
     if (input.confirm !== true) fail(400, "必须明确确认维护计划");
+    if(JSON.parse(row(ctx.params.id,ctx.params.updateId).plan_json).force_unknown)human(ctx);
     ctx.json(await apply(ctx.params.id, ctx.params.updateId, ctx.user.id, ctx.signal), 202);
   }));
   router.post(prefix + "/:updateId/cancel", access.safe(async ctx => { deps.auth.requireAdmin(ctx); fields(await ctx.body(), []); ctx.json(cancel(ctx.params.id, ctx.params.updateId)); }));
