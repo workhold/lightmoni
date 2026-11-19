@@ -11,16 +11,19 @@ import {
   Switch,
 } from "../../shared/ui";
 import { useI18n } from "../../shared/i18n";
-import type { Resource } from "./model";
+import type { Resource, Spec } from "./model";
 import ClusterUpstreams from "./ClusterUpstreams";
+import type {QuickCreate} from './ClusterFields';
 
 type Path = (string | number)[];
 export default function NginxFields({
   resources, clusterIds: boundClusterIds,
+  onQuickCreate,
   mode, locationsPath = ["spec", "locations"], watchPath = ["spec", "locations"], showSiteOptions = true, showRoutes = true,
 }: {
   resources: Resource[];
   clusterIds?: string[];
+  onQuickCreate?: QuickCreate;
   mode: string;
   locationsPath?: Path;
   watchPath?: Path;
@@ -29,6 +32,7 @@ export default function NginxFields({
 }) {
   const { t } = useI18n();
   const form = Form.useFormInstance();
+  const bindings:Spec[]=Form.useWatch(['spec','bindings'],{form,preserve:true})??[];
   const routing=Form.useWatch(['spec','routing_mode'],form);
   const available: string[] = Form.useWatch(["spec","cluster_ids"],form) ?? [];
   const clusterIds = boundClusterIds ?? available;
@@ -573,6 +577,18 @@ export default function NginxFields({
             label: t("站点：HTTPS与HTTP/2", "Site: HTTPS and HTTP/2"),
             children: (
               <>
+                <div className="lm-ops-repeater">
+                  <div className="lm-ops-subheading"><strong>{t('HTTPS 证书','HTTPS certificates')}</strong></div>
+                  <p className="lm-ops-note">{t('每组启用 HTTPS 的域名绑定选择一张证书；可使用平台签发或在证书管理上传的证书。', 'Choose a certificate for each HTTPS domain binding. Platform issued and uploaded certificates are both available.')}</p>
+                  {bindings.map((binding,index)=>binding.https?<Form.Item
+                    key={index}
+                    name={['spec','bindings',index,'certificate_id']}
+                    label={(binding.domains??[]).join(' · ')||t('域名绑定','Domain binding')+' '+(index+1)}
+                    rules={[{required:true,message:t('请选择 HTTPS 证书','Select an HTTPS certificate')}]}
+                    extra={onQuickCreate&&<Button size="small" type="link" icon={<PlusOutlined aria-hidden/>} onClick={()=>onQuickCreate('certificate',resource=>form.setFieldValue(['spec','bindings',index,'certificate_id'],resource.id))}>{t('新建或上传证书','Create or upload certificate')}</Button>}
+                  ><Select showSearch optionFilterProp="label" placeholder={t('选择证书管理中的证书','Choose a certificate from Certificate management')} options={resources.filter(resource=>resource.kind==='certificate').map(resource=>({value:resource.id,label:resource.name+' · '+(resource.spec.source==='uploaded'?t('手动上传','Uploaded'):resource.spec.source==='acme'?t('平台签发','Platform issued'):t('自签发','Self signed'))+' · '+(resource.status.certificate_version&&!resource.status.expired?t('可用','Ready'):t('待签发或导入','Awaiting issuance or import'))}))}/></Form.Item>:null)}
+                  {!bindings.some(binding=>binding.https)&&<p className="lm-ops-note">{t('先在域名绑定中启用 HTTPS，再选择证书。','Enable HTTPS for a domain binding, then choose its certificate.')}</p>}
+                </div>
                 <div className="lm-ops-grid">
                   {toggle(
                     [...p, "redirect_https"],

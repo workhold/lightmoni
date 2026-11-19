@@ -1,6 +1,6 @@
 import {useState} from 'react';
 import {containerYAML,containerForm} from './application-yaml';
-import { MinusCircleOutlined, PlusOutlined } from "@ant-design/icons";
+import { MinusCircleOutlined, PlusOutlined, UploadOutlined } from "@ant-design/icons";
 import {
   Alert,
   AutoComplete,
@@ -13,6 +13,7 @@ import {
   Select,
   Space,
   Switch,
+  Upload,
 } from "../../shared/ui";
 import { useI18n } from "../../shared/i18n";
 import type { Agent, Machine, Resource, ResourceKind } from "./model";
@@ -156,6 +157,8 @@ export default function ResourceFields({
   machines = [], onQuickCreate, onRefresh, certificateID,
 }: Props) {
   const [yamlError,setYamlError]=useState('');
+  const [pemFileError,setPemFileError]=useState('');
+  const [pemFileNames,setPemFileNames]=useState<Partial<Record<'certificate_pem'|'private_key_pem',string>>>({});
   const { t } = useI18n(),
     form = Form.useFormInstance(),
     source = Form.useWatch(["spec", "source"], form),
@@ -172,6 +175,23 @@ export default function ResourceFields({
   const required = [
     { required: true, message: t("请填写此项", "This field is required") },
   ];
+  const selectPEMFile = (field:'certificate_pem'|'private_key_pem') => <Upload
+    accept=".pem,.crt,.cer,.key,text/plain,application/x-pem-file"
+    showUploadList={false}
+    beforeUpload={async file=>{
+      const max=field==='certificate_pem'?128*1024:64*1024;
+      if(!file.size||file.size>max){setPemFileError(t('文件为空或超过大小限制（证书链 128 KiB，私钥 64 KiB）。','File is empty or exceeds the limit (128 KiB chain, 64 KiB key).'));return Upload.LIST_IGNORE}
+      try{
+        const content=await file.text();
+        const valid=field==='certificate_pem'?content.includes('-----BEGIN CERTIFICATE-----'):content.includes('PRIVATE KEY-----');
+        if(!valid)throw Error('invalid_pem');
+        form.setFieldValue(['spec',field],content);
+        setPemFileNames(previous=>({...previous,[field]:file.name}));
+        setPemFileError('');
+      }catch{setPemFileError(t('无法读取 PEM 文件，请选择有效的证书链或私钥文件。','Could not read the PEM file. Choose a valid certificate chain or private key file.'))}
+      return Upload.LIST_IGNORE;
+    }}
+  ><Button icon={<UploadOutlined aria-hidden/>}>{field==='certificate_pem'?t('选择证书链文件','Choose certificate chain file'):t('选择私钥文件','Choose private key file')}</Button></Upload>;
   const opts = (resourceKind: ResourceKind) =>
     resources
       .filter((r) => r.kind === resourceKind)
@@ -431,6 +451,10 @@ export default function ResourceFields({
           )}
           {source === "uploaded" && (
             <>
+              <p className="lm-ops-note">{t("可选择本地 PEM 文件，或在下方粘贴内容。文件仅在保存时通过证书管理提交。", "Choose local PEM files or paste below. Files are sent through Certificate management only when you save.")}</p>
+              {pemFileError&&<Alert type="error" showIcon title={pemFileError}/>}
+              {selectPEMFile('certificate_pem')}
+              {pemFileNames.certificate_pem&&<p className="lm-ops-note">{t('已读取证书链文件：','Certificate chain file selected: ')}{pemFileNames.certificate_pem}</p>}
               <Form.Item
                 name={["spec", "certificate_pem"]}
                 label={t("证书链 PEM", "Certificate chain PEM")}
@@ -449,10 +473,13 @@ export default function ResourceFields({
                   autoComplete="off"
                 />
               </Form.Item>
+              {selectPEMFile('private_key_pem')}
+              {pemFileNames.private_key_pem&&<p className="lm-ops-note">{t('已读取私钥文件：','Private key file selected: ')}{pemFileNames.private_key_pem} <Button size="small" type="link" onClick={()=>{form.setFieldValue(['spec','private_key_pem'],undefined);setPemFileNames(previous=>({...previous,private_key_pem:undefined}))}}>{t('改为手动粘贴','Paste instead')}</Button></p>}
               <Form.Item
                 name={["spec", "private_key_pem"]}
                 label={t("私钥 PEM", "Private key PEM")}
                 rules={existing?.spec.has_private_key ? [] : required}
+                hidden={!!pemFileNames.private_key_pem}
               >
                 <Input.TextArea
                   rows={5}
@@ -470,9 +497,12 @@ export default function ResourceFields({
               <Alert
                 type="info"
                 showIcon
-                title={t(
-                  "保存后执行“导入证书版本”，开启到期提醒并分发到启用的目标",
-                  "After saving, run ‘Import certificate version’ for expiry reminders and delivery to enabled targets",
+                title={existing?t(
+                  "更新材料后请执行“导入证书版本”，再向已启用目标分发",
+                  "After updating material, run ‘Import certificate version’ before delivery to active targets",
+                ):t(
+                  "保存后会在后台导入证书版本，并开启到期提醒及向已启用目标分发",
+                  "Saving imports the certificate version in the background and enables expiry reminders and delivery to active targets",
                 )}
               />
             </>

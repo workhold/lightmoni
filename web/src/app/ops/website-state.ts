@@ -5,6 +5,8 @@ export type WebsiteState = {key:string; label:Copy; hint:Copy; color?:'success'|
 const state = (key:string,label:Copy,hint:Copy,color?:WebsiteState['color']):WebsiteState => ({key,label,hint,color});
 
 export function websitePublication(site:Resource,clusterId?:string):WebsiteState {
+  if(site.status.__loading)return state('loading',['加载中','Loading'],['正在读取发布状态。','Loading publication status.'],'processing');
+  if(site.status.__error)return state('load_error',['加载失败','Failed to load'],['发布状态读取失败，请重试。','Publication status could not be loaded. Retry.'],'warning');
   const configured:string[]|undefined=site.spec.routing_mode==='managed'?site.status.actual_cluster_ids:site.spec.cluster_ids;
   const ids:string[]=configured?.length?configured:Object.keys(site.status.deployments??{});
   const deployments = (clusterId ? [site.status.deployments?.[clusterId]??{}] : ids.map(id=>site.status.deployments?.[id]??{})) as Spec[];
@@ -42,6 +44,8 @@ export function dnsErrorCopy(code:unknown):Copy {
 }
 
 export function websiteDNS(site:Resource,clusterId?:string,domain?:string):WebsiteState {
+  if(site.status.__loading)return state('loading',['加载中','Loading'],['正在读取解析状态。','Loading DNS status.'],'processing');
+  if(site.status.__error)return state('load_error',['加载失败','Failed to load'],['解析状态读取失败，请重试。','DNS status could not be loaded. Retry.'],'warning');
   const bindings = (site.spec.bindings??[]).filter((b:Spec)=>!domain||b.domains?.includes(domain));
   if (!bindings.some((b:Spec)=>b.dns_enabled)) return state('external',['自行维护','Managed externally'],['网站解析由你维护，系统不会创建 CNAME 记录。','You maintain website DNS. The system will not create CNAME records.']);
   const publication = websitePublication(site,clusterId);

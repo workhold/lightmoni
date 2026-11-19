@@ -1,0 +1,14 @@
+{
+  "checks": [
+    "应用配置在总览响应延迟时先显示，状态为加载中且依赖状态的操作禁用",
+    "按主机筛选在清单到达前不显示错误的应用匹配",
+    "网站配置先展示；发布与 DNS 状态随后替换加载中",
+    "旧页面的迟到响应不能覆盖导航后的新页面",
+    "总览失败保留应用配置，状态显示加载失败",
+    "本地 PEM 选择不提前上传；保存沿用证书资源接口且私钥不回显在公开资源",
+    "HTTPS 设置逐绑定选择平台或上传证书，保存并重新打开保留证书引用"
+  ],
+  "writes": 2,
+  "page_errors": [],
+  "source": "isolated local HTTP fixture and real Vite pages; generated ephemeral certificate pair"
+}

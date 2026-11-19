@@ -106,6 +106,8 @@ export function publishedApplicationRevisions(resource: Resource): number[] {
 }
 export function resourceState(resource: Resource): string {
   const s = resource.status ?? {};
+  if (s.__loading) return 'loading';
+  if (s.__error) return 'load_error';
   const current = (Array.isArray(s.instances) ? s.instances : []).filter((instance: Spec) => !instance.retired);
   if (resource.kind === "application" && Array.isArray(resource.spec.deployments)) {
     const published = Object.entries<Spec>(s.deployments ?? {}).filter(([, deployment]) => deployment.enabled && Number(deployment.desired_revision) > 0);
@@ -436,6 +438,6 @@ export function serializeSpec(kind: ResourceKind, values: Spec): Spec {
 export function filterApplicationsByState(applications:Resource[],filter:string):Resource[]{
  return applications.filter(r=>{
   const state=resourceState(r);
-  return filter==='all'||(filter==='failed'?['failed','degraded','error','unknown'].includes(state):filter==='pending'?['pending','queued'].includes(state):state===filter);
+  return filter==='all'||['loading','load_error'].includes(state)||(filter==='failed'?['failed','degraded','error','unknown'].includes(state):filter==='pending'?['pending','queued'].includes(state):state===filter);
  });
 }

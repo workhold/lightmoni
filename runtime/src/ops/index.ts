@@ -228,6 +228,9 @@ export function registerOperationsPlatform(
   router.get(
     "/api/v1/ops/resources",
     safe((ctx) => {
+      const view = ctx.url.searchParams.get("view");
+      if (view !== null && view !== "config")
+        fail(400, "invalid_platform_resource_view");
       const k = kind(ctx.url.searchParams.get("kind")),
         resources = store
           .list(k)
@@ -249,7 +252,12 @@ export function registerOperationsPlatform(
       ctx.json({
         resources: resources
           .slice(offset, offset + limit)
-          .map((r) => store.public(r)),
+          .map((r) => {
+            const publicResource = store.public(r);
+            if (view !== "config") return publicResource;
+            const { status: _status, ...configuration } = publicResource;
+            return configuration;
+          }),
         limit,
         offset,
         next_offset: offset + limit < resources.length ? offset + limit : null,

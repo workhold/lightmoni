@@ -271,7 +271,7 @@ test("administrators view public certificate material and download immutable ver
   assert.equal(await(await download(view.certificate_version,"private_key")).text(),material.private_key_pem);
   f.platform.store.patchStatus(cert.id,{state:"failed",last_error:"renew_failed"});
   assert.equal((await f.req(path)).status,200);
-  for(const snapshot of [(await f.req('/ops/overview')).body,(await f.req('/ops/resources/'+cert.id)).body,(await f.req('/ops/runs')).body]){
+  for(const snapshot of [(await f.req('/ops/overview')).body,(await f.req('/ops/resources/'+cert.id)).body,(await f.req('/ops/resources?kind=certificate&view=config')).body,(await f.req('/ops/runs')).body]){
     assert.ok(!JSON.stringify(snapshot).includes("BEGIN CERTIFICATE"));assert.ok(!JSON.stringify(snapshot).includes("PRIVATE KEY"));
   }
 });
@@ -468,6 +468,20 @@ test("overview uses one ordered resource snapshot for its page and total", async
   } finally {
     f.platform.store.list = originalList;
   }
+});
+test("resource config view omits status without changing the normal read contract", async (t) => {
+  const f = await setup(t);
+  f.platform.store.patchStatus(f.cluster.id,{state:'observed',last_error:null});
+  const normal = await f.req('/ops/resources?kind=cluster');
+  const config = await f.req('/ops/resources?kind=cluster&view=config');
+  assert.equal(normal.status,200);
+  assert.equal(config.status,200);
+  assert.equal(normal.body.resources[0].status.state,'observed');
+  assert.equal('status' in config.body.resources[0],false);
+  assert.deepEqual(config.body.resources[0].spec,normal.body.resources[0].spec);
+  assert.equal(config.body.total,normal.body.total);
+  assert.equal((await f.req('/ops/resources?kind=cluster&view=unknown')).status,400);
+  assert.equal((await f.req('/ops/resources?kind=cluster&view=config','GET',undefined,{'x-role':'member'})).status,403);
 });
 test("real platform HTTP checks role, confirmation and revision with saved state readback", async (t) => {
   const f = await setup(t);
