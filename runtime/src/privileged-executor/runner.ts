@@ -80,7 +80,9 @@ export class PrivilegedExecutorRunner {
     }
   }
   async once(signal: AbortSignal = new AbortController().signal, requestedJobID = ""): Promise<void> {
-    await this.observeOnce(signal);
+    // The resident helper owns application telemetry. An SSH one-shot must
+    // refresh its signed policy before claiming, without waiting for collection.
+    await this.heartbeat();
     // A previous process may have submitted an intent. Never resume its script,
     // even when no PID exists, or replace its start nonce after a reboot.
     for (const row of this.journal.all()) {
