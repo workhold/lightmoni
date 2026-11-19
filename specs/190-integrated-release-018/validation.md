@@ -7,6 +7,7 @@
 - [PR #261](https://github.com/workhold/lightmoni/pull/261)、[PR #263](https://github.com/workhold/lightmoni/pull/263)、[PR #262](https://github.com/workhold/lightmoni/pull/262) 已依次合入 GitHub `main`，最终提交 `c7a7aba8ffbc03482b420245c312cf87fb7b04b7`；合入后无开放 PR。
 - 隔离工作树按相同顺序合并无冲突，文件树与最终 `main` 相同；`npm run version:check` 46/46、Runtime 和 AI Runtime 类型检查、Runtime/AI Runtime/Web 构建通过。
 - AI Runtime 测试 89/89；相关 Runtime 测试 62 项通过、1 项环境门禁跳过。首次 Runtime 测试因尚未构建 AI Runtime `dist` 而失败，按完整构建顺序补齐后重跑通过。
+- `npm audit --omit=dev` 报告 Runtime 2 项 high、AI Runtime 4 项 high。涉及的 `systeminformation`、`undici`、`@mastra/core`、`@modelcontextprotocol/server`、`zod` 与 `@earendil-works/pi-coding-agent` 锁定版本均和本次合入前的 `main` 相同；本次发布未修复这些既有依赖告警。
 
 ## 镜像发布
 
