@@ -18,6 +18,7 @@
 - PR 已补齐 0.1.8 统一版本与固定 Compose 标签；发布镜像、中心部署及目标 Agent 升级仍须在合入后进行。
 - `npm run version:check`：0.1.8 的 46 项版本一致性检查通过；根目录 `npm run build` 通过（SDK、runtime、AI runtime、Web）。
 - `docker compose config --quiet` 在注入仅用于本地语法验证的占位密码后通过；三组相关测试共 62 项通过，`git diff --check` 通过。
+- `npm run release:agent -- 0.1.8` 生成 Linux amd64/arm64 两份发行包，`agent-releases.json` 的版本均为 0.1.8，源码修订均为候选提交 `cd3e828c97394138faf71bc2c6bd32179ae62d99`。官方 Node 下载在 120 秒超时后，改用受脚本支持的镜像源下载，包内容仍按官方 SHA256 清单校验；最终合入提交需重新打包并核对新修订。
 
 ## 架构影响
 
