@@ -91,6 +91,17 @@ test("script runs once only after durable intent and an online permit then repor
   finally { f.close(); }
 });
 
+test("SSH one-shot claims after heartbeat without waiting for application collection", async () => {
+  const f = fixture(); try {
+    f.runner.observeOnce = async () => { throw Error("application_collection_blocked"); };
+    await f.runner.once(undefined, "job");
+    assert.equal(f.runCalls, 1);
+    assert.equal(f.journal.get("job")?.state, "succeeded");
+    assert.deepEqual(f.requests.slice(0, 2).map(request => request.route), ["heartbeat", "jobs/claim"]);
+    assert.deepEqual(f.requests.find(request => request.route === "jobs/claim")?.body, { job_id: "job" });
+  } finally { f.close(); }
+});
+
 test("lost claim response retains its request ID across fresh signing and never runs twice", async () => {
   const f = fixture(); try { f.loseClaim(); await assert.rejects(f.runner.once(), /network_lost/); assert.equal(f.runCalls, 0); f.advance(1000); await f.runner.once(); assert.equal(f.runCalls, 1); const claims = f.requests.filter(r => r.route === "jobs/claim"); assert.equal(claims[0].claims.request_id, claims[1].claims.request_id); assert.notEqual(claims[0].claims.iat, claims[1].claims.iat); }
   finally { f.close(); }
