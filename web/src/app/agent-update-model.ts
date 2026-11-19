@@ -14,6 +14,7 @@ export interface AgentUpdatePlan {
  ssh_account:{id:string;username:string;revision:number};
  credential?:{id:string;method:string;retention?:string;expires_at?:string};
  current:AgentUpdateCurrent;target:AgentRelease;target_revision?:string;expires_at:string;
+ force_unknown?:{reason:string;blockers:{kind:string;id:string;state:string}[]};
  steps:string[];warnings?:string[];
 }
 export type AgentUpdateStatus='awaiting_approval'|'running'|'verifying'|'succeeded'|'rolled_back'|'failed'|'unknown'|'cancelled';

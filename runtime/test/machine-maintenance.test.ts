@@ -6,7 +6,7 @@ import {Router} from '../src/shared/http.js';
 import {NodeStore} from '../src/server/nodes-model.js';
 import {registerAgentJobs} from '../src/server/agent-jobs.js';
 import {OperationsPlatformStore} from '../src/ops/store.js';
-import {maintenanceBlockers,maintenanceWorkBusy,prepareMachineMaintenance,pendingMaintenancePreparation} from '../src/server/machine-maintenance.js';
+import {assertMaintenanceOverride,captureMaintenanceOverride,maintenanceBlockers,maintenanceWorkBusy,prepareMachineMaintenance,pendingMaintenancePreparation} from '../src/server/machine-maintenance.js';
 import {hasPendingAgentUpdate} from '../src/server/machine-agent-updates-guard.js';
 
 function fixture(t:any) {
@@ -84,4 +84,34 @@ test('unclaimed queued work waits while started or unknown work blocks maintenan
  assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),false);
  f.db.run("DELETE FROM task_runs WHERE id='user-script'");
  f.db.run("UPDATE privileged_jobs SET state='unknown'");assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),true);
+});
+
+test('reviewed override skips only the pinned historical unknown records',t=>{
+ const f=fixture(t);
+ f.db.exec("CREATE TABLE privileged_jobs(id TEXT,task_run_id TEXT,agent_id TEXT,machine_id TEXT,state TEXT,started_at TEXT,lease_id TEXT,capability TEXT,resolved_at TEXT,resolved_by TEXT,resolution_reason TEXT);CREATE TABLE task_runs(id TEXT,agent_id TEXT,host_id TEXT,state TEXT,resolved_at TEXT,superseded_by TEXT)");
+ f.db.run("INSERT INTO privileged_jobs VALUES(?,?,'agent','host','unknown','started','lease','operations.managed.v1','','','')",f.job.id,f.job.id);
+ f.db.run("INSERT INTO task_runs VALUES(?,'agent','host','unknown','','')",f.job.id);
+ f.db.run("UPDATE agent_jobs SET state='unknown' WHERE id=?",f.job.id);
+ const override=captureMaintenanceOverride(f.deps,'agent','host','inspected host: no active operation');
+ assert.deepEqual(new Set(override.blockers.map(item=>item.kind)),new Set(['task_run','agent_job','privileged_job']));
+ assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),true);
+ assert.equal(maintenanceWorkBusy(f.deps,'agent','host',override),false);
+ assert.doesNotThrow(()=>assertMaintenanceOverride(f.deps,'agent','host',override));
+ const preparation=prepareMachineMaintenance(f.deps,'host','agent',false,override);preparation.release();
+ f.db.run("INSERT INTO task_runs VALUES('new-unknown','agent','host','unknown','','')");
+ assert.throws(()=>assertMaintenanceOverride(f.deps,'agent','host',override),/force_override_changed/);
+ assert.equal(maintenanceWorkBusy(f.deps,'agent','host',override),true);
+ f.db.run("DELETE FROM task_runs WHERE id='new-unknown'");
+ f.db.run("UPDATE privileged_jobs SET state='running' WHERE id=?",f.job.id);
+ assert.throws(()=>assertMaintenanceOverride(f.deps,'agent','host',override),/force_override_changed/);
+ assert.equal(maintenanceWorkBusy(f.deps,'agent','host',override),true);
+});
+
+test('force override rejects active tasks, empty reasons and other hosts',t=>{
+ const f=fixture(t);
+ f.db.run("UPDATE agent_jobs SET state='unknown' WHERE id=?",f.job.id);
+ assert.throws(()=>captureMaintenanceOverride(f.deps,'agent','host',''),/force_reason_required/);
+ assert.throws(()=>captureMaintenanceOverride(f.deps,'foreign','other','reviewed'),/force_unknown_only/);
+ f.db.run("UPDATE agent_jobs SET state='leased' WHERE id=?",f.job.id);
+ assert.throws(()=>captureMaintenanceOverride(f.deps,'agent','host','reviewed'),/force_unknown_only/);
 });
