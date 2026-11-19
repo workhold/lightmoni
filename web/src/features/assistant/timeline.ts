@@ -1,6 +1,6 @@
 // Ported from Doca's persistent-event/timeline presentation skeleton.
 // Doca: MIT License, Copyright (c) 2026 smartdoca. See NOTICE.md.
-import type { AssistantEvent, TurnView } from './types';
+import type { AssistantEvent, Attachment, TurnView } from './types';
 import type { TimeRange } from '../../shared/types';
 import type {Language} from '../../shared/i18n';
 import {translator} from '../alerts/translation.ts';
@@ -25,12 +25,15 @@ export function assistantTimeline(events: AssistantEvent[],language:Language='zh
   for (const event of ordered) {
     let turn = turns.get(event.turn_id);
     if (!turn) {
-      turn = { id: event.turn_id, text: '', answer: '', tools: [], timestamp: event.timestamp, status: 'running' };
+      turn = { id: event.turn_id, text: '', attachments: [], answer: '', tools: [], timestamp: event.timestamp, status: 'running' };
       turns.set(event.turn_id, turn);
       stepAnswers.set(event.turn_id, new Map());
     }
     const data = event.data;
-    if (event.type === 'user.message') turn.text = String(data.text ?? '');
+    if (event.type === 'user.message') {
+      turn.text = String(data.text ?? '');
+      turn.attachments = Array.isArray(data.attachments) ? data.attachments.filter((item): item is Attachment => !!item && typeof item === 'object' && typeof item.name === 'string' && (item.kind === 'image' || item.kind === 'pdf')).map(({kind,name,mime_type,pages}) => ({kind,name,mime_type,pages})) : [];
+    }
     if (event.type === 'assistant.delta' || event.type === 'assistant.message') {
       const step = Number(data.step ?? 1);
       const answers = stepAnswers.get(event.turn_id)!;

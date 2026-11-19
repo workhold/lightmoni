@@ -1,0 +1,20 @@
+{
+  "passed": true,
+  "turn_order": [
+    "first",
+    "third",
+    "second",
+    "hold stop",
+    "ssh test",
+    "analyze attachment"
+  ],
+  "cancel_count": 2,
+  "composer_width": 840,
+  "mobile_composer_width": 323,
+  "mobile_theme": "dark",
+  "attachment_kinds": [
+    "image",
+    "pdf"
+  ],
+  "page_errors": []
+}

@@ -7,6 +7,7 @@ export interface ToolCall {
 export interface Message {
   role: "user" | "assistant" | "tool" | "system";
   content: string;
+  attachments?: { id?: string; kind: "image" | "pdf"; name: string; mime_type: string; pages?: number; data?: string; text?: string }[];
   tool_calls?: ToolCall[];
   tool_call_id?: string;
   provider_state?: { type: "reasoning" | "text"; text?: string; provider_options: Record<string, Record<string, string>> }[];

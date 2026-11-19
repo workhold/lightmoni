@@ -167,7 +167,7 @@ async function run(input: Input) {
     input.tools,
     input.config.max_input_tokens,
   );
-  const summaryHistory = (start: number, end: number) => JSON.stringify(input.messages.slice(start, end).map(({provider_state, tool_calls, ...message}) => ({...message, ...(tool_calls ? {tool_calls: tool_calls.map(({provider_options, ...call}) => call)} : {})})));
+  const summaryHistory = (start: number, end: number) => JSON.stringify(input.messages.slice(start, end).map(({provider_state, tool_calls, attachments, ...message}) => ({...message, ...(attachments ? {attachments: attachments.map(({kind,name,mime_type,pages}) => ({kind,name,mime_type,pages}))} : {}), ...(tool_calls ? {tool_calls: tool_calls.map(({provider_options, ...call}) => call)} : {})})));
   if (plan.through > through) {
     phase = "compact";
     event("context.compacting", {});

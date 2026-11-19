@@ -63,12 +63,14 @@ async function language(next,{crossTab=false}={}){
  await expect(page.locator('html')).toHaveAttribute('lang',next);
 }
 async function choose(select,option,targetPage=page){await select.click();await targetPage.locator('.ant-select-dropdown:visible .ant-select-item-option-content').getByText(option,{exact:true}).click()}
+async function scope(panel){const visible=page.locator('.lm-assistant-scope:visible');if(!await visible.count())await panel.getByRole('button',{name:/分析范围与设置|Analysis scope and settings/}).click();return visible}
 async function overflowElements(targetPage){return targetPage.evaluate(()=>({viewport:innerWidth,document:document.documentElement.scrollWidth,elements:[...document.querySelectorAll('body *')].flatMap(element=>{const box=element.getBoundingClientRect(),style=getComputedStyle(element);return box.width>0&&box.right>innerWidth+1&&style.visibility==='visible'?[{tag:element.tagName,class:typeof element.className==='string'?element.className:'',left:box.left,right:box.right,width:box.width}]:[]}).slice(0,15)}))}
 async function assertAssistantInputs(panel,prompt,workspace){
  await expect(panel.locator('.lm-assistant-composer textarea')).toHaveValue(prompt);
- await expect(panel.locator('.lm-assistant-code-workspace input')).toHaveValue(workspace);
- await expect(panel.locator('.lm-assistant-context .ant-select').nth(0)).toContainText('log_app');
- await expect(panel.locator('.lm-assistant-context .ant-select').nth(1)).toContainText('订单服务');
+ const controls=await scope(panel);
+ await expect(controls.getByRole('textbox',{name:/代码工作区|Code workspace/})).toHaveValue(workspace);
+ await expect(controls.locator('.ant-select').nth(0)).toContainText('log_app');
+ await expect(controls.locator('.ant-select').nth(1)).toContainText('订单服务');
 }
 async function verifyLoginForms(){
  for(const setup of [false,true]){
@@ -111,13 +113,13 @@ async function verifyLoginForms(){
 }
 try{
  await verifyLoginForms();
- await page.goto(origin+'/');await page.getByRole('button',{name:'打开 AI 助手',exact:true}).click();
+ await page.goto(origin+'/overview');await page.getByRole('button',{name:'打开 AI 助手',exact:true}).click();
  const compact=page.locator('.ant-drawer .lm-assistant.is-compact');
- await expect(compact.locator('.lm-assistant-code-workspace input')).toHaveValue('initial-workspace');
- await choose(compact.locator('.lm-assistant-context .ant-select').nth(0),'log_app');
- await choose(compact.locator('.lm-assistant-context .ant-select').nth(1),'订单服务');
+ await expect((await scope(compact)).getByRole('textbox',{name:'代码工作区'})).toHaveValue('initial-workspace');
+ await choose((await scope(compact)).locator('.ant-select').nth(0),'log_app');
+ await choose((await scope(compact)).locator('.ant-select').nth(1),'订单服务');
  await compact.locator('.lm-assistant-composer textarea').fill('抽屉中的提问草稿');
- await compact.locator('.lm-assistant-code-workspace input').fill('draft-workspace/不翻译');
+ await (await scope(compact)).getByRole('textbox',{name:'代码工作区'}).fill('draft-workspace/不翻译');
  const beforeDrawer=requests.length;
  await language('en-US',{crossTab:true});
  await assertAssistantInputs(compact,'抽屉中的提问草稿','draft-workspace/不翻译');
@@ -129,16 +131,16 @@ try{
 
  await page.goto(origin+'/assistant');
  const assistant=page.locator('.lm-assistant');
- await expect(assistant.locator('.lm-assistant-code-workspace input')).toHaveValue('initial-workspace');
- await choose(assistant.locator('.lm-assistant-context .ant-select').nth(0),'log_app');
- await choose(assistant.locator('.lm-assistant-context .ant-select').nth(1),'订单服务');
- await choose(assistant.locator('.lm-assistant-context .ant-select').nth(2),'最近 6 小时');
+ await expect((await scope(assistant)).getByRole('textbox',{name:'代码工作区'})).toHaveValue('initial-workspace');
+ await choose((await scope(assistant)).locator('.ant-select').nth(0),'log_app');
+ await choose((await scope(assistant)).locator('.ant-select').nth(1),'订单服务');
+ await choose((await scope(assistant)).locator('.ant-select').nth(2),'最近 6 小时');
  await assistant.locator('.lm-assistant-composer textarea').fill('全页提问草稿');
- await assistant.locator('.lm-assistant-code-workspace input').fill('scripts/custom-draft');
+ await (await scope(assistant)).getByRole('textbox',{name:'代码工作区'}).fill('scripts/custom-draft');
  const beforePage=requests.length;
  await language('en-US');
  await assertAssistantInputs(assistant,'全页提问草稿','scripts/custom-draft');
- await expect(assistant.locator('.lm-assistant-context .ant-select').nth(2)).toContainText('Last 6 hours');
+ await expect((await scope(assistant)).locator('.ant-select').nth(2)).toContainText('Last 6 hours');
  expect(requests.length).toBe(beforePage);
  await language('zh-CN');
  await assertAssistantInputs(assistant,'全页提问草稿','scripts/custom-draft');
@@ -146,6 +148,7 @@ try{
 
  await assistant.locator('.lm-assistant-session').getByText('业务会话原文',{exact:true}).click();
  await expect(assistant).toContainText('模型生成原文不翻译');
+ if(await assistant.locator('.lm-assistant-activity-trigger').getAttribute('aria-expanded')==='false')await assistant.locator('.lm-assistant-activity-trigger').click();
  await assistant.locator('.lm-assistant-tools .ant-collapse-header').click();
  await assistant.getByRole('button',{name:'审阅大盘草稿',exact:true}).click();
  const dashboard=page.locator('.ant-modal:visible');
