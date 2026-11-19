@@ -1,5 +1,7 @@
 # SDD 188 验收记录
 
+GitHub PR：[workhold/lightmoni#263](https://github.com/workhold/lightmoni/pull/263)，目标 `main`；未合入或部署。
+
 ## 自动化
 
 | 检查 | 结果 |
