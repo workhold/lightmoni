@@ -24,7 +24,7 @@ Date: 2026-11-21 Asia/Shanghai.
 
 ## Boundary
 
-- No production host was contacted or mutated by this SDD's implementation checks.
+- The new implementation checks and browser harness did not contact production. The separate incident diagnosis below used existing administrator APIs to reconcile one center-side unknown execution and release one interrupted in-memory lane; it did not dispatch SSH or mutate the remote host.
 - Historical unknown status is not rewritten to success.
 - The new closure path never performs SSH or remote mutation; it requires a fresh active executor heartbeat already present in the center.
 
@@ -48,4 +48,4 @@ Result: **205/205 passed**. The sweep covers first installation/recovery, runtim
   - A current online fully managed 0.1.8 host shows disabled overwrite deployment, enabled update history, enabled uninstall, and the maintenance-fence entry.
   - With that host selected, SSH preflight/uninstall/remove-node are enabled where applicable; overwrite deployment, host deletion, and a new upgrade rollout are disabled; the helper separately documents 50-host general batches and 20-host Agent rollouts.
 - `npm --prefix web run typecheck` and `npm --prefix web run build` passed after the state-gating change.
-- A complete `npm --prefix runtime test` sweep was also attempted in this checkout. It exposed pre-existing local release-asset/live-SSH/environment failures outside this change (generated Agent/SDK archives were not present in `runtime/downloads`, plus local SSH/network-sensitive cases). It is not used as this PR's pass signal; the targeted agent lifecycle sweep above remains the relevant regression evidence.
+- A complete `npm --prefix runtime test` sweep was also attempted in this checkout. It was not green in this checkout: generated Agent/SDK archives were absent from `runtime/downloads`, and several live-SSH/network-sensitive cases failed. Two non-release failures (`machine-service-addresses.test.ts` NAT candidates and `node-lifecycle.test.ts` archived-node plan authorization) were independently reproduced on clean `origin/main`, so they are not introduced by this PR. It is not used as this PR's pass signal; the targeted agent lifecycle sweep above remains the relevant regression evidence.
