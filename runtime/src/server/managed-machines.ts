@@ -16,7 +16,7 @@ import { NodeStore } from "./nodes-model.js";
 import { join } from "node:path";
 import { createAgentUpdatesSchema, registerMachineAgentUpdates, type AgentUpdateStore } from "./machine-agent-updates.js";
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
-import { maintenanceBlockers } from "./machine-maintenance.js";
+import { maintenanceBlockers, resolveLegacyExecutorBootstrap } from "./machine-maintenance.js";
 import type { PrivilegedExecutorStore } from "./privileged-executors.js";
 import type { ExecutionGrantRegistry } from "../capabilities/execution-grants.js";
 import { createAgentRuntimeSchema, preferredAgentRuntimeMode, recordAgentRuntime, registerMachineAgentRuntime, validAgentRuntimeMode, validAgentRuntimeObservation } from './machine-agent-runtime.js';
@@ -350,7 +350,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const lane = busy.get(machineID);
     if (lane) fail(409, `此主机有${busyLaneLabel(lane.holder)}操作进行中（自 ${iso(new Date(lane.since))} 起），请等待其结束；若确认操作已异常中断，管理员可通过主机忙状态接口释放`);
   };
-  const busyView = (machineID: string) => { const lane = busy.get(machineID); return { machine_id: machineID, busy: !!lane, ...(lane ? { holder: lane.holder, since: iso(new Date(lane.since)) } : {}) }; };
+  const busyView = (machineID: string) => { const lane = busy.get(machineID), agent = db.get<any>("SELECT agent_id FROM managed_machines WHERE id=?",machineID)?.agent_id ?? ""; return { machine_id: machineID, busy: !!lane, maintenance_blockers: agent ? maintenanceBlockers(deps,agent,machineID) : [], ...(lane ? { holder: lane.holder, since: iso(new Date(lane.since)) } : {}) }; };
   const releaseBusy = (machineID: string, actor: string, reason: string) => {
     const lane = busy.get(machineID);
     if (!lane) return { machine_id: machineID, released: false };
@@ -1089,6 +1089,14 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     if (!reason) fail(400, "释放主机忙状态需要填写原因");
     if (reason.length > 500) fail(400, "invalid reason");
     ctx.json(releaseBusy(ctx.params.id, ctx.user.id, reason));
+  }));
+  router.post("/api/v1/machines/:id/executor-bootstraps/:bootstrapId/reconcile", safe(async ctx => {
+    admin(ctx); ensureMachine(ctx.params.id);
+    if (ctx.req.headers.authorization || !ctx.req.headers.cookie?.split(";").some(part=>part.trim().startsWith("lm_session=")) || deps.auth.user(ctx.req)?.id!==ctx.user.id || deps.auth.user(ctx.req)?.role!=="admin" || !db.get("SELECT id FROM users WHERE id=? AND role='admin' AND active=1",ctx.user.id)) fail(403,"human_admin_session_required");
+    const body = record(await ctx.body()) as any;
+    if (Object.keys(body).some(key=>!["confirm","reason"].includes(key))) fail(400,"unknown request parameter");
+    if (body.confirm !== true) fail(400,"explicit_confirmation_required");
+    ctx.json(resolveLegacyExecutorBootstrap(deps,ctx.params.id,ctx.params.bootstrapId,ctx.user.id,String(body.reason??"")));
   }));
   router.post('/api/v1/machines/:id/installation-preflight',safe(async ctx=>{admin(ctx);ctx.json(await installationPreflight(ctx.params.id,await machineBody(ctx),ctx.user.id,ctx.signal));}));
   router.get('/api/v1/machines/:id/installation-preflights',safe(ctx=>{admin(ctx);ensureMachine(ctx.params.id);ctx.json(db.all<any>('SELECT * FROM machine_installation_selections WHERE machine_id=? ORDER BY created_at DESC,rowid DESC LIMIT 100',ctx.params.id).map(value=>({...value,attempts:db.all<any>('SELECT ordinal,credential_id,account_id,username,account_revision,status,check_id,result_json,created_at,finished_at FROM machine_installation_selection_attempts WHERE selection_id=? ORDER BY ordinal',value.id).map(attempt=>({...attempt,result:parseJSON(attempt.result_json,{}) ,result_json:undefined}))})));}));

@@ -6,7 +6,7 @@ import {Router} from '../src/shared/http.js';
 import {NodeStore} from '../src/server/nodes-model.js';
 import {registerAgentJobs} from '../src/server/agent-jobs.js';
 import {OperationsPlatformStore} from '../src/ops/store.js';
-import {assertMaintenanceOverride,captureMaintenanceOverride,maintenanceBlockers,maintenanceWorkBusy,prepareMachineMaintenance,pendingMaintenancePreparation} from '../src/server/machine-maintenance.js';
+import {assertMaintenanceOverride,captureMaintenanceOverride,maintenanceBlockers,maintenanceWorkBusy,maintenanceFenceMessage,prepareMachineMaintenance,pendingMaintenancePreparation,resolveLegacyExecutorBootstrap} from '../src/server/machine-maintenance.js';
 import {hasPendingAgentUpdate} from '../src/server/machine-agent-updates-guard.js';
 
 function fixture(t:any) {
@@ -114,4 +114,43 @@ test('force override rejects active tasks, empty reasons and other hosts',t=>{
  assert.throws(()=>captureMaintenanceOverride(f.deps,'foreign','other','reviewed'),/force_unknown_only/);
  f.db.run("UPDATE agent_jobs SET state='leased' WHERE id=?",f.job.id);
  assert.throws(()=>captureMaintenanceOverride(f.deps,'agent','host','reviewed'),/force_unknown_only/);
+});
+
+
+test('resolved legacy executor bootstrap fences are observable and can be closed with current executor evidence',t=>{
+  const f=fixture(t),at=f.deps.now().toISOString();
+  f.db.exec(`CREATE TABLE machine_executor_bootstraps(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,status TEXT NOT NULL,executor_id TEXT NOT NULL DEFAULT '',install_generation INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE privileged_executors(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,state TEXT NOT NULL,install_generation INTEGER NOT NULL,last_seen TEXT NOT NULL);
+    CREATE TABLE privileged_audit(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,job_id TEXT NOT NULL DEFAULT '',actor_id TEXT NOT NULL,event TEXT NOT NULL,created_at TEXT NOT NULL,detail_json TEXT NOT NULL DEFAULT '{}');
+    CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT NOT NULL,active INTEGER NOT NULL);`);
+  f.db.run("INSERT INTO machine_executor_bootstraps VALUES('legacy-bootstrap','host','agent','unknown','old-executor',4)");
+  f.db.run("INSERT INTO users VALUES('admin','admin',1)");
+  assert.deepEqual(maintenanceBlockers(f.deps,'agent','host'),[{kind:'executor_bootstrap',id:'legacy-bootstrap',state:'unknown'}]);
+  assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),true);
+  assert.match(maintenanceFenceMessage(f.deps,'agent','host'),/executor_bootstrap legacy-b unknown/);
+  assert.throws(()=>prepareMachineMaintenance(f.deps,'host','agent'),/maintenance_execution_pending: executor_bootstrap/);
+  assert.throws(()=>resolveLegacyExecutorBootstrap(f.deps,'host','legacy-bootstrap','admin','current executor supersedes legacy fence'),/current_executor_required/);
+  f.db.run("INSERT INTO privileged_executors VALUES('current-executor','host','agent','active',5,?)",at);
+  const closed=resolveLegacyExecutorBootstrap(f.deps,'host','legacy-bootstrap','admin','Current active executor supersedes the uncertain legacy bootstrap; no remote mutation.');
+  assert.equal(closed.status,'unknown');
+  assert.equal(closed.resolved_by,'admin');
+  assert.equal(maintenanceWorkBusy(f.deps,'agent','host'),false);
+  assert.deepEqual(maintenanceBlockers(f.deps,'agent','host'),[]);
+  const audit=f.db.get<any>("SELECT * FROM privileged_audit WHERE event='legacy_executor_bootstrap_closed'");
+  assert.equal(audit.machine_id,'host');assert.equal(audit.job_id,'legacy-bootstrap');
+  assert.throws(()=>resolveLegacyExecutorBootstrap(f.deps,'host','legacy-bootstrap','admin','repeat'),/already_closed/);
+});
+
+test('legacy executor bootstrap closure rejects stale or older executors',t=>{
+  const f=fixture(t),at=f.deps.now().toISOString();
+  f.db.exec(`CREATE TABLE machine_executor_bootstraps(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,status TEXT NOT NULL,executor_id TEXT NOT NULL DEFAULT '',install_generation INTEGER NOT NULL DEFAULT 0,resolved_at TEXT NOT NULL DEFAULT '',resolved_by TEXT NOT NULL DEFAULT '',resolution_reason TEXT NOT NULL DEFAULT '');
+    CREATE TABLE privileged_executors(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,state TEXT NOT NULL,install_generation INTEGER NOT NULL,last_seen TEXT NOT NULL);
+    CREATE TABLE privileged_audit(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,job_id TEXT NOT NULL DEFAULT '',actor_id TEXT NOT NULL,event TEXT NOT NULL,created_at TEXT NOT NULL,detail_json TEXT NOT NULL DEFAULT '{}');
+    CREATE TABLE users(id TEXT PRIMARY KEY,role TEXT NOT NULL,active INTEGER NOT NULL);`);
+  f.db.run("INSERT INTO machine_executor_bootstraps VALUES('legacy-bootstrap','host','agent','unknown','old-executor',6,'','','')");
+  f.db.run("INSERT INTO users VALUES('admin','admin',1)");
+  f.db.run("INSERT INTO privileged_executors VALUES('older-executor','host','agent','active',5,?)",at);
+  assert.throws(()=>resolveLegacyExecutorBootstrap(f.deps,'host','legacy-bootstrap','admin','evidence'),/current_executor_required/);
+  f.db.run("UPDATE privileged_executors SET install_generation=7,last_seen=?",'2020-01-01T00:00:00.000Z');
+  assert.throws(()=>resolveLegacyExecutorBootstrap(f.deps,'host','legacy-bootstrap','admin','evidence'),/current_executor_required/);
 });
