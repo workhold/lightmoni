@@ -14,6 +14,7 @@ export default function MachineWorkloadRecoveryDialog({machine,onClose,onRefresh
   const code=value instanceof Error?value.message:String(value);
   if(code.includes('upgrade_required'))return t('请先升级当前 Agent，再核验旧实例','Upgrade the current Agent before verifying previous instances');
   if(code.includes('execution_unresolved'))return t('旧身份仍在线或有未结束任务，请先核对任务结果','The previous Agent or its execution is unresolved. Verify the task results first.');
+  if(code.includes('auto_inspection_pending'))return t('自动只读核验正在执行；请等待结果或核对未知结果后重试','An automatic read-only check is running. Wait for its result or review an unknown outcome, then retry.');
   if(code.includes('instance_count'))return t('没有需要恢复绑定的旧实例，或数量超过单次上限','No previous bindings require recovery, or the batch exceeds its limit.');
   if(code.includes('managed_state_required'))return t('原受管状态或数据位置无法确认，请先核对保留目录和备份','The original managed state or data location is unconfirmed. Check retained directories and backups.');
   if(code.includes('ownership_unverified'))return t('容器归属、受管状态或固定路径未通过核验，请核对原目录和备份','Container ownership, managed state or fixed paths could not be verified. Check original directories and backups.');
@@ -37,7 +38,7 @@ export default function MachineWorkloadRecoveryDialog({machine,onClose,onRefresh
   try{
    const next=valid(await api<Plan>(action==='plan'?`${base}/plan`:`${base}/${encodeURIComponent(old!.id)}/${action}`,{method:'POST',body:JSON.stringify(action==='plan'?{reason:reason.trim()}:action==='apply'?{revision:old!.revision,confirm:true}:{})}));
    if(mounted.current){setRecord(next);setChecked(false);setName('');setUncertain(false);void onRefresh().catch(()=>{});}
-  }catch(e){if(mounted.current){setError(message(e));setUncertain(true);}}finally{pending.current=false;if(mounted.current)setBusy(false);}
+  }catch(e){if(mounted.current){setError(message(e));setUncertain(!(e instanceof Error&&e.message.includes('auto_inspection_pending')));}}finally{pending.current=false;if(mounted.current)setBusy(false);}
  };
  const labels:Record<string,string>={preparing:t('正在只读核验旧实例','Verifying previous instances'),awaiting_approval:t('核验完成，等待审阅','Verified; awaiting review'),verifying:t('正在复验并恢复绑定','Rechecking and restoring bindings'),succeeded:t('应用绑定已恢复','Application bindings restored'),failed:t('恢复未完成','Recovery incomplete'),unknown:t('结果待核对','Outcome requires verification'),cancelled:t('计划已取消','Plan cancelled'),expired:t('计划已过期','Plan expired')};
  const expired=!!record&&Date.parse(record.expires_at)<=now;

@@ -18,6 +18,7 @@ const active = [
   "running",
   "unknown",
 ];
+const inFlight = active.filter(state => state !== "unknown");
 export const INSTANCE_RECOVERY_CAPABILITY =
   "operations.platform.instance-recovery.v1";
 export const INSTANCE_RECOVERY_REVIEW_CAPABILITY='operations.platform.instance-recovery-review.v1';
@@ -152,6 +153,28 @@ export function recoverReinstalledInstances(
       m.agent_id,
     );
     if (old.length) blockedMachines.add(machineID);
+    if (!old.length) continue;
+    if (db.get(
+      "SELECT 1 FROM ops_workload_recoveries WHERE machine_id=? AND status IN ('preparing','awaiting_approval','verifying','unknown')",
+      machineID,
+    )) {
+      pending = "agent_reinstall_review_pending";
+      continue;
+    }
+    const inProgress = db.get<Row>(`SELECT run.state FROM ops_instance_recoveries recovery
+      JOIN ops_cluster_instances instance ON instance.id=recovery.instance_id
+      JOIN ops_platform_runs run ON run.id=recovery.run_id
+      LEFT JOIN agent_jobs job ON job.id=run.job_id
+      WHERE instance.machine_id=? AND run.agent_id=?
+        AND (run.state IN (${inFlight.map(() => '?').join(',')})
+          OR (run.state='unknown' AND (job.id IS NULL OR ${blockingAgentJobSQL(db,'job')}))) LIMIT 1`,
+      machineID, m.agent_id, ...inFlight);
+    if (inProgress) {
+      pending = inProgress.state === 'unknown'
+        ? "agent_reinstall_execution_unresolved"
+        : "agent_reinstall_inspecting";
+      continue;
+    }
     for (const i of old) {
       if (dataReviewRequired(store, i)) {
         pending = "agent_reinstall_stateful_review_required";
@@ -181,6 +204,10 @@ export function recoverReinstalledInstances(
           previous.run_id,
         );
       if (previous && previous.snapshot_json === JSON.stringify(target)) {
+        if (previous.status === "agent_reinstall_containers_remain" && run?.state === "succeeded") {
+          pending = previous.status;
+          continue;
+        }
         if (run && active.includes(run.state) && run.state !== "unknown") {
           pending = "agent_reinstall_inspecting";
           continue;
@@ -219,9 +246,30 @@ export function recoverReinstalledInstances(
       );
       runs.push(queued);
       pending = "agent_reinstall_inspecting";
+      break;
     }
   }
   return { runs, pending, blockedMachines };
+}
+function cancelQueuedAutomaticInspections(store: PlatformStore, machineID: string, actor: string) {
+  const {db} = store.deps;
+  const rows = db.all<Row>(`SELECT run.id,run.resource_id,run.state,job.state AS job_state
+    FROM ops_instance_recoveries recovery
+    JOIN ops_cluster_instances instance ON instance.id=recovery.instance_id
+    JOIN ops_platform_runs run ON run.id=recovery.run_id
+    LEFT JOIN agent_jobs job ON job.id=run.job_id
+    WHERE instance.machine_id=? AND (run.state IN (${inFlight.map(() => '?').join(',')})
+      OR (run.state='unknown' AND (job.id IS NULL OR ${blockingAgentJobSQL(db,'job')})))`,
+    machineID, ...inFlight);
+  if (rows.some(row => row.state !== 'queued' || row.job_state !== 'queued'))
+    fail(409, 'workload_recovery_auto_inspection_pending');
+  for (const row of rows) {
+    try {
+      store.jobs.cancelQueuedDeployment('platform-' + row.resource_id, row.id, actor);
+    } catch {
+      fail(409, 'workload_recovery_auto_inspection_pending');
+    }
+  }
 }
 export function recordInstanceRecovery(
   store: PlatformStore,
@@ -417,6 +465,7 @@ export function registerInstanceRecoveryReview(store:PlatformStore,safe:(fn:Hand
   db.transaction(()=>{
    db.run("UPDATE ops_workload_recoveries SET status='expired' WHERE machine_id=? AND status='awaiting_approval' AND expires_at<=?",ctx.params.id,at);
    if(db.get("SELECT 1 FROM ops_workload_recoveries WHERE machine_id=? AND status IN ('preparing','awaiting_approval','verifying','unknown')",ctx.params.id))fail(409,'workload_recovery_pending');
+   cancelQueuedAutomaticInspections(store,ctx.params.id,ctx.user.id);
    const target=reviewSnapshot(store,ctx.params.id);
    db.run("INSERT INTO ops_workload_recoveries(id,machine_id,agent_id,status,snapshot_json,reason,created_by,created_at) VALUES(?,?,?,'preparing',?,?,?,?)",rowID,ctx.params.id,target.machine.agent_id,JSON.stringify(target),b.reason.trim(),ctx.user.id,at);
    const row=reviewRow(store,rowID),owner=store.get(target.instances[0].owner_id);
