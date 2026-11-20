@@ -14,3 +14,8 @@
 .lm-retention-settings{max-width:760px}.lm-retention-settings>p,.lm-retention-hint{color:var(--lm-muted);line-height:1.7}.lm-retention-settings .ant-form{max-width:560px}.lm-retention-hint{font-size:12px}.lm-retention-table-name{font-family:ui-monospace,SFMono-Regular,monospace;overflow-wrap:anywhere}
 
 .lm-shell .lm-assistant-launcher.ant-btn.ant-btn-circle{left:10px;right:auto;bottom:90px;width:32px;height:32px;box-shadow:none}
+
+.lm-brand-copy{min-width:0}
+.lm-brand-copy small{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.lm-brand-version{display:inline-block;min-width:0;padding:1px 6px;border:1px solid #344863;border-radius:999px;background:#182a42;color:#a4bbdd;font-size:10px;font-weight:600;line-height:16px;letter-spacing:0}
+.lm-shell.is-nav-collapsed .lm-brand-copy{display:none}
