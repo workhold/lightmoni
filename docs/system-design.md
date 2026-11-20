@@ -2940,3 +2940,28 @@ flowchart LR
 旧 Agent 缺少平台调和能力时，中心每 15 秒推进兼容性实例检查。多个实例的只读 SSH 检查可能连续占用同一主机的操作车道，使“先要求空闲、再创建维护预约”的一键升级无法开始。管理员发起一键升级后，中心先写入现有 `machine_maintenance_preparations` 预约，阻止该 Agent 的新作业入队和领取；中心 SSH 派发器在预约或更新记录存在时跳过该主机未领取的排队作业，保留队列状态。中心等待当前已运行作业及 SSH 车道自然结束，最多 90 秒。未知结果立即拒绝，等待超时、取消或探测失败仅释放本次 token 对应预约，不清除任务或远端状态。排空后续期预约，再沿用原有 `idle`、受管 Agent 检查、SSH 指纹探测及发行包固定流程；计划入库后，由 `awaiting_approval` 更新记录接管围栏，再按原有启动与健康确认协议执行。普通审阅计划、回退及批次仍要求即时空闲。
 
 主机升级能力投影在 SSH 目标和可复用凭据满足时允许管理员进入一键升级，即使当前车道忙碌；持久更新、安装、卸载、Docker 安装与缺少 Agent 等前提继续阻止入口。服务端始终重新检查真实围栏，按钮可用不代表现有任务被取消或升级已启动。该调整不改变凭据、Agent 协议、业务容器或状态表结构；生产现象、契约及验证见 [SDD184](../specs/184-agent-upgrade-drain/spec.md)。
+
+## 192. Agent 生命周期维护围栏闭环（SDD192）
+
+Agent 相关能力先按权威记录区分：主机/SSH 预检、首装、常驻心跳与遥测、普通任务、中心 SSH 普通作业、签名提权受管作业、升级/回退/批次、标准与恢复卸载、重装后应用绑定恢复、Docker/应用运维，以及已移除的历史 executor 首装。UI 心跳和容器状态只是证据；`machine_deployments`、`task_runs`、`agent_jobs`、`privileged_jobs`、`machine_agent_updates`、`machine_uninstallations`、恢复计划及各自领域记录才是结果事实。架构显示为“待检查”不是错误：中心必须通过固定 SSH 预检查真实架构，不能凭主机名或心跳猜测。
+
+Agent 首装、更新、卸载、任务中心、普通 Agent 作业与提权受管作业共享只读维护围栏投影。`GET /api/v1/machines/:id/busy` 继续区分进程内终端/检查/部署车道，同时返回持久化 `maintenance_blockers`，包含历史首装 executor bootstrap、task run、agent job 与 privileged job 的类型、ID 和状态。维护准备在拒绝时附带相同明细，页面不再只能展示泛化的 `maintenance_execution_pending`。
+
+单机与多选操作也消费同一状态投影：当前发行显示“查看 Agent 更新”而不是可升级；已有 Agent 禁止覆盖部署，活动 Agent 未移除前禁止删除主机；新升级批次仅包含发行可更新或待核对的已绑定主机。批量按钮显示可操作/已选数量，普通批次与 Agent 升级批次分别使用 50/20 上限。所有前端预判仅用于减少无效入口，服务端仍逐台复验权威状态。
+
+统一 Agent 发行移除了旧独立 executor 首装流程，但历史 `machine_executor_bootstraps.status='unknown'` 记录仍会永久阻塞后续维护。机器页提供“维护围栏与恢复”入口：内存车道仅可凭确认和原因释放，不改变任何持久结果；遗留 unknown 首装围栏只有在中心已经存在同主机、同 Agent、不低于该代次且心跳新鲜的 active 签名执行器时，才允许管理员交互会话确认并留因闭环。闭环不访问远端主机、不重放安装、不把历史 unknown 改写为成功，只补充 resolved 元数据并写入 `privileged_audit(legacy_executor_bootstrap_closed)`。运行中、待核对、执行器过期、身份不匹配或已闭环的记录继续拒绝。
+
+```mermaid
+flowchart LR
+  request["升级 / 卸载 / 维护计划"] --> gate["maintenanceWorkBusy"]
+  gate --> lane["进程内 busy：terminal / SSH / deployment"]
+  gate --> durable["持久围栏：bootstrap / task_run / agent_job / privileged_job"]
+  durable --> projection["busy + maintenance_blockers"]
+  projection --> task["任务中心或执行历史：只读核对"]
+  projection --> legacy["legacy unknown bootstrap"]
+  executor["当前 active 签名执行器心跳"] --> review["管理员确认 + 原因"]
+  legacy --> review --> audit["保留 unknown，写入 resolved 与审计"]
+  audit --> gate
+```
+
+规格、接口和验证见 [SDD192](../specs/192-agent-lifecycle-fence-closure/spec.md)。

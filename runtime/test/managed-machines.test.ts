@@ -275,6 +275,24 @@ test('busy lane reports holder and since, and an admin release with confirm and 
  lease.release();
 });
 
+test('busy projection and legacy bootstrap reconciliation expose durable fences',async t=>{
+ const clock=now;const f=await fixture(t,{now:()=>clock},undefined,true),h=await host(f,'legacy-bootstrap-fence');
+ f.db.run('UPDATE managed_machines SET agent_id=? WHERE id=?','legacy-agent',h.id);
+ f.db.exec(`CREATE TABLE machine_executor_bootstraps(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,status TEXT NOT NULL,executor_id TEXT NOT NULL DEFAULT '',install_generation INTEGER NOT NULL DEFAULT 0);
+  CREATE TABLE privileged_executors(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,agent_id TEXT NOT NULL,state TEXT NOT NULL,install_generation INTEGER NOT NULL,last_seen TEXT NOT NULL);
+  CREATE TABLE privileged_audit(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,job_id TEXT NOT NULL DEFAULT '',actor_id TEXT NOT NULL,event TEXT NOT NULL,created_at TEXT NOT NULL,detail_json TEXT NOT NULL DEFAULT '{}');`);
+ f.db.run('INSERT INTO machine_executor_bootstraps VALUES(?,?,?,?,?,?)','legacy-bootstrap',h.id,'legacy-agent','unknown','old-executor',3);
+ f.db.run('INSERT INTO privileged_executors VALUES(?,?,?,?,?,?)','current-executor',h.id,'legacy-agent','active',4,clock.toISOString());
+ const busy=await f.request(`/machines/${h.id}/busy`);
+ assert.equal(busy.status,200,busy.raw);assert.equal(busy.data.busy,false);assert.deepEqual(busy.data.maintenance_blockers,[{kind:'executor_bootstrap',id:'legacy-bootstrap',state:'unknown'}]);
+ assert.equal((await f.request(`/machines/${h.id}/executor-bootstraps/legacy-bootstrap/reconcile`,'POST',{confirm:true})).status,400);
+ assert.equal((await f.request(`/machines/${h.id}/executor-bootstraps/legacy-bootstrap/reconcile`,'POST',{confirm:true,reason:''})).status,400);
+ const closed=await f.request(`/machines/${h.id}/executor-bootstraps/legacy-bootstrap/reconcile`,'POST',{confirm:true,reason:'current signed executor heartbeat supersedes legacy uncertain bootstrap'});
+ assert.equal(closed.status,200,closed.raw);assert.equal(closed.data.status,'unknown');assert.equal(closed.data.resolved_by,'admin');
+ const after=await f.request(`/machines/${h.id}/busy`);
+ assert.deepEqual(after.data.maintenance_blockers,[]);
+});
+
 test('completed deployment plans cannot be cancelled and an active terminal blocks cancellation',async t=>{
  const f=await fixture(t),h=await host(f,'cancel-guard');
  const checked=await f.request(`/machines/${h.id}/ssh-check`,'POST',{});

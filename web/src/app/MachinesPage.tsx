@@ -27,6 +27,7 @@ import MachineEditDialog from './MachineEditDialog';
 import MachineServiceAddressesDialog from './MachineServiceAddressesDialog';
 import MachineAgentUninstallDialog,{type AgentUninstallation} from './MachineAgentUninstallDialog';
 import MachineStateRecoveryDialog from './MachineStateRecoveryDialog';
+import MachineMaintenanceFenceDialog from './MachineMaintenanceFenceDialog';
 import MachineWorkloadRecoveryDialog from './MachineWorkloadRecoveryDialog';
 import {type AgentItem,type AgentTaskLabel,type TaskHost} from './agent-model';
 import {NodeDetails} from './AgentsPage';
@@ -35,6 +36,7 @@ import HostTasksPanel from './HostTasksPanel';
 import HostExecutionPanel from './HostExecutionPanel';
 import {defaultAgentRuntimeMode,runtimeCapabilityText,runtimeObservation} from './agent-runtime-model';
 import MachineBatchDialog,{type BatchAction,type BatchTarget} from './MachineBatchDialog';
+import {batchUnavailableReason} from './machine-batch';
 import MachineAgentUpdateDialog,{AgentUpdateHistory} from './MachineAgentUpdateDialog';
 import MachineAgentRolloutDialog,{type AgentRolloutTarget} from './MachineAgentRolloutDialog';
 import {shortIdentity,updateIsActive,type AgentInstalledRelease,type AgentUpdate} from './agent-update-model';
@@ -130,6 +132,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const [taskHost,setTaskHost]=useState<TaskHost>();
  const [uninstallGuide,setUninstallGuide]=useState(false),[uninstallMode,setUninstallMode]=useState<'standard'|'recovery'>('standard'),[uninstallForce,setUninstallForce]=useState(false);
  const [stateRecoveryMachine,setStateRecoveryMachine]=useState<Pick<Machine,'id'|'name'>>();
+ const [fenceMachine,setFenceMachine]=useState<Pick<Machine,'id'|'name'>>();
  const [workloadRecoveryMachine,setWorkloadRecoveryMachine]=useState<Pick<Machine,'id'|'name'>>();
  useEffect(()=>{if(!admin)setWorkloadRecoveryMachine(undefined)},[admin]);
  useEffect(()=>{if(!admin)setStateRecoveryMachine(undefined)},[admin]);
@@ -450,12 +453,16 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   setSelectedIDs(previous=>{const next=admin?previous.filter(id=>allowed.has(id)):[];return next.length===previous.length?previous:next});
  },[admin,selectionScope]);
  const selectedRows=rows.filter(row=>selectedIDs.includes(row.id));
+ const bulkTarget=(row:FleetRow):BatchTarget=>{
+  return {id:row.id,name:row.name,address:row.address||undefined,port:row.port||undefined,
+   machine:{id:row.id,name:row.name,address:row.address,port:row.port,agent_id:row.agent_id,agent_status:row.agent_status,connection_method:row.connection_method,host_key_status:row.host_key_status,capabilities:{...row.capabilities}},
+   agent:row.node?{id:row.node.id,hostname:row.node.hostname,lifecycle_state:row.node.lifecycle_state}:undefined};
+ };
+ const eligibleBatchRows=(action:BatchAction)=>selectedRows.filter(row=>!batchUnavailableReason(action,bulkTarget(row)));
+ const upgradeEligibleRows=selectedRows.filter(row=>row.agent_id&&!['removed','uninstalled'].includes(row.agent_status)&&['update_available','unknown'].includes(row.agent_update?.state||'unknown'));
  const openBatch=(action:BatchAction)=>{
   if(!admin||loading||batch||rollout||!selectedRows.length)return;
-  const targets:BatchTarget[]=selectedRows.map(row=>({id:row.id,name:row.name,address:row.address||undefined,port:row.port||undefined,
-   machine:{id:row.id,name:row.name,address:row.address,port:row.port,agent_id:row.agent_id,agent_status:row.agent_status,connection_method:row.connection_method,host_key_status:row.host_key_status,capabilities:{...row.capabilities}},
-   agent:row.node?{id:row.node.id,hostname:row.node.hostname,lifecycle_state:row.node.lifecycle_state}:undefined}));
-  setBatch({action,targets});
+  setBatch({action,targets:selectedRows.map(bulkTarget)});
  };
  const batchSuccess=(target:BatchTarget,action:BatchAction,result:any)=>{
   cancelLoads();
@@ -503,7 +510,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   const maintenance=[
    {key:'deploy',label:t('部署 Agent','Deploy Agent'),disabled:!cap.deploy_agent?.available&&!accountRepairable(cap.deploy_agent),onClick:()=>void openPlan(m)},
    {key:'permission',label:t('运行模式与权限','Runtime mode & permissions'),disabled:!linked,onClick:()=>void openDetail(m,'execution')},
-   {key:'upgrade',label:updatePending?updateLabel:localUpdateStart==='starting'?t('正在启动 Agent 升级','Starting Agent upgrade'):localUpdateStart==='uncertain'?t('核对升级请求','Verify upgrade request'):t('升级 Agent','Upgrade Agent'),disabled:localUpdateStart==='starting'||!cap.update_agent?.available&&!updatePending&&localUpdateStart!=='uncertain',onClick:()=>localUpdateStart==='uncertain'&&!updatePending?void openDetail(m,'history'):void openUpdate(m,'upgrade',undefined,updatePending)},
+   {key:'upgrade',label:updatePending?updateLabel:localUpdateStart==='starting'?t('正在启动 Agent 升级','Starting Agent upgrade'):localUpdateStart==='uncertain'?t('核对升级请求','Verify upgrade request'):m.agent_update?.state==='current'?t('查看 Agent 更新','View Agent update'):m.agent_update?.state==='unknown'?t('核对 Agent 更新','Verify Agent update'):t('升级 Agent','Upgrade Agent'),disabled:localUpdateStart==='starting'||!cap.update_agent?.available&&!updatePending&&localUpdateStart!=='uncertain',onClick:()=>localUpdateStart==='uncertain'&&!updatePending?void openDetail(m,'history'):void openUpdate(m,'upgrade',undefined,updatePending)},
    ...(cap.update_agent?.reason==='agent_task_busy'?[{key:'force-upgrade',label:t('强制升级 Agent','Force upgrade Agent'),danger:true,onClick:()=>void openUpdate(m,'upgrade',undefined,false,true)}]:[]),
    {key:'rollback',label:t('回退 Agent','Roll back Agent'),disabled:!cap.rollback_agent?.available,onClick:()=>void openUpdate(m,'rollback')},
    {type:'divider' as const},
@@ -511,6 +518,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    ...(cap.uninstall_agent?.reason==='agent_task_busy'?[{key:'force-uninstall',label:t('强制卸载 Agent','Force uninstall Agent'),danger:true,onClick:()=>void openUninstall(m,undefined,'standard',false,true)}]:[]),
    {key:'recovery',label:t('SSH 恢复卸载','SSH recovery uninstall'),danger:true,disabled:!cap.recovery_uninstall_agent?.available&&!accountRepairable(cap.recovery_uninstall_agent),onClick:()=>void openUninstall(m,undefined,'recovery')},
    {key:'state-recovery',label:t('修正 Agent 状态','Correct Agent state'),danger:true,disabled:!m.ssh_recovery_available||!m.agent_id,onClick:()=>setStateRecoveryMachine({id:m.id,name:m.name})},
+   {key:'maintenance-fence',label:t('维护围栏与恢复','Maintenance fences & recovery'),onClick:()=>setFenceMachine({id:m.id,name:m.name})},
    {key:'workload-recovery',label:t('恢复重装后的应用绑定','Restore application bindings after reinstallation'),disabled:!m.agent_id||m.agent_status!=='online',onClick:()=>setWorkloadRecoveryMachine({id:m.id,name:m.name})},
    ...(m.last_uninstallation_status?[{key:'uninstall-history',label:t('查看卸载记录','View uninstall record'),onClick:()=>void openUninstall(m,undefined,'standard',true)}]:[]),
   ];
@@ -560,9 +568,13 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   {admin&&selectedRows.length>0&&<div className="lm-machine-batch-toolbar" role="region" aria-label={t('批量操作','Bulk actions')}>
    <Space wrap><Typography.Text strong>{t(`已选择 ${selectedRows.length} 台`,`Selected ${selectedRows.length}`)}</Typography.Text><Button size="small" disabled={!!batch} onClick={()=>setSelectedIDs([])}>{t('清除选择','Clear selection')}</Button></Space>
    <Space wrap>{([
-    ['ssh_check',t('SSH 安装检查','SSH preflight')],['install',t('部署 Agent','Deploy Agent')],['uninstall',t('卸载 Agent','Uninstall Agent')],['remove_node',t('移除节点','Remove nodes')],['delete_host',t('删除主机','Delete hosts')],
-   ] as [BatchAction,string][]).map(([action,label])=><Button key={action} size="small" aria-label={label} danger={['uninstall','remove_node','delete_host'].includes(action)} disabled={loading||!!batch||!!rollout} onClick={()=>openBatch(action)}>{label}</Button>)}<Button size="small" disabled={loading||selectedRows.length>20||!!batch||!!rollout} onClick={()=>setRollout({targets:selectedRows.map(row=>({id:row.id,name:row.name,arch:row.arch}))})}>{t('升级 Agent','Upgrade Agent')}</Button></Space>
-   <Typography.Text type="secondary">{t('按所选主机逐台处理，安装和卸载先审阅计划。每批最多 50 台。','Process selected hosts in sequence; review installation and removal plans first. Up to 50 hosts per batch.')}</Typography.Text>
+    ['ssh_check',t('SSH 安装检查','SSH preflight'),t('对所选主机执行只读 SSH 检查。','Run read-only SSH checks on the selected hosts.')],
+    ['install',t('部署 Agent','Deploy Agent'),t('仅远端未安装 Agent 的主机会生成审阅计划，不覆盖已有身份。','Only hosts without a remote Agent generate reviewed plans; existing identities are never overwritten.')],
+    ['uninstall',t('卸载 Agent','Uninstall Agent'),t('卸载远端受管 Agent 程序；数据保留或清除写入审阅计划。','Uninstall the remote managed Agent; data retention or purge is part of the reviewed plan.')],
+    ['remove_node',t('移除节点','Remove nodes'),t('仅移除平台节点身份，不卸载远端程序。','Remove only the platform node identity; this does not uninstall the remote program.')],
+    ['delete_host',t('删除主机','Delete hosts'),t('删除主机登记前需先结束 Agent 状态并解绑凭据。','Finish Agent state and unbind credentials before deleting host records.')],
+   ] as [BatchAction,string,string][]).map(([action,label,help])=>{const eligible=eligibleBatchRows(action);return <Button key={action} size="small" aria-label={label} title={eligible.length?t(`可操作 ${eligible.length}/${selectedRows.length} 台；${help}`,`Eligible ${eligible.length}/${selectedRows.length}; ${help}`):t(`所选主机暂无可操作目标；${help}`,`No selected host is eligible; ${help}`)} danger={['uninstall','remove_node','delete_host'].includes(action)} disabled={loading||!!batch||!!rollout||!eligible.length} onClick={()=>openBatch(action)}>{label}</Button>})}<Button size="small" title={upgradeEligibleRows.length?t(`可升级或核对 ${upgradeEligibleRows.length}/${selectedRows.length} 台；已当前发行、更新中或未安装的主机不进入新批次。`,`Eligible ${upgradeEligibleRows.length}/${selectedRows.length}; current, updating, or uninstalled hosts do not enter a new batch.`):t('所选主机均已当前发行、更新中或未安装；请从单机记录查看更新。','Selected hosts are current, updating, or not installed; use individual records to view updates.')} disabled={loading||upgradeEligibleRows.length===0||upgradeEligibleRows.length>20||!!batch||!!rollout} onClick={()=>setRollout({targets:upgradeEligibleRows.map(row=>({id:row.id,name:row.name,arch:row.arch}))})}>{t('升级 Agent','Upgrade Agent')}</Button></Space>
+   <Typography.Text type="secondary">{t('按钮按所选主机状态预判；服务端仍逐台复验。SSH/安装/卸载等批次最多 50 台，Agent 升级批次最多 20 台。','Buttons are pre-gated by the selected host state; the server still revalidates every host. SSH/install/uninstall batches support 50 hosts; Agent upgrade batches support 20.')}</Typography.Text>
   </div>}
   <div className="lm-surface lm-host-list"><Table<FleetRow> rowKey="id" dataSource={rows} loading={loading||hostsRole.current!==admin} rowSelection={admin?{selectedRowKeys:selectedIDs,preserveSelectedRowKeys:true,columnWidth:44,onChange:keys=>{if(keys.length>50){void message.warning(t('每批最多选择 50 项','Select up to 50 targets per batch'));return}setSelectedIDs(keys.map(String))},getCheckboxProps:row=>({'aria-label':t(`选择 ${row.name}`,`Select ${row.name}`),disabled:!!batch||!!rollout})}:undefined} scroll={{x:1024}} pagination={{pageSize:10,hideOnSinglePage:true}} locale={{emptyText:<Empty description={hostQuery||group||cluster?t('没有匹配的主机','No matching hosts'):t('尚无主机','No hosts yet')}/>}} columns={[
    {title:t('主机','Host'),width:240,render:(_:unknown,m:FleetRow)=><div className="lm-host-overview">{admin?<Button type="link" className="lm-host-name" loading={entryBusy.detail===m.id} onClick={()=>void openDetail(m)}>{m.name}</Button>:<strong>{m.name}</strong>}<Typography.Text className="lm-host-ssh-copy" type="secondary" copyable={admin&&m.address?{text:sshEndpoint(m.address,m.port)}:false}>{admin?(m.address?sshEndpoint(m.address,m.port):t('SSH 未配置','SSH not configured')):t('主机 ID：','Host ID: ')+m.id}</Typography.Text><HostNetworkOverview network={m.network}/></div>},
@@ -586,6 +598,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   {admin&&uninstallGuide&&<Modal title={t('离线手动卸载 Agent','Offline manual Agent uninstall')} open onCancel={()=>setUninstallGuide(false)} footer={null} width={780} destroyOnHidden><AgentUninstallManual/></Modal>}
   {admin&&uninstallDetail&&<MachineAgentUninstallDialog key={`${uninstallDetail.machine.id}:${uninstallRecord?.id||uninstallMode}`} initialMode={uninstallMode} initialForceUnknown={uninstallForce} machine={uninstallDetail.machine} credentials={uninstallDetail.credentials} existing={uninstallRecord} onRefresh={()=>refreshMachine(uninstallDetail.machine.id)} onClose={closeUninstall}/>}
   {admin&&stateRecoveryMachine&&<MachineStateRecoveryDialog key={stateRecoveryMachine.id} machine={stateRecoveryMachine} onRefresh={()=>refreshMachine(stateRecoveryMachine.id)} onClose={()=>setStateRecoveryMachine(undefined)}/>}
+  {admin&&fenceMachine&&<MachineMaintenanceFenceDialog key={fenceMachine.id} machine={fenceMachine} onRefresh={()=>refreshMachine(fenceMachine.id)} onClose={()=>setFenceMachine(undefined)}/>}
   {admin&&workloadRecoveryMachine&&<MachineWorkloadRecoveryDialog key={workloadRecoveryMachine.id} machine={workloadRecoveryMachine} onRefresh={()=>refreshMachine(workloadRecoveryMachine.id)} onClose={()=>setWorkloadRecoveryMachine(undefined)}/>}
   {admin&&networkMachine&&<MachineServiceAddressesDialog key={networkMachine.id} machineID={networkMachine.id} name={networkMachine.name} onClose={()=>setNetworkMachine(undefined)} onSaved={()=>hostSaved(networkMachine.id)}/>}
   {admin&&editMachine&&<MachineEditDialog key={editMachine.id} machine={editMachine} onClose={()=>setEditMachine(undefined)} onSaved={()=>hostSaved(editMachine.id)}/>}
