@@ -4,7 +4,7 @@
 
 **Created**: 2026-11-20
 
-**Status**: Implemented locally; production validation pending
+**Status**: Image published; production validation pending
 
 **Input**: Production issue [#265](https://github.com/workhold/lightmoni/issues/265): automatic inspection of old instances competes with administrator reviewed binding recovery after an Agent is reinstalled.
 
