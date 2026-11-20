@@ -33,3 +33,11 @@ Date: 2026-11-21 Asia/Shanghai.
 A read-only review of `zz-bj-1` found its current signed executor active at Agent 0.1.8, while an Agent rollout still returned `maintenance_execution_pending`. The visible managed execution was an unknown privileged job whose worker had exited with `managed_worker_refused`; it was closed through the existing administrator reconciliation API with an audit reason. An interrupted in-memory terminal lane was also released through the existing administrator busy-release API. No SSH command or remote host mutation was dispatched.
 
 After those visible fences were closed, rollout planning still returned `maintenance_execution_pending`. Task-center, privileged-job, installation, uninstallation, and update records exposed through existing APIs no longer explained the blocker. This matches the otherwise-invisible legacy `machine_executor_bootstraps` fence retained from the removed first-install executor flow and motivated SDD192's explicit projection and audited closure path. Production will be re-validated only after this fix is reviewed, merged, released, and deployed.
+
+## Broad agent-lifecycle regression sweep
+
+After the capability inventory was added, the following eleven Runtime files were run together:
+
+`machine-agent-lifecycle`, `machine-agent-runtime`, `machine-installation-recovery`, `machine-installation-recovery-races`, `machine-state-recovery`, `agent-runtime-maintenance`, `agent-job-fence`, `agent-jobs`, `managed-executor-jobs`, `privileged-executors`, and `center-ssh-dispatch`.
+
+Result: **205/205 passed**. The sweep covers first installation/recovery, runtime-mode transitions, standard and recovery removal, task markers, ordinary job leases and SSH dispatch, signed executor policy/permits, unknown-result reconciliation, managed operations, and Docker fences. No existing safety semantic was relaxed.
