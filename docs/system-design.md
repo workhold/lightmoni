@@ -2947,6 +2947,8 @@ Agent 相关能力先按权威记录区分：主机/SSH 预检、首装、常驻
 
 Agent 首装、更新、卸载、任务中心、普通 Agent 作业与提权受管作业共享只读维护围栏投影。`GET /api/v1/machines/:id/busy` 继续区分进程内终端/检查/部署车道，同时返回持久化 `maintenance_blockers`，包含历史首装 executor bootstrap、task run、agent job 与 privileged job 的类型、ID 和状态。维护准备在拒绝时附带相同明细，页面不再只能展示泛化的 `maintenance_execution_pending`。
 
+单机与多选操作也消费同一状态投影：当前发行显示“查看 Agent 更新”而不是可升级；已有 Agent 禁止覆盖部署，活动 Agent 未移除前禁止删除主机；新升级批次仅包含发行可更新或待核对的已绑定主机。批量按钮显示可操作/已选数量，普通批次与 Agent 升级批次分别使用 50/20 上限。所有前端预判仅用于减少无效入口，服务端仍逐台复验权威状态。
+
 统一 Agent 发行移除了旧独立 executor 首装流程，但历史 `machine_executor_bootstraps.status='unknown'` 记录仍会永久阻塞后续维护。机器页提供“维护围栏与恢复”入口：内存车道仅可凭确认和原因释放，不改变任何持久结果；遗留 unknown 首装围栏只有在中心已经存在同主机、同 Agent、不低于该代次且心跳新鲜的 active 签名执行器时，才允许管理员交互会话确认并留因闭环。闭环不访问远端主机、不重放安装、不把历史 unknown 改写为成功，只补充 resolved 元数据并写入 `privileged_audit(legacy_executor_bootstrap_closed)`。运行中、待核对、执行器过期、身份不匹配或已闭环的记录继续拒绝。
 
 ```mermaid

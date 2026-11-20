@@ -41,3 +41,11 @@ After the capability inventory was added, the following eleven Runtime files wer
 `machine-agent-lifecycle`, `machine-agent-runtime`, `machine-installation-recovery`, `machine-installation-recovery-races`, `machine-state-recovery`, `agent-runtime-maintenance`, `agent-job-fence`, `agent-jobs`, `managed-executor-jobs`, `privileged-executors`, and `center-ssh-dispatch`.
 
 Result: **205/205 passed**. The sweep covers first installation/recovery, runtime-mode transitions, standard and recovery removal, task markers, ordinary job leases and SSH dispatch, signed executor policy/permits, unknown-result reconciliation, managed operations, and Docker fences. No existing safety semantic was relaxed.
+
+## Action-gating UI regression
+
+- `node web/src/app/verify-machine-bulk-action-gates-ui.mjs`: 2/2 browser checks passed.
+  - A current online fully managed 0.1.8 host shows disabled overwrite deployment, enabled update history, enabled uninstall, and the maintenance-fence entry.
+  - With that host selected, SSH preflight/uninstall/remove-node are enabled where applicable; overwrite deployment, host deletion, and a new upgrade rollout are disabled; the helper separately documents 50-host general batches and 20-host Agent rollouts.
+- `npm --prefix web run typecheck` and `npm --prefix web run build` passed after the state-gating change.
+- A complete `npm --prefix runtime test` sweep was also attempted in this checkout. It exposed pre-existing local release-asset/live-SSH/environment failures outside this change (generated Agent/SDK archives were not present in `runtime/downloads`, plus local SSH/network-sensitive cases). It is not used as this PR's pass signal; the targeted agent lifecycle sweep above remains the relevant regression evidence.

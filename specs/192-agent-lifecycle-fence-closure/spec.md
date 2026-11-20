@@ -27,3 +27,7 @@ Agent 首装、升级、卸载、任务执行和受管操作已有独立 unknown
 4. 闭环后历史状态仍为 `unknown`，新增 resolved 元数据与 `privileged_audit` 记录，维护围栏不再把它视为 blocker。
 5. Agent 维护准备失败返回 blocker 明细，不再只有 `maintenance_execution_pending`。
 6. 相关 Runtime API 回归、类型检查和 `git diff --check` 通过。
+
+## UI state-gating supplement
+
+Agent 单机菜单不得把“当前发行”显示为可升级：当前发行显示“查看 Agent 更新”，发行未知显示“核对 Agent 更新”，只有存在可升级/待核对入口时才显示“升级 Agent”。多选工具栏按所选主机状态预判可用目标：已有 Agent 时禁用“部署 Agent”，活动 Agent 未移除时禁用“删除主机”，当前发行/更新中/未安装主机不进入新升级批次。按钮提示给出可操作数量和语义；服务端仍逐台复验。批量说明分别标明普通批次 50 台与 Agent 升级批次 20 台。
