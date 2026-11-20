@@ -2943,6 +2943,8 @@ flowchart LR
 
 ## 192. Agent 生命周期维护围栏闭环（SDD192）
 
+Agent 相关能力先按权威记录区分：主机/SSH 预检、首装、常驻心跳与遥测、普通任务、中心 SSH 普通作业、签名提权受管作业、升级/回退/批次、标准与恢复卸载、重装后应用绑定恢复、Docker/应用运维，以及已移除的历史 executor 首装。UI 心跳和容器状态只是证据；`machine_deployments`、`task_runs`、`agent_jobs`、`privileged_jobs`、`machine_agent_updates`、`machine_uninstallations`、恢复计划及各自领域记录才是结果事实。架构显示为“待检查”不是错误：中心必须通过固定 SSH 预检查真实架构，不能凭主机名或心跳猜测。
+
 Agent 首装、更新、卸载、任务中心、普通 Agent 作业与提权受管作业共享只读维护围栏投影。`GET /api/v1/machines/:id/busy` 继续区分进程内终端/检查/部署车道，同时返回持久化 `maintenance_blockers`，包含历史首装 executor bootstrap、task run、agent job 与 privileged job 的类型、ID 和状态。维护准备在拒绝时附带相同明细，页面不再只能展示泛化的 `maintenance_execution_pending`。
 
 统一 Agent 发行移除了旧独立 executor 首装流程，但历史 `machine_executor_bootstraps.status='unknown'` 记录仍会永久阻塞后续维护。机器页提供“维护围栏与恢复”入口：内存车道仅可凭确认和原因释放，不改变任何持久结果；遗留 unknown 首装围栏只有在中心已经存在同主机、同 Agent、不低于该代次且心跳新鲜的 active 签名执行器时，才允许管理员交互会话确认并留因闭环。闭环不访问远端主机、不重放安装、不把历史 unknown 改写为成功，只补充 resolved 元数据并写入 `privileged_audit(legacy_executor_bootstrap_closed)`。运行中、待核对、执行器过期、身份不匹配或已闭环的记录继续拒绝。
