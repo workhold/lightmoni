@@ -22,7 +22,7 @@ import { supportsSSHOnce, validateSSHOnceCommands, type SSHOnceCommand } from '.
 
 type Row = Record<string, any>;
 const terminal = (state: string) => ["succeeded", "failed", "cancelled", "unknown"].includes(state);
-const observationTasks = new Set(['node.inspect', 'workload.inspect', 'gateway.inspect', 'registry.inspect']);
+const observationTasks = new Set(['node.inspect', 'workload.inspect', 'gateway.inspect', 'registry.inspect', 'instance.recovery.inspect']);
 
 /** Frozen, single-action observations may be replaced with a fresh observation;
  * an unknown mutation must still be reviewed instead of replayed. */
