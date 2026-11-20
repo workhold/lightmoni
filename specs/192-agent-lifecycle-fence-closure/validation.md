@@ -27,3 +27,9 @@ Date: 2026-11-21 Asia/Shanghai.
 - No production host was contacted or mutated by this SDD's implementation checks.
 - Historical unknown status is not rewritten to success.
 - The new closure path never performs SSH or remote mutation; it requires a fresh active executor heartbeat already present in the center.
+
+## Production incident diagnosis
+
+A read-only review of `zz-bj-1` found its current signed executor active at Agent 0.1.8, while an Agent rollout still returned `maintenance_execution_pending`. The visible managed execution was an unknown privileged job whose worker had exited with `managed_worker_refused`; it was closed through the existing administrator reconciliation API with an audit reason. An interrupted in-memory terminal lane was also released through the existing administrator busy-release API. No SSH command or remote host mutation was dispatched.
+
+After those visible fences were closed, rollout planning still returned `maintenance_execution_pending`. Task-center, privileged-job, installation, uninstallation, and update records exposed through existing APIs no longer explained the blocker. This matches the otherwise-invisible legacy `machine_executor_bootstraps` fence retained from the removed first-install executor flow and motivated SDD192's explicit projection and audited closure path. Production will be re-validated only after this fix is reviewed, merged, released, and deployed.
