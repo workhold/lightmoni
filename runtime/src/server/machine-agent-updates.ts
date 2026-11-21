@@ -513,6 +513,20 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         return view(row(machineID, operationID));
       }
       recheck();
+      if (remote.status === "rollback_failed") {
+        validateRemote(operation, remote);
+        const observed = await probe(machine, credential, signal);
+        // The failed recovery has already completed its restore pass once. A
+        // fresh read-only probe—not the stale rollback receipt—is what proves
+        // that the approved original is now running. No replay is allowed.
+        validateOriginalProbe(machine, observed, approved);
+        const rollbackError = JSON.parse(operation.receipt_json || "{}").rollback_error_code;
+        if (rollbackError !== "recovery_original_unhealthy") fail(409, "agent_update_recovery_unverified");
+        recheck();
+        db.run("UPDATE machine_agent_updates SET status='rolled_back',receipt_json=?,error='',finished_at=?,ticket_hash='' WHERE id=? AND status='unknown'", JSON.stringify(recoveryReceipt(operation.id,{ rollback_error_code: rollbackError, current_verification: { boot_id: observed.current.boot_id, fingerprint: observed.current.fingerprint, verified_at: at() }, recovery_closed_by: actor })), at(), operationID);
+        event(operationID,"rolled_back");
+        return view(row(machineID, operationID));
+      }
       if (remote.status === "failed") {
         validateRemote(operation, remote);
         const observed = await probe(machine, credential, signal);

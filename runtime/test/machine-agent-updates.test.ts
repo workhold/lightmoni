@@ -23,7 +23,7 @@ const oldRelease = { version: "0.1.0", source_revision: "1".repeat(40), build_id
   artifact_sha256: "1".repeat(64), arch: "amd64", fingerprint: "a".repeat(64), boot_id: OLD_BOOT };
 const previousRelease = { ...oldRelease, artifact_sha256: "2".repeat(64), build_id: "0.1.0-previous", fingerprint: "b".repeat(64) };
 type Mode = "success" | "rollback" | "wrong_build" | "same_boot" | "wrong_config" | "last_error" | "disconnect" | "missing_receipt" | "hold" | "failed" | "service_state_changed" | "wrong_uid" | "string_uid" | "missing_uid"
-  | "helper_inactive" | "helper_old_release" | "helper_old_activation" | "helper_stale" | "helper_wrong_identity";
+  | "helper_inactive" | "helper_old_release" | "helper_old_activation" | "helper_stale" | "helper_wrong_identity" | "rollback_failed_unhealthy";
 
 function releaseFiles(directory: string) {
   mkdirSync(directory, { recursive: true });
@@ -98,7 +98,10 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     }
     if (input.command.includes("update-runner.mjs status")) {
       if (mode === "hold" || mode === "disconnect") return { stdout: JSON.stringify(state), stderr: "", stages: ["status"] };
-      if (mode === "failed") state.status = "failed";
+      if (mode === "rollback_failed_unhealthy") {
+        state.status = "rollback_failed"; state.rollback_error_code = "recovery_original_unhealthy";
+      }
+      else if (mode === "failed") state.status = "failed";
       else if (mode === "service_state_changed") {
         state.status = "failed"; state.error_code = "service_state_changed";
         observations.get(mid).service_active = false;
@@ -546,6 +549,22 @@ test("tickets bind host, operation, immutable files and expire once detached exe
   await f.apply(h.id, p.id); await f.settle(h.id, p.id);
   const tokenValue = JSON.parse(f.calls.find(input => input.command.includes(".update-bootstrap")).stdin).download_token;
   assert.equal((await f.request(`/machines/${h.id}/agent-updates/${p.id}/downloads/bundle.tar.gz`, "GET", undefined, { authorization: "Bearer " + tokenValue })).status, 401);
+});
+
+test("a failed unhealthy-restore recovery can close as rolled_back only after a fresh original probe", async t => {
+  const f = await fixture(t), h = await f.host(); f.modes.set(h.id, "rollback_failed_unhealthy");
+  const planned = await f.plan(h.id); assert.equal(planned.status, 201, planned.raw);
+  const applied = await f.apply(h.id, planned.data.id); assert.equal(applied.status, 202, applied.raw);
+  await f.settle(h.id, planned.data.id);
+  const receipt=JSON.parse(f.db.get<any>("SELECT receipt_json FROM machine_agent_updates WHERE id=?", planned.data.id).receipt_json);
+  receipt.rollback_error_code="recovery_original_unhealthy";
+  f.db.run("UPDATE machine_agent_updates SET status='unknown',finished_at='' WHERE id=?", planned.data.id);
+  f.db.run("UPDATE machine_agent_updates SET receipt_json=? WHERE id=?", JSON.stringify(receipt), planned.data.id);
+  const reconciled=await f.request(`/machines/${h.id}/agent-updates/${planned.data.id}/reconcile`,"POST",{});
+  assert.equal(reconciled.status,200,reconciled.raw);assert.equal(reconciled.data.status,"rolled_back");
+  const saved=await f.request(`/machines/${h.id}/agent-updates/${planned.data.id}`);assert.equal(saved.data.status,"rolled_back");
+  assert.equal(saved.data.receipt.rollback_error_code,"recovery_original_unhealthy");
+  assert.match(saved.data.receipt.current_verification.verified_at,/^2026-/);
 });
 
 test("SSH disconnect remains unknown; read-only reconciliation never commits a waiting operation", async t => {

@@ -2989,3 +2989,7 @@ flowchart LR
 管理员确认后的 Agent 首装、卸载、升级启动和维护恢复使用中心侧有界 operation signal，不再绑定批准请求的 HTTP `AbortSignal`。用户关闭页面、刷新或浏览器断开不会中断中心侧操作，页面重开后通过既有持久记录、轮询和进度事件恢复显示。重复确认仍被 durable 状态原子更新拒绝，不会派发第二个副作用事务。
 
 operation signal 只限制中心进程会话最长 15 分钟；远端 systemd、Agent 维护预算和健康确认窗口继续约束真实副作用。只读预检、计划生成、下载、核对和交互 reconcile 保留请求取消语义。中心进程重启仍保守处理：安装/卸载运行中转 unknown，更新 running/verifying 转 unknown，批次暂停，随后只走只读核对、恢复审批或重新审阅，不自动重放。
+
+## 199. 已恢复原发行的健康核对闭环（SDD199）
+
+当恢复流程已执行恢复但返回 `rollback_failed/recovery_original_unhealthy`，随后远端 Agent 又回到健康原发行时，平台不再要求重复恢复。只读核对必须重新 probe 并逐项匹配审批原发行的身份、指纹、发行、运行模式、权限代次、helper 状态、服务状态和空闲围栏，同时确认原回执确实是 `recovery_original_unhealthy`。全部一致时，管理员核对可将原始记录闭环为 `rolled_back`，并保留原 rollback 错误、当前 boot ID、指纹、核对时间和操作者。任意漂移、其他 rollback 错误、锁未释放或 probe 失败都保持 unknown 围栏，不重放恢复。
