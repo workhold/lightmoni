@@ -9,6 +9,7 @@ import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
 import { assertNoPendingMachineInstallation } from "./machine-installations-guard.js";
 import {createAgentLifecycleSchema} from './agent-lifecycle.js';
 import { holdBusy, type BusyLane } from './machine-busy-lane.js';
+import { operationSignal } from './operation-signal.js';
 export type UninstallationStatus = "awaiting_approval" | "running" | "succeeded" | "failed" | "unknown" | "cancelled";
 interface Access {
   get(id: string): MachineSummary; idle(id: string): void; revision(machine: MachineSummary): string;
@@ -153,10 +154,10 @@ export function registerMachineUninstallations(deps: Dependencies, access: Acces
     if(!Number.isFinite(Date.parse(plan.expires_at))||Date.parse(plan.expires_at)<=deps.now().getTime())fail(409,"卸载计划已过期，请取消并重新检查");
     const asset=assertPlanTarget(operation),{machine,credential}=access.credential(asset.id,operation.credential_id);assertSSHAccount(machine,plan.ssh_account);if(sshCredentialRevision(credential)!==plan.credential_revision)fail(409,"ssh_credential_changed");access.checked(machine,plan.check_id,credential.id);holdBusy(access.busy, machine.id, "uninstallation", deps.now().getTime());let destructive=false;
     try{
-      const observed=await probe(machine,credential,ctx.signal);assertObservation(machine,observed,plan.mode||"standard",'',plan.force_unknown);if(!plan.observation||!same(observed,plan.observation))fail(409,"远端 Agent 证据与审核计划不一致，请重新计划");
+      const executionSignal=operationSignal();const observed=await probe(machine,credential,executionSignal);assertObservation(machine,observed,plan.mode||"standard",'',plan.force_unknown);if(!plan.observation||!same(observed,plan.observation))fail(409,"远端 Agent 证据与审核计划不一致，请重新计划");
       const live=access.credential(machine.id,credential.id);assertSSHAccount(live.machine,plan.ssh_account);if(sshCredentialRevision(live.credential)!==plan.credential_revision)fail(409,"ssh_credential_changed");access.checked(live.machine,plan.check_id,credential.id);assertPlanTarget(operation);
       if(!db.run("UPDATE machine_uninstallations SET status='running',approved_at=?,started_at=? WHERE id=? AND status='awaiting_approval'",at(),at(),operation.id).changes)fail(409,"卸载计划已被其他请求执行");
-      destructive=true;const result=await access.runner({machine,credentialID:credential.id,...access.authentication(machine.id,credential),command:agentRemovalCommand(plan.observation,!!plan.purge),signal:ctx.signal,port:machine.port,timeoutMs:120_000});access.markCredentialUsed(credential.id);
+      destructive=true;const result=await access.runner({machine,credentialID:credential.id,...access.authentication(machine.id,credential),command:agentRemovalCommand(plan.observation,!!plan.purge),signal:executionSignal,port:machine.port,timeoutMs:120_000});access.markCredentialUsed(credential.id);
       complete(operation,parseAgentRemovalProbe(result.stdout),"running");ctx.json(decode(row(machine.id,operation.id)));
     }catch(error){const message=destructive?"卸载结果未知，请使用只读核对确认远端状态":error instanceof HTTPError?error.message:"卸载前检查失败，未执行移除";db.run("UPDATE machine_uninstallations SET status=?,error=?,finished_at=? WHERE id=? AND status=?",destructive?"unknown":"failed",message,at(),operation.id,destructive?"running":"awaiting_approval");if(error instanceof HTTPError&&!destructive)throw error;throw new HTTPError(502,message);}finally{access.busy.delete(machine.id);}
   }));

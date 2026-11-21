@@ -1221,16 +1221,18 @@ for(const code of ['timed_out','cancelled','ssh_failed','invalid_response'] as c
 }
 
 
-test('disconnecting during installation readiness retains unknown evidence and releases the host',async t=>{
+test('disconnecting during installation readiness never interrupts detached execution',async t=>{
  let observe!:()=>void;const observed=new Promise<void>(resolve=>{observe=resolve});
- const f=await fixture(t,{},undefined,false,{installationReadinessTimeoutMs:10_000}),h=await host(f,'cancel-readiness');
+ const f=await fixture(t,{},undefined,false,{installationReadinessTimeoutMs:30,installationReadinessPollIntervalMs:1}),h=await host(f,'cancel-readiness');
  f.agentCredentials.enrollmentStatus=()=>{observe();return {status:'pending',agent_id:''}};
  const plan=await installationPlan(f,h),controller=new AbortController();
  const applied=f.rawRequest(`/machines/${h.id}/deployments/${plan.id}/apply`,'POST',{confirm:true},controller.signal);
  await observed;controller.abort();await assert.rejects(applied,{name:'AbortError'});
- for(let i=0;i<100&&f.machines.assistantDeployment(plan.id).status==='running';i++)await new Promise(resolve=>setTimeout(resolve,1));
- const saved=f.machines.assistantDeployment(plan.id);assert.equal(saved.status,'unknown');
- assert.ok((saved.receipt as any).stages.includes('installation_confirmation_cancelled'));assert.equal(f.issued.cancelled,undefined);
+ assert.equal(f.machines.assistantDeployment(plan.id).status,'running');
+ let saved=f.machines.assistantDeployment(plan.id);
+ for(let i=0;i<1000&&saved.status==='running';i++){await new Promise(resolve=>setTimeout(resolve,1));saved=f.machines.assistantDeployment(plan.id);}
+ assert.equal(saved.status,'unknown');
+ assert.ok((saved.receipt as any).stages.includes('activation_pending'));assert.equal(f.issued.cancelled,undefined);
  assert.equal((await f.request(`/machines/${h.id}/ssh-check`,'POST',{credential_id:h.credential})).status,200);
 });
 
