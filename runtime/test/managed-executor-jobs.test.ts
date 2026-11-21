@@ -223,6 +223,19 @@ test('managed work can queue behind a running signed operation and only runs aft
   assert.equal(planClaims(verifyJWS(claim.job.plan,f.store.centerPublicKey,f.store.centerKeyID)).job_id,next.id);
  }finally{f.close()}
 });
+test('a busy execution lane defers queued managed work instead of cancelling it',()=>{
+ const f=fixture();try{
+  const first=flow(f),next=f.enqueue();
+  // The executor keeps polling for work while the first job occupies the lane;
+  // dispatch validation hits machine_execution_locked and must leave the job queued.
+  f.store.prepareSSH('host');
+  assert.equal(f.jobs.get(next.id).state,'queued');
+  assert.equal(f.db.all<any>('SELECT * FROM agent_job_events WHERE job_id=? AND phase=\'cancelled\'',next.id).length,0);
+  first.permit();first.phases();first.result();
+  const claim=f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v));
+  assert.equal(planClaims(verifyJWS(claim.job.plan,f.store.centerPublicKey,f.store.centerKeyID)).job_id,next.id);
+ }finally{f.close()}
+});
 test('managed admission preserves manual privilege and unresolved result fences',()=>{
  for(const mode of ['manual','unknown','mismatch']){const f=fixture();try{
   if(mode==='manual')f.apply();else{const old=flow(f);if(mode==='unknown'){f.advance(46);f.store.sweep();f.heartbeat()}else f.db.run("UPDATE privileged_jobs SET task_run_id='other' WHERE id=?",old.job.id)}
