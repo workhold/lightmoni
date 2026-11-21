@@ -171,6 +171,8 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     catch (error) {
       if (error instanceof SSHError && error.remoteFailure?.remote_reason_code === "agent_recovery_runtime_unavailable")
         fail(409, "agent_recovery_runtime_unavailable");
+      if (error instanceof SSHError && error.remoteFailure?.remote_reason_code === "recovery_worker_running")
+        fail(409, "recovery_worker_running");
       throw error;
     }
     access.markCredentialUsed(credential.id);
@@ -181,16 +183,21 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   };
   const probe = async (machine: MachineSummary | SSHMachineTarget, credential: any, signal: AbortSignal) =>
     parseAgentUpdateProbe((await ssh(machine, credential, agentUpdateProbeCommand(), signal)).stdout);
-  const validateProbe = (machine: MachineSummary, observation: AgentUpdateProbe, requireActive = true) => {
+  const validateProbe = (machine: MachineSummary, observation: AgentUpdateProbe, requireActive = true, ignoreLifecycle = false) => {
     if (observation.agent_id !== machine.agent_id) fail(409, "SSH 主机的 Agent 身份与平台不一致");
     if (!observation.ready) fail(409, "Agent 不是空闲且健康的受管 systemd 安装：远端安装未通过受管校验，请检查安装状态后重试");
     if (requireActive && !observation.service_active) fail(409, "Agent 不是空闲且健康的受管 systemd 安装：Agent 服务未在运行");
-    if (observation.lifecycle_locked) fail(409, "Agent 不是空闲且健康的受管 systemd 安装：生命周期锁未释放，可能有维护进程仍在进行；确认无维护进程后清理 /run/lightmoni-agent-lifecycle.lock");
+    if (!ignoreLifecycle && observation.lifecycle_locked) fail(409, "Agent 不是空闲且健康的受管 systemd 安装：生命周期锁未释放，可能有维护进程仍在进行；确认无维护进程后清理 /run/lightmoni-agent-lifecycle.lock");
     if (observation.operation_lock) fail(409, "Agent 不是空闲且健康的受管 systemd 安装：操作锁未释放，主机存在未收尾的维护或任务状态文件；若维护已中断，重启 lightmoni-agent 服务让 Agent 自检回收后再试");
     if (observation.current.state_schema !== 1) fail(409, "当前 Agent 状态格式未知，不能安全升级或回退");
   };
-  const validateOriginalProbe = (machine: MachineSummary, observation: AgentUpdateProbe, approved: any, requireOriginalService = true) => {
-    validateProbe(machine, observation, false);
+  const validateLifecycleFree = (observation: AgentUpdateProbe) => {
+    if (observation.lifecycle_locked) fail(409, "Agent 不是空闲且健康的受管 systemd 安装：生命周期锁未释放，可能有维护进程仍在进行；确认无维护进程后清理 /run/lightmoni-agent-lifecycle.lock");
+  };
+  const validateOriginalProbe = (machine: MachineSummary, observation: AgentUpdateProbe, approved: any, requireOriginalService = true, ignoreLifecycle = false) => {
+    validateProbe(machine, observation, false, ignoreLifecycle);
+    if (requireOriginalService && observation.service_active !== approved.current.service_active) fail(409, "agent_update_recovery_unverified：原程序服务状态与审批计划不一致，无法核实恢复结果");
+
     const drift = observation.current.fingerprint !== approved.current.fingerprint ? "程序指纹"
       : observation.runtime_mode !== approved.runtime_mode ? "运行模式"
       : observation.permission_generation !== approved.permission_generation ? "权限代次"
@@ -518,17 +525,22 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         const observed = await probe(machine, credential, signal);
         // A stale lifecycle lock can survive an otherwise verified restore.
         // Never clear it until the exact approved original is healthy and the
-        // maintenance worker is independently proven dead.
+        // maintenance worker is independently proven dead. The pre-cleanup
+        // probe may still show the stale lifecycle fence, so ignore it here.
+        validateOriginalProbe(machine, observed, approved, false, true);
         const beforeFingerprint = observed.current.fingerprint;
         let lockCleanup: { before_fingerprint: string; after_fingerprint: string; worker_evidence: string; cleaned_at: string } | undefined;
         if (observed.lifecycle_locked) {
           const unit = await ssh(machine, credential, agentUpdateStatusCommand(operationID), signal);
           if (JSON.parse(unit.stdout).status !== "rollback_failed") fail(409, "agent_update_recovery_unverified");
+          // Reconcile uses the same bounded systemd/cgroup proof as recovery;
+          // it must never clean a lifecycle lock while a worker can be live.
           const workerOutput = (await ssh(machine, credential, workerStopEvidenceCommand(operationID), signal)).stdout;
-          if (!/^workerStopped=true$/m.test(workerOutput)) fail(409, "recovery_worker_running");
+          if (!/^workerStopped=true(?: [a-z_]+=[^\n]+)*$/m.test(workerOutput)) fail(409, "recovery_worker_running");
           await ssh(machine, credential, lifecycleLockCleanupCommand(), signal);
           const afterProbe = await probe(machine, credential, signal);
           validateOriginalProbe(machine, afterProbe, approved);
+          validateLifecycleFree(afterProbe);
           observed.current = afterProbe.current;
           observed.service_active = afterProbe.service_active;
           observed.lifecycle_locked = afterProbe.lifecycle_locked;
@@ -539,6 +551,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         // fresh read-only probe—not the stale rollback receipt—is what proves
         // that the approved original is now running. No replay is allowed.
         validateOriginalProbe(machine, observed, approved);
+        validateLifecycleFree(observed);
         const rollbackError = JSON.parse(operation.receipt_json || "{}").rollback_error_code;
         if (rollbackError !== "recovery_original_unhealthy") fail(409, "agent_update_recovery_unverified");
         recheck();
