@@ -200,3 +200,36 @@ recovery_dir=$(mktemp -d /run/lightmoni-agent-recovery.XXXXXX)
 trap 'rm -rf "$recovery_dir"' EXIT HUP INT TERM
 "$runtime_node" -e ${quote(bootstrap)} "$recovery_dir"`);
 }
+
+export function workerStopEvidenceCommand(operationID: string): string {
+  const unit = `lightmoni-agent-update-${operationID}.service`;
+  return [
+    "set -eu",
+    `unit=${JSON.stringify(unit)}`,
+    "state=$(systemctl show \"$unit\" --property=LoadState,ActiveState,MainPID,ControlPID,ControlGroup,Job)",
+    "parse() { key=$1; printf '%s\\n' \"$state\" | awk -F= -v k=\"$key\" '$1==k{print $2; found=1} END{if(!found)exit 20}'; }",
+    "load=$(parse LoadState); active=$(parse ActiveState); main=$(parse MainPID); control=$(parse ControlPID); job=$(parse Job); group=$(parse ControlGroup)",
+    "[ \"$load\" = loaded ] || [ \"$load\" = not-found ] || exit 21",
+    "[ \"$active\" = inactive ] || [ \"$active\" = failed ] || exit 22",
+    "[ \"$main\" = 0 ] || [ -z \"$main\" ] || exit 23",
+    "[ \"$control\" = 0 ] || [ -z \"$control\" ] || exit 24",
+    "[ \"$job\" = 0 ] || [ -z \"$job\" ] || exit 25",
+    "if [ -n \"$group\" ] && [ -r \"/sys/fs/cgroup$group/cgroup.procs\" ]; then [ -z \"$(cat \"/sys/fs/cgroup$group/cgroup.procs\")\" ] || exit 26; fi",
+    "for proc in /proc/[0-9]*; do [ -r \"$proc/cmdline\" ] || continue; if tr '\\0' '\\n' < \"$proc/cmdline\" | grep -Fxq '/opt/lightmoni-agent/updates/${operationID}/worker.mjs'; then exit 27; fi; done",
+    "printf 'workerStopped=true\\n'",
+  ].join('\\n');
+}
+
+export function lifecycleLockCleanupCommand(): string {
+  return [
+    "set -eu",
+    "if [ -e /run/lightmoni-agent-lifecycle.lock ] || [ -L /run/lightmoni-agent-lifecycle.lock ]; then",
+    "  [ -d /run/lightmoni-agent-lifecycle.lock ] || exit 31",
+    "  owner=$(cat /run/lightmoni-agent-lifecycle.lock/owner.json 2>/dev/null || true)",
+    "  printf '%s' \"$owner\" | grep -q 'operation_id' || exit 32",
+    "  rm -rf -- /run/lightmoni-agent-lifecycle.lock",
+    "fi",
+    "[ ! -e /run/lightmoni-agent-lifecycle.lock ] && [ ! -L /run/lightmoni-agent-lifecycle.lock ] || exit 33",
+    "printf 'lifecycleLockClear=true\\n'",
+  ].join("\\n");
+}

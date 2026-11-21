@@ -17,7 +17,7 @@ import type { PrivilegedExecutorStore } from "./privileged-executors.js";
 import { assertSSHAccount, SSHError, sshAccountSnapshot, sshCredentialRevision, type SSHRunner } from "./machine-ssh.js";
 import { AgentReleaseCatalog, type AgentRelease, type PinnedAgentFile } from "./machine-agent-updates-catalog.js";
 import { NodeStore } from "./nodes-model.js";
-import { agentUpdateProbeCommand, parseAgentUpdateProbe, agentUpdateStartCommand, agentUpdateStatusCommand, agentUpdateCommitCommand,
+import { agentUpdateProbeCommand, parseAgentUpdateProbe, agentUpdateStartCommand, agentUpdateStatusCommand, lifecycleLockCleanupCommand, workerStopEvidenceCommand, agentUpdateCommitCommand,
   parseAgentUpdateStatus, agentUpdateRecoveryBootstrap, type AgentUpdateRecoveryRequest, type AgentUpdateProbe, type AgentUpdateRemoteStatus, type AgentUpdateStartRequest } from "./machine-agent-update-ssh.js";
 
 export type AgentUpdateStatus = "awaiting_approval" | "running" | "verifying" | "succeeded" | "rolled_back" | "failed" | "unknown" | "cancelled";
@@ -516,6 +516,25 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       if (remote.status === "rollback_failed") {
         validateRemote(operation, remote);
         const observed = await probe(machine, credential, signal);
+        // A stale lifecycle lock can survive an otherwise verified restore.
+        // Never clear it until the exact approved original is healthy and the
+        // maintenance worker is independently proven dead.
+        const beforeFingerprint = observed.current.fingerprint;
+        let lockCleanup: { before_fingerprint: string; after_fingerprint: string; worker_evidence: string; cleaned_at: string } | undefined;
+        if (observed.lifecycle_locked) {
+          const unit = await ssh(machine, credential, agentUpdateStatusCommand(operationID), signal);
+          if (JSON.parse(unit.stdout).status !== "rollback_failed") fail(409, "agent_update_recovery_unverified");
+          const workerOutput = (await ssh(machine, credential, workerStopEvidenceCommand(operationID), signal)).stdout;
+          if (!/^workerStopped=true$/m.test(workerOutput)) fail(409, "recovery_worker_running");
+          await ssh(machine, credential, lifecycleLockCleanupCommand(), signal);
+          const afterProbe = await probe(machine, credential, signal);
+          validateOriginalProbe(machine, afterProbe, approved);
+          observed.current = afterProbe.current;
+          observed.service_active = afterProbe.service_active;
+          observed.lifecycle_locked = afterProbe.lifecycle_locked;
+          observed.operation_lock = afterProbe.operation_lock;
+          lockCleanup = { before_fingerprint: beforeFingerprint, after_fingerprint: afterProbe.current.fingerprint, worker_evidence: workerOutput.trim(), cleaned_at: at() };
+        }
         // The failed recovery has already completed its restore pass once. A
         // fresh read-only probe—not the stale rollback receipt—is what proves
         // that the approved original is now running. No replay is allowed.
@@ -523,7 +542,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
         const rollbackError = JSON.parse(operation.receipt_json || "{}").rollback_error_code;
         if (rollbackError !== "recovery_original_unhealthy") fail(409, "agent_update_recovery_unverified");
         recheck();
-        db.run("UPDATE machine_agent_updates SET status='rolled_back',receipt_json=?,error='',finished_at=?,ticket_hash='' WHERE id=? AND status='unknown'", JSON.stringify(recoveryReceipt(operation.id,{ rollback_error_code: rollbackError, current_verification: { boot_id: observed.current.boot_id, fingerprint: observed.current.fingerprint, verified_at: at() }, recovery_closed_by: actor })), at(), operationID);
+        db.run("UPDATE machine_agent_updates SET status='rolled_back',receipt_json=?,error='',finished_at=?,ticket_hash='' WHERE id=? AND status='unknown'", JSON.stringify(recoveryReceipt(operation.id,{ rollback_error_code: rollbackError, current_verification: { boot_id: observed.current.boot_id, fingerprint: observed.current.fingerprint, verified_at: at() }, recovery_closed_by: actor, ...(typeof lockCleanup !== 'undefined' ? { lifecycle_lock_cleanup: lockCleanup } : {}) })), at(), operationID);
         event(operationID,"rolled_back");
         return view(row(machineID, operationID));
       }
