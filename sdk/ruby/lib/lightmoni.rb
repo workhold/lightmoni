@@ -116,7 +116,7 @@ module LightMoni
         rows = merged.values
       end
       resource, scope, field = { 'metrics' => %w[resourceMetrics scopeMetrics metrics], 'logs' => %w[resourceLogs scopeLogs logRecords], 'traces' => %w[resourceSpans scopeSpans spans] }.fetch(signal)
-      LightMoni.json(resource => [{ 'resource' => @resource, scope => [{ 'scope' => { 'name' => 'lightmoni/sdk/ruby', 'version' => '0.1.13' }, field => rows }] }])
+      LightMoni.json(resource => [{ 'resource' => @resource, scope => [{ 'scope' => { 'name' => 'lightmoni/sdk/ruby', 'version' => '0.1.14' }, field => rows }] }])
     end
     def collect
       now = LightMoni.nano
@@ -162,7 +162,7 @@ module LightMoni
       return if !@self_enabled || now - @self_last < 30
       @self_last = now
       at, time = Time.now.utc.iso8601(9), LightMoni.nano.to_s
-      attributes = LightMoni.attrs('lightmoni.component' => 'sdk', 'sdk.language' => 'ruby', 'sdk.version' => '0.1.13')
+      attributes = LightMoni.attrs('lightmoni.component' => 'sdk', 'sdk.language' => 'ruby', 'sdk.version' => '0.1.14')
       values = { 'heartbeat' => 1 }.merge(@stats.select { |name,_| %w[pending_batches pending_bytes retried_batches dropped_records rejected_records invalid_records overflow_records].include?(name) })
       rows = values.map { |name,value| { 'name' => 'lightmoni.sdk.' + name, 'gauge' => { 'dataPoints' => [{ 'timeUnixNano' => time, 'asDouble' => value, 'attributes' => attributes }] } } }
       enqueue_self('metrics', rows, at)
