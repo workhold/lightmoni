@@ -539,7 +539,10 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
           if (!/^workerStopped=true(?: [a-z_]+=[^\n]+)*$/m.test(workerOutput)) fail(409, "recovery_worker_running");
           const cleanup: { worker_evidence: string; cleaned_at: string } = { worker_evidence: workerOutput.trim(), cleaned_at: at() };
           try { await ssh(machine, credential, lifecycleLockCleanupCommand(), signal); }
-          catch (cleanupError) { fail(409, `agent_update_lock_cleanup_failed:${cleanupError instanceof Error ? cleanupError.message : "unknown"}`); }
+          catch (cleanupError) {
+            const stderr = cleanupError instanceof SSHError && cleanupError.remoteStderr ? cleanupError.remoteStderr.replace(/[\r\n]+/g, " ").slice(0, 200) : "";
+            fail(409, `agent_update_lock_cleanup_failed:${cleanupError instanceof Error ? cleanupError.message : "unknown"}${stderr ? `:${stderr}` : ""}`);
+          }
           const afterProbe = await probe(machine, credential, signal);
           validateOriginalProbe(machine, afterProbe, approved);
           if (afterProbe.lifecycle_locked) fail(409, `agent_update_lock_cleanup_unverified:${JSON.stringify({...cleanup, before_fingerprint: beforeFingerprint, after_fingerprint: afterProbe.current.fingerprint})}`);
