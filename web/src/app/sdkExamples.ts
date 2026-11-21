@@ -119,8 +119,8 @@ export function sdkEnvironment(endpoint:string,options:SDKSampleOptions={}):stri
 export interface SDKPackage {id:string;language:string;runtime:string;file:string;url:string;available:boolean}
 export interface SDKInstall {endpoint?:string;endpoints?:ReportingAddress[];default_endpoint_id?:string;version:string;node_url:string;go_url:string;packages:SDKPackage[];checksums_url:string}
 export const sdkExamples:Record<string,{language:string;install:string;sample:string}>={
- typescript:{language:'typescript',install:'npm install ./lightmoni-sdk-0.1.10.tgz',sample:sdkSampleFor('typescript')},
- go:{language:'go',install:'tar -xzf lightmoni-go-sdk_0.1.10.tar.gz\ngo mod edit -replace github.com/workhold/lightmoni=./lightmoni-go-sdk\ngo get github.com/workhold/lightmoni/sdk/go\ngo mod tidy',sample:sdkSampleFor('go')},
- rust:{language:'rust',install:'tar -xzf lightmoni-rust-sdk_0.1.10.tar.gz\n# Cargo.toml [dependencies]\n# lightmoni = { path = "./lightmoni-rust-sdk/sdk/rust" }',sample:sdkSampleFor('rust')},
- python:{language:'python',install:'tar -xzf lightmoni-python-sdk_0.1.10.tar.gz\npython3 -m pip install ./lightmoni-python-sdk/sdk/python',sample:sdkSampleFor('python')},
+ typescript:{language:'typescript',install:'npm install ./lightmoni-sdk-0.1.11.tgz',sample:sdkSampleFor('typescript')},
+ go:{language:'go',install:'tar -xzf lightmoni-go-sdk_0.1.11.tar.gz\ngo mod edit -replace github.com/workhold/lightmoni=./lightmoni-go-sdk\ngo get github.com/workhold/lightmoni/sdk/go\ngo mod tidy',sample:sdkSampleFor('go')},
+ rust:{language:'rust',install:'tar -xzf lightmoni-rust-sdk_0.1.11.tar.gz\n# Cargo.toml [dependencies]\n# lightmoni = { path = "./lightmoni-rust-sdk/sdk/rust" }',sample:sdkSampleFor('rust')},
+ python:{language:'python',install:'tar -xzf lightmoni-python-sdk_0.1.11.tar.gz\npython3 -m pip install ./lightmoni-python-sdk/sdk/python',sample:sdkSampleFor('python')},
 };
