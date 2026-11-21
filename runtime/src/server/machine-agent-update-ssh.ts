@@ -206,8 +206,8 @@ export function workerStopEvidenceCommand(operationID: string): string {
   return [
     "set -eu",
     `unit=${JSON.stringify(unit)}`,
-    "state=$(systemctl show \"$unit\" --property=LoadState,ActiveState,MainPID,ControlPID,ControlGroup,Job)",
-    "parse() { key=$1; printf '%s\\n' \"$state\" | awk -F= -v k=\"$key\" '$1==k{print $2; found=1} END{if(!found)exit 20}'; }",
+    "state=$(systemctl show \"$unit\" --property=LoadState,ActiveState,MainPID,ControlPID,ControlGroup,Job 2>/dev/null || true)",
+    "parse() { key=$1; printf '%s\\n' \"$state\" | awk -F= -v k=\"$key\" '$1==k{print substr($0,index($0,\"=\")+1); found=1} END{if(!found)print \"\"}'; }",
     "load=$(parse LoadState); active=$(parse ActiveState); main=$(parse MainPID); control=$(parse ControlPID); job=$(parse Job); group=$(parse ControlGroup)",
     "[ \"$load\" = loaded ] || [ \"$load\" = not-found ] || exit 21",
     "[ \"$active\" = inactive ] || [ \"$active\" = failed ] || exit 22",
@@ -215,7 +215,7 @@ export function workerStopEvidenceCommand(operationID: string): string {
     "[ \"$control\" = 0 ] || [ -z \"$control\" ] || exit 24",
     "[ \"$job\" = 0 ] || [ -z \"$job\" ] || exit 25",
     "if [ -n \"$group\" ] && [ -r \"/sys/fs/cgroup$group/cgroup.procs\" ]; then [ -z \"$(cat \"/sys/fs/cgroup$group/cgroup.procs\")\" ] || exit 26; fi",
-    "for proc in /proc/[0-9]*; do [ -r \"$proc/cmdline\" ] || continue; if tr '\\0' '\\n' < \"$proc/cmdline\" | grep -Fxq '/opt/lightmoni-agent/updates/${operationID}/worker.mjs'; then exit 27; fi; done",
+    "for proc in /proc/[0-9]*; do [ -r \"$proc/cmdline\" ] || continue; if tr '\\0' '\\n' < \"$proc/cmdline\" | grep -Eq '(^|/)(update-runner|worker)\\.mjs$' && tr '\\0' '\\n' < \"$proc/cmdline\" | grep -Fq '${operationID}'; then exit 27; fi; done",
     "printf 'workerStopped=true\\n'",
   ].join('\\n');
 }
