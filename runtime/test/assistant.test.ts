@@ -150,6 +150,39 @@ async function session(f: any) {
   return result.data.id;
 }
 
+test("assistant sessions persist categories, support rename/move, and delete their attachments", async (t) => {
+  const f = await fixture(t);
+  const created = await f.request("/sessions", "POST", { title: "upgrade host", category: "Agent operations" });
+  assert.equal(created.status, 201, created.raw);
+  assert.equal(created.data.category, "Agent operations");
+  const listed = await f.request("/sessions");
+  assert.equal(listed.data.items.length, 1);
+  assert.equal(listed.data.items[0].category, "Agent operations");
+  const renamed = await f.request(`/sessions/${created.data.id}`, "PATCH", { title: "vchive recovery", category: "Incidents" });
+  assert.equal(renamed.status, 200, renamed.raw);
+  assert.equal(renamed.data.title, "vchive recovery");
+  assert.equal(renamed.data.category, "Incidents");
+  assert.equal((await f.request("/sessions")).data.items[0].category, "Incidents");
+  f.db.run(
+    "INSERT INTO assistant_records(id,value) VALUES(?,?)",
+    `attachment/alice/${created.data.id}/screen`,
+    Buffer.from("private attachment"),
+  );
+  const deleted = await f.request(`/sessions/${created.data.id}`, "DELETE");
+  assert.equal(deleted.status, 200, deleted.raw);
+  assert.equal(deleted.data.deleted, true);
+  assert.equal((await f.request(`/sessions/${created.data.id}`)).status, 404);
+  assert.equal((await f.request("/sessions")).data.items.length, 0);
+  assert.equal(f.db.get("SELECT id FROM assistant_records WHERE id=?", `attachment/alice/${created.data.id}/screen`), undefined);
+
+  const invalid = await f.request("/sessions", "POST", { title: "bad", category: "x".repeat(33) });
+  assert.equal(invalid.status, 400);
+  const moved = await f.request("/sessions", "POST", { title: "member", category: "Research" });
+  f.user.role = "member";
+  assert.equal((await f.request(`/sessions/${moved.data.id}`, "DELETE")).status, 200);
+  assert.equal((await f.request("/sessions")).status, 200);
+});
+
 test("assistant encrypted legacy config survives startup, key binds exact base, admin and strict fields", async (t) => {
   const f = await fixture(t, {}, (db) => {
     db.exec(
