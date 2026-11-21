@@ -239,13 +239,13 @@ class _State:
                 else:
                     merged[record["name"]][kind]["dataPoints"].extend(record[kind]["dataPoints"])
             return _json({"resourceMetrics": [{"resource": self.resource, "scopeMetrics": [
-                {"scope": {"name": "lightmoni/sdk/python" + ("/" + kind if kind else ""), "version": "0.1.13"}, "metrics": list(merged.values())}
+                {"scope": {"name": "lightmoni/sdk/python" + ("/" + kind if kind else ""), "version": "0.1.14"}, "metrics": list(merged.values())}
                 for kind, merged in scopes.items()]}]})
         resource, scope, field = {"metrics": ("resourceMetrics", "scopeMetrics", "metrics"),
                                   "logs": ("resourceLogs", "scopeLogs", "logRecords"),
                                   "traces": ("resourceSpans", "scopeSpans", "spans")}[signal]
         return _json({resource: [{"resource": self.resource, scope: [{
-            "scope": {"name": "lightmoni/sdk/python", "version": "0.1.13"}, field: records}]}]})
+            "scope": {"name": "lightmoni/sdk/python", "version": "0.1.14"}, field: records}]}]})
 
     def collect(self, force=True):
         if self.reporting_disabled:
@@ -323,7 +323,7 @@ class _State:
         self.self_last = time.monotonic()
         at = datetime.datetime.now(datetime.timezone.utc).isoformat().replace('+00:00', 'Z')
         now = str(time.time_ns())
-        attributes = _attrs({'lightmoni.component': 'sdk', 'sdk.language': 'python', 'sdk.version': '0.1.13'})
+        attributes = _attrs({'lightmoni.component': 'sdk', 'sdk.language': 'python', 'sdk.version': '0.1.14'})
         values = dict(heartbeat=1, **{n: self.stats[n] for n in ('pending_batches','pending_bytes','retried_batches','dropped_records','rejected_records','invalid_records','overflow_records')})
         self.enqueue_self('metrics', [dict(name='lightmoni.sdk.' + name, gauge={'dataPoints': [dict(timeUnixNano=now, asDouble=value, attributes=attributes)]}) for name,value in values.items()], at)
         changed = any(self.stats[n] > self.self_previous.get(n, 0) for n in ('retried_batches','dropped_records','rejected_records','invalid_records','overflow_records'))

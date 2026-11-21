@@ -537,10 +537,12 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
           // it must never clean a lifecycle lock while a worker can be live.
           const workerOutput = (await ssh(machine, credential, workerStopEvidenceCommand(operationID), signal)).stdout;
           if (!/^workerStopped=true(?: [a-z_]+=[^\n]+)*$/m.test(workerOutput)) fail(409, "recovery_worker_running");
-          await ssh(machine, credential, lifecycleLockCleanupCommand(), signal);
+          const cleanup: { worker_evidence: string; cleaned_at: string } = { worker_evidence: workerOutput.trim(), cleaned_at: at() };
+          try { await ssh(machine, credential, lifecycleLockCleanupCommand(), signal); }
+          catch (cleanupError) { fail(409, `agent_update_lock_cleanup_failed:${cleanupError instanceof Error ? cleanupError.message : "unknown"}`); }
           const afterProbe = await probe(machine, credential, signal);
           validateOriginalProbe(machine, afterProbe, approved);
-          validateLifecycleFree(afterProbe);
+          if (afterProbe.lifecycle_locked) fail(409, `agent_update_lock_cleanup_unverified:${JSON.stringify({...cleanup, before_fingerprint: beforeFingerprint, after_fingerprint: afterProbe.current.fingerprint})}`);
           observed.current = afterProbe.current;
           observed.service_active = afterProbe.service_active;
           observed.lifecycle_locked = afterProbe.lifecycle_locked;
