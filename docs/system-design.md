@@ -2965,3 +2965,21 @@ flowchart LR
 ```
 
 规格、接口和验证见 [SDD192](../specs/192-agent-lifecycle-fence-closure/spec.md)。
+
+## 197. Agent 更新恢复事务续跑（SDD197）
+
+显式恢复在切换后状态执行副作用前先写入一次性的 `recovery.json`。当恢复进程在 `restore_previous` 中途崩溃时，平台不允许盲目重放 worker，也不能把远端心跳当作回执成功；但可以在极窄前提下续跑同一个已审批恢复事务。续跑要求 started journal 的 schema、审批摘要、action 和 source status 与当前更新回执一致，仅接受 `switching`、`waiting_confirmation`、`rollback_failed` 到 `restore_previous` 的场景，且恢复前回执、原/目标发行快照、launcher/service/helper、卸载器快照、Agent 身份、运行模式、权限代次、生命周期锁和 worker 停止状态全部复核通过。当前路径只允许审批原发行或审批目标发行。
+
+满足上述围栏时，恢复命令重入既有 restore 协议：停止服务、恢复固定快照、按原期望重启、核验旧发行身份与健康，成功后把同一个 journal 置为 succeeded 并让原更新记录进入 `rolled_back`。审批漂移、回执漂移、快照漂移、未知 journal 状态、worker 存活、锁丢失/易主或当前路径不在两个审批候选中时拒绝；不会把 unknown 改写为成功，也不会自动派发新的升级或回滚。`archive_preparing` 仍不放宽为可续跑副作用事务。
+
+```mermaid
+flowchart LR
+  started["started restore journal"] --> match["审批 / 回执 / 快照 / 身份 / 锁匹配"]
+  match -->|否| reject["保持围栏并拒绝"]
+  match -->|是| resume["重入 restore_previous"]
+  resume --> health["核验原发行健康"]
+  health --> journal["同一 journal=succeeded"]
+  journal --> receipt["原更新=rolled_back"]
+```
+
+规格和验证见 [SDD197](../specs/197-agent-update-recovery-resume/spec.md)。

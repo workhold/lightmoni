@@ -898,7 +898,7 @@ test('recover response loss after successful restore is finalized without a seco
   const result=await f.maintenance.recover(input);assert.equal(result.status,'rolled_back');assert.equal(result.recovery.status,'succeeded');assert.equal(f.calls.filter(([file,args])=>file==='systemctl'&&args[0]==='stop').length,stops);
 });
 
-test('an actual SIGKILL during a started recovery preserves its nonterminal fence and never replays restore or worker',{timeout:15000},async t=>{
+test('an actual SIGKILL during a started recovery can resume only the same approved restore',{timeout:15000},async t=>{
   const f=await killedWorker(t,'cutover'),input=recoveryRequest(f,f.request),directory=f.p('opt/lightmoni-agent/updates/'+f.request.operation_id);
   const script=f.p('fault-recovery.mjs'),marker=f.p('recovery-fault-marker'),events=f.p('recovery-events.jsonl'),requestFile=f.p('recovery-request.json');
   const status=fs.readFileSync(join(directory,'status.json')),claim=fs.readFileSync(join(directory,'worker-claim.json')),bundle=fs.readFileSync(join(directory,'bundle.tar.gz'));
@@ -934,21 +934,55 @@ await runner.recover(JSON.parse(fs.readFileSync(requestFile,'utf8')));\n`);
     const deadline=Date.now()+10000;while(!fs.existsSync(marker)){if(child.exitCode!==null||Date.now()>deadline)throw Error('recovery fault boundary not reached: '+stderr);await new Promise(resolve=>setTimeout(resolve,2));}
     child.kill('SIGKILL');assert.deepEqual(await closed,{code:null,signal:'SIGKILL'});
   }finally{if(child.exitCode===null&&child.signalCode===null){child.kill('SIGKILL');await closed;}}
-  const journal=fs.readFileSync(join(directory,'recovery.json')),owner=fs.readFileSync(f.p('run/lightmoni-agent-lifecycle.lock/owner.json')),commands=fs.readFileSync(events);
-  assert.equal(JSON.parse(journal.toString()).status,'started');assert.equal(f.maintenance.state(f.request.operation_id).status,'switching');
+  const started=JSON.parse(fs.readFileSync(join(directory,'recovery.json')).toString()),commands=fs.readFileSync(events);
+  assert.equal(started.status,'started');assert.equal(f.maintenance.state(f.request.operation_id).status,'switching');
   assert.equal(f.maintenance.currentPath(),f.old);assert.equal(fs.readFileSync(f.p('usr/local/bin/lightmoni-agent'),'utf8'),'#!/bin/sh\n# old launcher\n');
   assert.match(fs.readFileSync(f.p('usr/local/sbin/lightmoni-agent-uninstall'),'utf8'),/new offline helper/);
   assert.deepEqual(fs.readFileSync(join(directory,'status-before-recovery.json')),status);
   assert.equal(commands.toString().trim().split('\n').map(line=>JSON.parse(line)).filter(value=>value.event==='restore').length,1);
-  let restores=0,workers=0;f.maintenance.restore=async()=>{restores++;throw Error('restore must not replay');};f.maintenance.worker=async()=>{workers++;throw Error('worker must not replay');};
-  const calls=f.calls.length;
-  for(let retry=0;retry<2;retry++)await assert.rejects(f.maintenance.recover(input),/recovery_interrupted/);
-  assert.equal(restores,0);assert.equal(workers,0);assert.equal(f.maintenance.ownsLock(f.request.operation_id),true);
-  assert.equal(f.calls.slice(calls).some(([file,args])=>file==='systemctl'&&['stop','restart'].includes(args[0])),false);
-  assert.deepEqual(fs.readFileSync(join(directory,'recovery.json')),journal);assert.deepEqual(fs.readFileSync(join(directory,'status.json')),status);
-  assert.deepEqual(fs.readFileSync(f.p('run/lightmoni-agent-lifecycle.lock/owner.json')),owner);assert.deepEqual(fs.readFileSync(events),commands);
+  stoppedWorker(f);
+  const result=await f.maintenance.recover(input);
+  assert.equal(result.status,'rolled_back');assert.equal(result.recovery.action,'restore_previous');assert.equal(result.recovery.source_status,'switching');
+  assert.equal(f.maintenance.state(f.request.operation_id).status,'rolled_back');assert.equal(f.maintenance.ownsLock(f.request.operation_id),false);
+  assert.equal(f.maintenance.currentPath(),f.old);assert.match(fs.readFileSync(f.p('usr/local/sbin/lightmoni-agent-uninstall'),'utf8'),/old offline helper/);
+  const completed=JSON.parse(fs.readFileSync(join(directory,'recovery.json')).toString());
+  assert.equal(completed.status,'succeeded');assert.equal(completed.action,started.action);assert.equal(completed.source_status,started.source_status);assert.equal(completed.recovered_at,started.recovered_at);assert.equal(completed.approval,started.approval);
+  assert.deepEqual(fs.readFileSync(join(directory,'status-before-recovery.json')),status);assert.deepEqual(fs.readFileSync(events),commands);
   assert.deepEqual(fs.readFileSync(join(directory,'worker-claim.json')),claim);assert.deepEqual(fs.readFileSync(join(directory,'bundle.tar.gz')),bundle);
-  assert.equal(fs.existsSync(candidatePath(f,f.request)),true);f.preserve();
+  assert.equal(f.calls.some(([file,args])=>file==='systemctl'&&args[0]==='restart'&&args[1]==='lightmoni-agent.service'),true);
+  assert.equal(fs.existsSync(candidatePath(f,f.request)),true);
+  const stops=f.calls.filter(([file,args])=>file==='systemctl'&&args[0]==='stop').length;
+  assert.deepEqual(await f.maintenance.recover(input),result);assert.equal(f.calls.filter(([file,args])=>file==='systemctl'&&args[0]==='stop').length,stops);
+  f.preserve();
+});
+
+test('started restore resume rejects journal, receipt, approval, snapshot, worker, or owner drift',{timeout:15000},async t=>{
+  const f=await killedWorker(t,'cutover'),input=recoveryRequest(f,f.request),directory=f.p('opt/lightmoni-agent/updates/'+f.request.operation_id);
+  stoppedWorker(f);
+  const restore=f.maintenance.restore.bind(f.maintenance);
+  f.maintenance.restore=async()=>{throw Error('simulated interrupted restore');};
+  await assert.rejects(f.maintenance.recover(input),/simulated interrupted restore/);
+  f.maintenance.restore=restore;
+  assert.equal(JSON.parse(fs.readFileSync(join(directory,'recovery.json')).toString()).status,'started');
+  const original=fs.readFileSync(join(directory,'status-before-recovery.json')),journal=fs.readFileSync(join(directory,'recovery.json')),approved=fs.readFileSync(join(directory,'approved-target.json'));
+  const before=fs.readFileSync(join(directory,'status.json')),calls=f.calls.length;
+  fs.writeFileSync(join(directory,'status-before-recovery.json'),JSON.stringify({...JSON.parse(original.toString()),drift:true}));
+  await assert.rejects(f.maintenance.recover(input),/recovery_receipt_changed/);
+  fs.writeFileSync(join(directory,'status-before-recovery.json'),original);
+  const started=JSON.parse(journal.toString());fs.writeFileSync(join(directory,'recovery.json'),JSON.stringify({...started,source_status:'waiting_confirmation'}));
+  await assert.rejects(f.maintenance.recover(input),/recovery_interrupted/);
+  fs.writeFileSync(join(directory,'recovery.json'),journal);
+  await assert.rejects(f.maintenance.recover({...input,expected_permission_generation:input.expected_permission_generation+1}),/recovery_identity_changed/);
+  fs.writeFileSync(join(directory,'approved-target.json'),JSON.stringify({...JSON.parse(approved.toString()),fingerprint:'0'.repeat(64)}));
+  await assert.rejects(f.maintenance.recover(input),/recovery_target_snapshot_changed/);
+  fs.writeFileSync(join(directory,'approved-target.json'),approved);
+  stoppedWorker(f,{ActiveState:'active',MainPID:'42'});
+  await assert.rejects(f.maintenance.recover(input),/recovery_worker_running/);
+  stoppedWorker(f);
+  fs.rmSync(f.p('run/lightmoni-agent-lifecycle.lock'),{recursive:true,force:true});
+  await assert.rejects(f.maintenance.recover(input),/recovery_other_lifecycle_owner/);
+  assert.deepEqual(fs.readFileSync(join(directory,'status.json')),before);assert.deepEqual(fs.readFileSync(join(directory,'recovery.json')),journal);
+  assert.equal(f.calls.slice(calls).some(([file,args])=>file==='systemctl'&&['stop','restart'].includes(args[0])),false);
 });
 
 test('a concurrent explicit recover cannot enter an already started restore',{timeout:15000},async t=>{

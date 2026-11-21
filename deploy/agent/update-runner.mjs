@@ -985,6 +985,28 @@ export class AgentMaintenance {
           this.atomic(path.join(directory,'recovery.json'),{...journal,status:'succeeded'});
           return this.save(id,{recovery});
         }
+        // A started restore is the only side-effecting recovery that may be
+        // resumed. The durable journal, original receipt, snapshots, identity,
+        // worker death, and lifecycle owner must all still describe that exact
+        // approved transaction; every other partial journal remains fenced.
+        if(journal.status==='started'&&journal.action==='restore_previous'
+          &&['switching','waiting_confirmation','rollback_failed'].includes(journal.source_status ?? '')
+          &&journal.source_status===state.status&&typeof journal.recovered_at==='string'&&Number.isFinite(Date.parse(journal.recovered_at))){
+          const original=path.join(directory,'status-before-recovery.json');
+          if(!fs.existsSync(original)||Buffer.compare(fs.readFileSync(this.checkManaged(original)),fs.readFileSync(this.checkManaged(path.join(directory,'status.json'))))!==0)fail('recovery_receipt_changed');
+          if(!fs.existsSync(this.lock)||!this.ownsLock(id))fail('recovery_other_lifecycle_owner');
+          this.validateRecoverySnapshots(id,request);
+          if(this.hasOperation())fail('recovery_operation_conflict');
+          try{this.writeOnce(path.join(directory,'worker-claim.json'),{schema:1,operation_id:id,recovery_fence:true,claimed_at:this.timestamp()});}catch(error){if(error?.code!=='EEXIST')throw error;this.checkManaged(path.join(directory,'worker-claim.json'));}
+          this.assertWorkerStopped(id);
+          const fresh=this.validateRecovery(input);if(fresh.state.status!==state.status)fail('recovery_receipt_changed');
+          if(this.hasOperation())fail('recovery_operation_conflict');
+          const recovery={schema:1,status:'succeeded',action:journal.action,source_status:journal.source_status,recovered_at:journal.recovered_at};
+          const result=await this.restore(id,'worker_interrupted_after_switch',{preserveArtifacts:true});
+          const completed=this.save(id,{recovery});
+          this.atomic(path.join(directory,'recovery.json'),{...journal,status:'succeeded'});
+          return completed;
+        }
         fail('recovery_interrupted');
       }
       if(!['accepted','preparing','switching','waiting_confirmation','rollback_failed'].includes(state.status))fail('recovery_not_required');
