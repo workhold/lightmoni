@@ -109,3 +109,38 @@
 .lm-host-deploy-split>.lm-host-menu-trigger{width:22px;flex-shrink:0}
 .lm-host-deploy-split>.lm-host-menu-trigger>.ant-btn{width:22px;padding-inline:3px;border-start-start-radius:0;border-end-start-radius:0}
 .lm-host-dialog-loading{display:flex;align-items:center;justify-content:center;gap:10px;min-height:96px}
+
+/* SDD204: one clear recovery path instead of a dense warning block. */
+.lm-agent-recovery-card{position:relative;margin:12px 0 16px;padding:16px;border:1px solid var(--lm-border);border-left:3px solid #d97706;border-radius:10px;background:var(--lm-surface)}
+.lm-agent-recovery-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.lm-agent-recovery-title{display:flex;align-items:center;gap:8px;min-width:0}
+.lm-agent-recovery-title strong{font-size:15px;white-space:nowrap}
+.lm-agent-recovery-head>span{max-width:360px;font-size:12px;line-height:1.5;color:var(--lm-muted);text-align:right}
+.lm-agent-recovery-facts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:14px 0 4px;padding:0}
+.lm-agent-recovery-facts div{min-width:0}
+.lm-agent-recovery-facts dt,.lm-agent-recovery-ids dt{margin:0 0 3px;font-size:12px;font-weight:400;color:var(--lm-muted)}
+.lm-agent-recovery-facts dd{margin:0;font-weight:600;font-size:13px;overflow-wrap:anywhere}
+.lm-agent-recovery-card>time{display:block;margin-bottom:12px;font-size:12px;color:var(--lm-muted)}
+.lm-agent-recovery-credential{display:flex;align-items:center;gap:10px;margin:12px 0}
+.lm-agent-recovery-credential>span{flex:0 0 auto;font-size:12px;color:var(--lm-muted)}
+.lm-agent-recovery-credential>.ant-select{flex:1;min-width:180px;max-width:100%}
+.lm-agent-recovery-credential>.lm-machine-form-notice,.lm-agent-recovery-credential>.ant-btn{margin:0}
+.lm-agent-recovery-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:10px 0}
+.lm-agent-recovery-actions .ant-btn{height:38px;white-space:nowrap}
+.lm-agent-recovery-confirm{display:flex;flex-direction:column;gap:5px;margin:10px 0 0}
+.lm-agent-recovery-confirm small{color:var(--lm-muted)}
+.lm-agent-recovery-warning{margin:10px 0 0}
+.lm-agent-recovery-card .lm-agent-update-technical{margin-top:12px}
+.lm-agent-recovery-card .lm-agent-update-technical ul{margin:10px 0;padding-left:20px;color:var(--lm-text);font-size:13px;line-height:1.7}
+.lm-agent-recovery-ids{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:12px 0 0}
+.lm-agent-recovery-ids dd{margin:0;overflow-wrap:anywhere}
+.lm-agent-recovery-ids code{font-size:12px;overflow-wrap:anywhere}
+@media(max-width:720px){
+ .lm-agent-recovery-head{flex-direction:column}
+ .lm-agent-recovery-head>span{max-width:none;text-align:left}
+ .lm-agent-recovery-facts{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .lm-agent-recovery-actions,.lm-agent-recovery-ids{grid-template-columns:1fr}
+ .lm-agent-recovery-actions .ant-btn{width:100%}
+}
+.lm-agent-recovery-warning{display:flex;align-items:center;gap:8px;margin-top:10px;padding:8px 10px;border:1px solid color-mix(in srgb,#d97706 35%,transparent);border-radius:8px;background:color-mix(in srgb,#d97706 8%,transparent);font-size:12px;line-height:1.5;color:var(--lm-text)}
+.lm-agent-recovery-warning strong{flex:0 0 auto}
