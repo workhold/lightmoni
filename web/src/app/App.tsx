@@ -14,6 +14,7 @@ import WorkspaceHeader from './WorkspaceHeader';
 import {navigationLinks} from './navigation';
 import SidebarNavigation from './SidebarNavigation';
 import {loginDestination,useDefaultHomepage} from './default-homepage';
+import BrandMark from './BrandMark';
 import './navigation.css';
 const McpAccessPage=lazy(()=>import('./McpAccessPage'));
 const McpAuthorizationPage=lazy(()=>import('./McpAccessPage').then(module=>({default:module.McpAuthorizationPage})));
@@ -58,7 +59,7 @@ export default function Root(){
  if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate(loginDestination(u,location.pathname,location.search),{replace:true})}}/>;
  return <MonitoringScope.Provider value={{publish:setPublishedScope}}><div className={`lm-shell ${navCollapsed?'is-nav-collapsed':'is-nav-expanded'} ${/^\/dashboards\/[^/]+\/panels\//.test(location.pathname)?'is-panel-standalone':''}`}>
   <aside className="lm-sidebar">
-   <Link to={homepage} className="lm-brand" aria-label={t('返回默认首页','Go to default homepage')}><span className="lm-brand-mark">L</span><span>LightMoni<small>{t('监控工作台','Monitoring workspace')}</small></span></Link>
+   <BrandMark homepage={homepage}/>
    <SidebarNavigation pathname={location.pathname} role={user.role} collapsed={navCollapsed}/>
    <Button className="lm-nav-collapse" type="text" aria-label={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} title={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} icon={navCollapsed?<MenuUnfoldOutlined/>:<MenuFoldOutlined/>} onClick={toggleNavigation}>{!navCollapsed&&t('收起导航','Collapse navigation')}</Button>
   </aside>
