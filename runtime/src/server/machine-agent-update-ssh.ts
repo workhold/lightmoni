@@ -243,5 +243,5 @@ export function lifecycleLockCleanupCommand(): string {
     "fi",
     "[ ! -e /run/lightmoni-agent-lifecycle.lock ] && [ ! -L /run/lightmoni-agent-lifecycle.lock ] || exit 33",
     "printf 'lifecycleLockClear=true\\n'",
-  ].join("\\n");
+   ].join("\n");
 }
