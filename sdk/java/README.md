@@ -6,7 +6,7 @@ JDK 17+，Gson 2.11.0。下载源码后安装到本地 Maven 仓库：
 mvn -f sdk/java/pom.xml install
 ~~~
 
-业务依赖 io.lightmoni:lightmoni-sdk:0.1.14；Gradle 使用 mavenLocal() 和 implementation("io.lightmoni:lightmoni-sdk:0.1.14")。
+业务依赖 io.lightmoni:lightmoni-sdk:0.1.15；Gradle 使用 mavenLocal() 和 implementation("io.lightmoni:lightmoni-sdk:0.1.15")。
 
 ~~~java
 import io.lightmoni.Client;

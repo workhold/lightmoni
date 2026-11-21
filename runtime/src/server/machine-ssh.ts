@@ -44,8 +44,10 @@ const REMOTE_REASONS = ["agent_service_override_not_allowed", "ordinary_agent_pr
 export interface SSHRemoteFailure { remote_exit_code: number | null; remote_reason_code: typeof REMOTE_REASONS[number] | "remote_command_failed" }
 export class SSHError extends Error {
   readonly remoteFailure?: SSHRemoteFailure;
-  constructor(readonly code: "ssh_failed" | "host_key_mismatch" | "timed_out" | "cancelled" | "invalid_response", remoteFailure?: SSHRemoteFailure) {
+  readonly remoteStderr?: string;
+  constructor(readonly code: "ssh_failed" | "host_key_mismatch" | "timed_out" | "cancelled" | "invalid_response", remoteFailure?: SSHRemoteFailure, remoteStderr?: string) {
     super(code);
+    this.remoteStderr = remoteStderr;
     if (code === "ssh_failed" && remoteFailure) this.remoteFailure = {
       remote_exit_code: Number.isSafeInteger(remoteFailure.remote_exit_code) && remoteFailure.remote_exit_code! >= 0 && remoteFailure.remote_exit_code! <= 255 ? remoteFailure.remote_exit_code : null,
       remote_reason_code: REMOTE_REASONS.some(value => value === remoteFailure.remote_reason_code) ? remoteFailure.remote_reason_code : "remote_command_failed",
@@ -57,7 +59,7 @@ export class SSHError extends Error {
 export function remoteSSHFailure(exitCode: number | null, stdout: string, stderr: string): SSHError {
   const lines = (stderr + "\n" + stdout).slice(-24_000).split(/\r?\n/);
   const reason = REMOTE_REASONS.find(value => lines.some(line => line === value || line === "Error: " + value));
-  return new SSHError("ssh_failed", { remote_exit_code: exitCode, remote_reason_code: reason ?? "remote_command_failed" });
+  return new SSHError("ssh_failed", { remote_exit_code: exitCode, remote_reason_code: reason ?? "remote_command_failed" }, stderr.slice(-800));
 }
 
 // Match a fixed pin; kept as a pure parser for existing tooling and tests.
