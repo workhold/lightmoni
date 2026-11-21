@@ -204,19 +204,24 @@ trap 'rm -rf "$recovery_dir"' EXIT HUP INT TERM
 export function workerStopEvidenceCommand(operationID: string): string {
   const unit = `lightmoni-agent-update-${operationID}.service`;
   return [
-    "set -eu",
+    "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
     `unit=${JSON.stringify(unit)}`,
-    "state=$(systemctl show \"$unit\" --property=LoadState,ActiveState,MainPID,ControlPID,ControlGroup,Job 2>/dev/null || true)",
-    "parse() { key=$1; printf '%s\\n' \"$state\" | awk -F= -v k=\"$key\" '$1==k{print substr($0,index($0,\"=\")+1); found=1} END{if(!found)print \"\"}'; }",
-    "load=$(parse LoadState); active=$(parse ActiveState); main=$(parse MainPID); control=$(parse ControlPID); job=$(parse Job); group=$(parse ControlGroup)",
-    "[ \"$load\" = loaded ] || [ \"$load\" = not-found ] || exit 21",
-    "[ \"$active\" = inactive ] || [ \"$active\" = failed ] || exit 22",
-    "[ \"$main\" = 0 ] || [ -z \"$main\" ] || exit 23",
-    "[ \"$control\" = 0 ] || [ -z \"$control\" ] || exit 24",
-    "[ \"$job\" = 0 ] || [ -z \"$job\" ] || exit 25",
-    "if [ -n \"$group\" ] && [ -r \"/sys/fs/cgroup$group/cgroup.procs\" ]; then [ -z \"$(cat \"/sys/fs/cgroup$group/cgroup.procs\")\" ] || exit 26; fi",
-    "printf 'workerStopped=true\\n'",
-  ].join('\\n');
+    "set +e",
+    "active=$(systemctl is-active \"$unit\" 2>/dev/null)",
+    "active_rc=$?",
+    "state=$(systemctl show \"$unit\" --property=LoadState,MainPID,ControlPID,Job 2>/dev/null)",
+    "show_rc=$?",
+    "load=$(printf '%s\\n' \"$state\" | sed -n 's/^LoadState=//p' | head -n1)",
+    "main=$(printf '%s\\n' \"$state\" | sed -n 's/^MainPID=//p' | head -n1)",
+    "control=$(printf '%s\\n' \"$state\" | sed -n 's/^ControlPID=//p' | head -n1)",
+    "job=$(printf '%s\\n' \"$state\" | sed -n 's/^Job=//p' | head -n1)",
+    "[ \"$active\" != active ] || exit 21",
+    "[ \"$load\" = loaded ] || [ \"$load\" = not-found ] || [ \"$load\" = masked ] || exit 22",
+    "[ -z \"$main\" ] || [ \"$main\" = 0 ] || exit 23",
+    "[ -z \"$control\" ] || [ \"$control\" = 0 ] || exit 24",
+    "[ -z \"$job\" ] || [ \"$job\" = 0 ] || exit 25",
+    "printf 'workerStopped=true active=%s load=%s show_rc=%s active_rc=%s\\n' \"$active\" \"$load\" \"$show_rc\" \"$active_rc\"",
+  ].join("\n");
 }
 
 export function lifecycleLockCleanupCommand(): string {
