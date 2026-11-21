@@ -12,7 +12,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { isIP } from "node:net";
 import { atomicJSON } from "../shared/io.js";
 
-export const VERSION = "0.1.16";
+export const VERSION = "0.1.17";
 export interface Probe {
   id: string;
   kind: "http" | "tcp";

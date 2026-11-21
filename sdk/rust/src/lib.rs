@@ -119,9 +119,9 @@ impl State {
         if signal=="metrics" {
             let mut scopes:BTreeMap<String,BTreeMap<String,Value>>=BTreeMap::new();
             for row in rows{let name=row["name"].as_str().unwrap().to_string();let kind=["sum","gauge","histogram","exponentialHistogram","summary"].into_iter().find(|k|!row[*k].is_null()).unwrap();let scope=match scopes.get("").and_then(|m|m.get(&name)){Some(existing)if existing[kind].is_null()=>kind,_=>""};let merged=scopes.entry(scope.into()).or_default();if let Some(existing)=merged.get_mut(&name){existing[kind]["dataPoints"].as_array_mut().unwrap().extend(row[kind]["dataPoints"].as_array().unwrap().iter().cloned());}else{merged.insert(name,row.clone());}}
-            return json!({"resourceMetrics":[{"resource":self.resource,"scopeMetrics":scopes.into_iter().map(|(kind,rows)|json!({"scope":{"name":if kind.is_empty(){"lightmoni/sdk/rust".to_string()}else{format!("lightmoni/sdk/rust/{kind}")},"version":"0.1.16"},"metrics":rows.into_values().collect::<Vec<_>>()})).collect::<Vec<_>>()}]}).to_string().into_bytes();
+            return json!({"resourceMetrics":[{"resource":self.resource,"scopeMetrics":scopes.into_iter().map(|(kind,rows)|json!({"scope":{"name":if kind.is_empty(){"lightmoni/sdk/rust".to_string()}else{format!("lightmoni/sdk/rust/{kind}")},"version":"0.1.17"},"metrics":rows.into_values().collect::<Vec<_>>()})).collect::<Vec<_>>()}]}).to_string().into_bytes();
         }
-        json!({resource:[{"resource":self.resource,scope:[{"scope":{"name":"lightmoni/sdk/rust","version":"0.1.16"},field:rows}]}]}).to_string().into_bytes()
+        json!({resource:[{"resource":self.resource,scope:[{"scope":{"name":"lightmoni/sdk/rust","version":"0.1.17"},field:rows}]}]}).to_string().into_bytes()
     }
     fn collect(&mut self,force:bool) {
         let now=nano();
@@ -166,7 +166,7 @@ impl State {
     fn collect_self(&mut self) {
         if self.key.is_empty() || !self.limits.self_telemetry || self.self_last.is_some_and(|at|at.elapsed()<Duration::from_secs(30)){return;}
         self.self_last=Some(Instant::now());let at=format_rfc3339(nano());let time=nano().to_string();
-        let attributes=json!([{"key":"lightmoni.component","value":{"stringValue":"sdk"}},{"key":"sdk.language","value":{"stringValue":"rust"}},{"key":"sdk.version","value":{"stringValue":"0.1.16"}}]);
+        let attributes=json!([{"key":"lightmoni.component","value":{"stringValue":"sdk"}},{"key":"sdk.language","value":{"stringValue":"rust"}},{"key":"sdk.version","value":{"stringValue":"0.1.17"}}]);
         let mut values=BTreeMap::from([("heartbeat",1)]);
         for name in ["pending_batches","pending_bytes","retried_batches","dropped_records","rejected_records","invalid_records","overflow_records"]{values.insert(name,self.stats[name]);}
         let rows:Vec<_>=values.iter().map(|(name,value)|json!({"name":format!("lightmoni.sdk.{name}"),"gauge":{"dataPoints":[{"timeUnixNano":time,"asDouble":value,"attributes":attributes}]}})).collect();
