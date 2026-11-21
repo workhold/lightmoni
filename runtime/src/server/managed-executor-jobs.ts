@@ -77,6 +77,9 @@ export function connectManagedExecutorJobs(deps:Dependencies,options:{jobs:Agent
       try{const job=jobs.get(row.id),approved=source(job);executors.enqueueManaged(job,approved.payload,approved.actor);}
       catch(error){
         if(!(error instanceof HTTPError))throw error;
+        // A busy execution lane only blocks this dispatch round; the approval itself
+        // stays valid, so the job must remain queued instead of being cancelled.
+        if(error.message==='machine_execution_locked')return;
         if(error.message==='agent_upgrade_required'){
           if(!jobs.failQueuedSSH)throw error;
           jobs.failQueuedSSH(row.id,'agent_upgrade_required');
