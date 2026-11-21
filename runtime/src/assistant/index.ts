@@ -948,7 +948,7 @@ export function registerAssistant(
         );
       const controller = new AbortController(),
         timeout = AbortSignal.timeout(options.turnTimeout ?? 120000),
-        signal = AbortSignal.any([ctx.signal, controller.signal, timeout]),
+        signal = AbortSignal.any([controller.signal, timeout]),
         turn = id();
       let release!: () => void;
       const done = new Promise<void>((resolve) => {
