@@ -1,4 +1,5 @@
 import { InstallationReadinessError, waitForInstallationReadiness } from './agent-install-readiness.js';
+import { operationSignal } from './operation-signal.js';
 import { busyLaneLabel, holdBusy, type BusyLane } from './machine-busy-lane.js';
 import { registerMachineDocker } from './machine-docker.js';
 import { registerMachineStateRecovery } from './machine-state-recovery.js';
@@ -963,10 +964,11 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     let dispatched = false;
     let completedStages: string[] = [];
     let privateKey = "", password = "";
+    const executionSignal = operationSignal();
     try {
       const material = authentication(machine.id, credential);
       privateKey = material.privateKey; password = material.password ?? "";
-      const observed = await runSSH({ credentialID: credential.id, machine:resolved.machine, privateKey, ...(password ? { password } : {}), command: preflightCommand(deps.externalURL), signal: ctx.signal, port: machine.port, timeoutMs: CHECK_TIMEOUT_MS });
+      const observed = await runSSH({ credentialID: credential.id, machine:resolved.machine, privateKey, ...(password ? { password } : {}), command: preflightCommand(deps.externalURL), signal: executionSignal, port: machine.port, timeoutMs: CHECK_TIMEOUT_MS });
       const fresh = parsePreflight(observed.stdout);
       const currentTarget = get(machine.id);
       if (!fresh.ready || fresh.agent_installation.state !== "absent" || currentTarget.agent_id !== machine.agent_id || !replaceableAgentBinding(db, currentTarget.agent_id, iso(now()))) fail(409, "发现已有 Agent 或安装条件已变化，未签发新身份");
@@ -987,7 +989,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
       const dispatching=db.run("UPDATE machine_deployments SET execution_stage='bootstrap_dispatched' WHERE id=? AND status='running' AND execution_stage='enrollment_issued' AND enrollment_id=? AND resolved_at=''",deployment.id,enrollment.enrollment_id);
       if(!dispatching.changes)fail(409,"安装记录已进入恢复流程，旧请求不能派发安装");
       dispatched = true;
-      const result = await runSSH({ credentialID: credential.id, machine:resolved.machine, privateKey, ...(password ? { password } : {}), command, enrollmentToken: enrollment.token_display_once, signal: ctx.signal, port: machine.port });
+      const result = await runSSH({ credentialID: credential.id, machine:resolved.machine, privateKey, ...(password ? { password } : {}), command, enrollmentToken: enrollment.token_display_once, signal: executionSignal, port: machine.port });
       completedStages = result.stages;
       const enrollmentID = enrollment.enrollment_id;
       const status = await waitForInstallationReadiness<{ agent_id: string }>(() => {
@@ -1010,7 +1012,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
             return { pending: 'privileged_executor_pending' };
         }
         return { ready: active };
-      }, ctx.signal, { timeoutMs: options.installationReadinessTimeoutMs, pollIntervalMs: options.installationReadinessPollIntervalMs });
+      }, executionSignal, { timeoutMs: options.installationReadinessTimeoutMs, pollIntervalMs: options.installationReadinessPollIntervalMs });
       const receipt = { stages: result.stages, stdout: redact(result.stdout, [enrollment.token_display_once, privateKey, password]), stderr: redact(result.stderr, [enrollment.token_display_once, privateKey, password]), enrollment_id: enrollment.enrollment_id, agent_id: status.agent_id };
       db.transaction(() => {
         const saved=db.run("UPDATE machine_deployments SET status='succeeded',finished_at=?,receipt_json=?,error='' WHERE id=? AND status='running' AND resolved_at=''", iso(now()), JSON.stringify(receipt), deployment.id);

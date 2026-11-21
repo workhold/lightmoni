@@ -1,5 +1,6 @@
 import {assertMaintenanceOverride,captureMaintenanceOverride,maintenanceBlockers,maintenanceWorkBusy,prepareMachineMaintenance,type MaintenanceBlocker,type MaintenanceOverride} from './machine-maintenance.js';
 import { holdBusy, type BusyLane } from './machine-busy-lane.js';
+import { operationSignal } from './operation-signal.js';
 import { createReadStream, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pipeline } from "node:stream/promises";
@@ -420,8 +421,9 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     for (const file of Object.values(body.files) as PinnedAgentFile[]) catalog.verify(file);
     holdLane(machineID);
     let dispatched = false, observing = false;
+    const executionSignal = operationSignal();
     try {
-      const observed = await probe(machine, credential, signal); validateProbe(machine, observed, operation.action !== "rollback");
+      const observed = await probe(machine, credential, executionSignal); validateProbe(machine, observed, operation.action !== "rollback");
       if (observed.current.fingerprint !== body.current.fingerprint) fail(409, "当前 Agent 程序已变化，请取消旧计划并重新审阅");
       if (observed.service_active !== body.current.service_active) fail(409, "当前 Agent 服务运行状态已变化，请取消旧计划并重新审阅");
       if((observed.runtime_mode??'user')!==(body.runtime_mode??'user')||(observed.permission_generation??1)!==(body.permission_generation??1))fail(409,'Agent 运行账户或权限代次已变化，请重新审阅');
@@ -443,7 +445,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       event(operationID,"starting");
       // Any failure after invoking start is unknown: the detached worker may already run.
       dispatched = true;
-      const response = parseAgentUpdateStatus((await ssh(machine, credential, command, signal, JSON.stringify({ download_token: downloadToken }) + "\n", 180_000)).stdout);
+      const response = parseAgentUpdateStatus((await ssh(machine, credential, command, executionSignal, JSON.stringify({ download_token: downloadToken }) + "\n", 180_000)).stdout);
       validateRemote(operation, response);
       db.run("UPDATE machine_agent_updates SET ticket_hash='',receipt_json=? WHERE id=?", JSON.stringify(response), operationID);
       event(operationID,response.status);
@@ -582,7 +584,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     holdLane(machineID);let dispatched=false;
     try {
       recheck();saveAttempt();dispatched=true;
-      const output=await ssh(machine,credential,agentUpdateRecoveryBootstrap(operationID,pinned.file.sha256),signal,JSON.stringify({runner_base64:source.toString('base64'),request})+'\n',660_000);
+      const output=await ssh(machine,credential,agentUpdateRecoveryBootstrap(operationID,pinned.file.sha256),operationSignal(),JSON.stringify({runner_base64:source.toString('base64'),request})+'\n',660_000);
       let envelope:any;try{envelope=JSON.parse(output.stdout);}catch{fail(409,'agent_update_recovery_unverified');}
       if(envelope?.error_code&&!envelope.status){
         attempt.remote_error_code=/^[a-z_]{1,80}$/.test(envelope.error_code)?envelope.error_code:'recovery_unverified';
@@ -646,14 +648,14 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   router.post(prefix + "/start", access.safe(async ctx => {
     deps.auth.requireAdmin(ctx); fields(await ctx.body(), []);
     const proposed=await plan(ctx.params.id,{action:"upgrade"},ctx.user.id,ctx.signal,true);
-    try { ctx.json(await apply(ctx.params.id,proposed.id,ctx.user.id,ctx.signal),202); }
+    try { ctx.json(await apply(ctx.params.id,proposed.id,ctx.user.id,operationSignal()),202); }
     catch(error) { if(row(ctx.params.id,proposed.id).status==="awaiting_approval")cancel(ctx.params.id,proposed.id); throw error; }
   }));
   router.post(prefix + "/:updateId/apply", access.safe(async ctx => {
     deps.auth.requireAdmin(ctx); const input = fields(await ctx.body(), ["confirm"]);
     if (input.confirm !== true) fail(400, "必须明确确认维护计划");
     if(JSON.parse(row(ctx.params.id,ctx.params.updateId).plan_json).force_unknown)human(ctx);
-    ctx.json(await apply(ctx.params.id, ctx.params.updateId, ctx.user.id, ctx.signal), 202);
+    ctx.json(await apply(ctx.params.id, ctx.params.updateId, ctx.user.id, operationSignal()), 202);
   }));
   router.post(prefix + "/:updateId/cancel", access.safe(async ctx => { deps.auth.requireAdmin(ctx); fields(await ctx.body(), []); ctx.json(cancel(ctx.params.id, ctx.params.updateId)); }));
   router.post(prefix + "/:updateId/reconcile", access.safe(async ctx => { deps.auth.requireAdmin(ctx); const input = fields(await ctx.body(), ["credential_id", "resolution", "reason"]);

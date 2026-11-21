@@ -2983,3 +2983,9 @@ flowchart LR
 ```
 
 规格和验证见 [SDD197](../specs/197-agent-update-recovery-resume/spec.md)。
+
+## 198. Agent 操作脱离请求生命周期（SDD198）
+
+管理员确认后的 Agent 首装、卸载、升级启动和维护恢复使用中心侧有界 operation signal，不再绑定批准请求的 HTTP `AbortSignal`。用户关闭页面、刷新或浏览器断开不会中断中心侧操作，页面重开后通过既有持久记录、轮询和进度事件恢复显示。重复确认仍被 durable 状态原子更新拒绝，不会派发第二个副作用事务。
+
+operation signal 只限制中心进程会话最长 15 分钟；远端 systemd、Agent 维护预算和健康确认窗口继续约束真实副作用。只读预检、计划生成、下载、核对和交互 reconcile 保留请求取消语义。中心进程重启仍保守处理：安装/卸载运行中转 unknown，更新 running/verifying 转 unknown，批次暂停，随后只走只读核对、恢复审批或重新审阅，不自动重放。
