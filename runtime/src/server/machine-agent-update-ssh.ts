@@ -215,7 +215,7 @@ export function workerStopEvidenceCommand(operationID: string): string {
     "[ \"$control\" = 0 ] || [ -z \"$control\" ] || exit 24",
     "[ \"$job\" = 0 ] || [ -z \"$job\" ] || exit 25",
     "if [ -n \"$group\" ] && [ -r \"/sys/fs/cgroup$group/cgroup.procs\" ]; then [ -z \"$(cat \"/sys/fs/cgroup$group/cgroup.procs\")\" ] || exit 26; fi",
-    "for proc in /proc/[0-9]*; do [ -r \"$proc/cmdline\" ] || continue; if tr '\\0' '\\n' < \"$proc/cmdline\" | grep -Fq '${operationID}'; then exit 27; fi; done",
+    "for proc in /proc/[0-9]*; do [ -r \"$proc/cmdline\" ] || continue; args=$(tr '\\0' '\\n' < \"$proc/cmdline\" 2>/dev/null || true); case $args in *${operationID}*) exit 27;; esac; done",
     "printf 'workerStopped=true\\n'",
   ].join('\\n');
 }
