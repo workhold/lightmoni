@@ -92,8 +92,8 @@ try{
  await expect.poll(()=>nextSession).toBe(1);
  await expect(assistant.getByRole('button',{name:'停止当前响应'})).toBeVisible();
  await expect(assistant.locator('.lm-assistant-session').filter({hasText:'first'}).locator('.lm-assistant-session-status.running')).toBeVisible();
- await box.fill('second');await assistant.getByRole('button',{name:'加入队列'}).click();
- await box.fill('third');await assistant.getByRole('button',{name:'加入队列'}).click();
+ await box.fill('second');await page.getByRole('button',{name:/加入队列|Queue turn/}).click();
+ await box.fill('third');await page.getByRole('button',{name:/加入队列|Queue turn/}).click();
  await expect(assistant.locator('.lm-assistant-queue-item')).toHaveCount(2);
  await assistant.locator('.lm-assistant-queue-item').filter({hasText:'third'}).getByRole('button',{name:'立即发送'}).click();
  await expect.poll(()=>turns.length).toBe(3);

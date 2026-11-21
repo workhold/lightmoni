@@ -269,21 +269,26 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const drafts = useRef(new Map<string,{text:string;attachments:Attachment[]}>());
   const fileInput = useRef<HTMLInputElement>(null);
   const previewController = useRef<AbortController | null>(null);
-  const turns = useMemo(() => assistantTimeline(events,language), [events,language]);
+  const timeline = useMemo(() => assistantTimeline(events,language), [events,language]);
+  const turns = useMemo(() => timeline, [timeline]);
   const table = tables.find(item => item.name === context.table);
-  const busy = creating || (!!sessionId && runningIds.includes(sessionId));
+  const busy = creating || (!!sessionId && (activeTurns.current.has(sessionId) || runningIds.includes(sessionId)));
   const queue = sessionId ? queuedTurns.current.get(sessionId) ?? [] : [];
   void queueVersion;
 
-  async function refreshSessions() { const data = await api<{ items: AssistantSession[] }>('/assistant/sessions'); setSessions(data.items); }
+  async function refreshSessions() { const data = await api<{ items: AssistantSession[] }>('/assistant/sessions'); setSessions(data.items); setRunningIds(previous => { const ids = data.items.filter(item => item.status === 'running').map(item => item.id); return previous.length === ids.length && ids.every(id => previous.includes(id)) ? previous : ids; }); return data; }
   useEffect(() => {
     let alive = true;
-    Promise.all([api<AssistantConfig>('/assistant/config'), api<{ items: AssistantSession[] }>('/assistant/sessions'), api<User>('/auth/me'), api<CatalogTable[]>('/catalog/tables')]).then(([model, history, actor, catalog]) => {
+    Promise.all([api<AssistantConfig>('/assistant/config'), api<{ items: AssistantSession[] }>('/assistant/sessions'), api<User>('/auth/me'), api<CatalogTable[]>('/catalog/tables')]).then(async ([model, history, actor, catalog]) => {
       if (!alive) return;
       setConfig(model); setSessions(history.items); setUser(actor); setTables(Array.isArray(catalog) ? catalog : []); setCodeWorkspace(initialContext?.code_workspace ?? model.code_workspace ?? '.');
+      setRunningIds(previous => { const ids = history.items.filter(item => item.status === 'running').map(item => item.id); return previous.length === ids.length && ids.every(id => previous.includes(id)) ? previous : ids; });
     }).catch(problem => { if (alive) setError(errorText(problem,t)); }).finally(() => { if (alive) setLoading(false); });
-    const timer = window.setInterval(() => { if (alive) void refreshSessions().catch(() => {}); }, 3000);
-    return () => { alive = false; window.clearInterval(timer); for (const controller of activeTurns.current.values()) controller.abort(); previewController.current?.abort(); };
+    const timer = window.setInterval(() => {
+      if (!alive) return;
+      void refreshSessions().catch(() => {});
+    }, 3000);
+    return () => { alive = false; window.clearInterval(timer); };
   }, []);
   useEffect(()=>{if(error)void message.error(error);},[error,message]);
   useEffect(() => { if (initialPrompt !== undefined) setText(initialPrompt); }, [initialPrompt]);
@@ -425,7 +430,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
           {attachments.length>0&&<div className="lm-assistant-attachments">{attachments.map((attachment,index)=><span className="lm-assistant-attachment" key={`${index}-${attachment.name}`}>{attachment.kind==='pdf'?<FilePdfOutlined aria-hidden="true"/>:<PictureOutlined aria-hidden="true"/>}<span>{attachment.name}</span><button type="button" aria-label={t(`移除 ${attachment.name}`,`Remove ${attachment.name}`)} onClick={()=>setAttachments(previous=>previous.filter((_,i)=>i!==index))}><CloseOutlined/></button></span>)}</div>}
           <Input.TextArea aria-label={t("给 AI 助手的问题","Question for the AI assistant")} placeholder={t("询问日志中的异常，或描述你想创建的大盘…","Ask about log anomalies, or describe a dashboard to create…")} value={text} onChange={event => setText(event.target.value)} autoSize={{ minRows: 2, maxRows: 7 }} maxLength={16000} disabled={!config?.enabled || loading} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
           {attachmentError&&<div className="lm-assistant-attachment-error" role="alert">{attachmentError}</div>}
-          <div className="lm-assistant-composer-actions"><div className="lm-assistant-composer-left"><Button type="text" icon={readingAttachment?<LoadingOutlined spin/>:<PaperClipOutlined/>} aria-label={t('添加图片或 PDF','Attach image or PDF')} disabled={!config?.enabled||readingAttachment||attachments.length>=4} onClick={()=>fileInput.current?.click()}/><Popover content={scopeControls} trigger="click" placement="top"><Button type="text" icon={<SlidersOutlined/>} aria-label={t('分析范围与设置','Analysis scope and settings')}/></Popover><Button type="text" className={compact?undefined:'lm-assistant-mobile-history'} icon={<HistoryOutlined/>} aria-label={t('对话历史','Conversation history')} onClick={()=>setHistoryOpen(true)}/><small>{t("图片与文本 PDF · Enter 发送 · Shift + Enter 换行","Images and text PDFs · Enter to send · Shift + Enter for a new line")}</small></div><div className="lm-assistant-composer-send">{busy&&(text.trim()||attachments.length>0)&&<Button size="small" disabled={creating||readingAttachment} onClick={()=>void send()}>{t('加入队列','Queue')}</Button>}{sessionId&&runningIds.includes(sessionId)?<button type="button" className="lm-assistant-send-button" aria-label={t('停止当前响应','Stop current response')} onClick={()=>void cancel()}><span className="lm-assistant-stop-square"/></button>:<button type="button" className="lm-assistant-send-button" aria-label={t('发送','Send')} disabled={(!text.trim()&&!attachments.length)||!config?.enabled||loading||creating||readingAttachment} onClick={()=>void send()}><ArrowUpOutlined/></button>}</div></div>
+          <div className="lm-assistant-composer-actions"><div className="lm-assistant-composer-left"><Button type="text" icon={readingAttachment?<LoadingOutlined spin/>:<PaperClipOutlined/>} aria-label={t('添加图片或 PDF','Attach image or PDF')} disabled={!config?.enabled||readingAttachment||attachments.length>=4} onClick={()=>fileInput.current?.click()}/><Popover content={scopeControls} trigger="click" placement="top"><Button type="text" icon={<SlidersOutlined/>} aria-label={t('分析范围与设置','Analysis scope and settings')}/></Popover><Button type="text" className={compact?undefined:'lm-assistant-mobile-history'} icon={<HistoryOutlined/>} aria-label={t('对话历史','Conversation history')} onClick={()=>setHistoryOpen(true)}/><small>{t("图片与文本 PDF · Enter 发送 · Shift + Enter 换行","Images and text PDFs · Enter to send · Shift + Enter for a new line")}</small></div><div className="lm-assistant-composer-send">{busy&&(text.trim()||attachments.length>0)&&<Button size="small" aria-label={t('加入队列','Queue turn')} disabled={creating||readingAttachment} onClick={()=>void send()}>{t('加入队列','Queue turn')}</Button>}{sessionId&&runningIds.includes(sessionId)?<button type="button" className="lm-assistant-send-button" aria-label={t('停止当前响应','Stop current response')} onClick={()=>void cancel()}><span className="lm-assistant-stop-square"/></button>:<button type="button" className="lm-assistant-send-button" aria-label={t('发送','Send')} disabled={(!text.trim()&&!attachments.length)||!config?.enabled||loading||creating||readingAttachment} onClick={()=>void send()}><ArrowUpOutlined/></button>}</div></div>
         </div>
       </div>
     </main>
