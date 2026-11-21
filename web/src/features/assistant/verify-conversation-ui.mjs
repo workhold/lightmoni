@@ -10,8 +10,8 @@ const user={id:'fixture-user',name:'Fixture',role:'admin'};
 const config={enabled:true,model:'fixture-model',base_url:'https://fixture.invalid/v1',has_key:false,code_tasks_enabled:false};
 const now='2026-11-19T00:00:00Z';
 const sessions=new Map([
- ['needs-review',{id:'needs-review',user_id:user.id,title:'Approval needed',created_at:now,updated_at:now,status:'needs_action',messages:[],events:[]}],
- ['failed',{id:'failed',user_id:user.id,title:'Failed analysis',created_at:now,updated_at:now,status:'failed',messages:[],events:[]}],
+ ['needs-review',{id:'needs-review',user_id:user.id,title:'Approval needed',category:'Review',created_at:now,updated_at:now,status:'needs_action',messages:[],events:[]}],
+ ['failed',{id:'failed',user_id:user.id,title:'Failed analysis',category:'',created_at:now,updated_at:now,status:'failed',messages:[],events:[]}],
 ]);
 const turns=[];const cancels=[];const active=new Map();const errors=[];
 let nextSession=0,nextTurn=0;
@@ -31,9 +31,14 @@ const server=createServer(async(req,res)=>{
   if(req.method==='GET'&&path==='/api/v1/assistant/sessions')return json(res,{items:[...sessions.values()].map(s=>({...s,status:active.has(s.id)?'running':s.status,messages:null,events:null}))});
   if(req.method==='POST'&&path==='/api/v1/assistant/sessions'){
    let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(raw);
-   const id=`new-${++nextSession}`,session={id,user_id:user.id,title:input.title,created_at:now,updated_at:now,status:'idle',messages:[],events:[]};sessions.set(id,session);return json(res,session,201);
+   const id=`new-${++nextSession}`,session={id,user_id:user.id,title:input.title,category:input.category||'',created_at:now,updated_at:now,status:'idle',messages:[],events:[]};sessions.set(id,session);return json(res,session,201);
   }
-  const match=path.match(/^\/api\/v1\/assistant\/sessions\/([^/]+)(?:\/(turns|cancel))?$/);
+  let match=path.match(/^\/api\/v1\/assistant\/sessions\/([^/]+)$/);
+  if(match){const session=sessions.get(match[1]);if(!session)return json(res,{error:'not found'},404);
+   if(req.method==='PATCH'){let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(raw);session.title=input.title??session.title;session.category=input.category??session.category;return json(res,session);}
+   if(req.method==='DELETE'){sessions.delete(match[1]);return json(res,{deleted:true});}
+  }
+  match=path.match(/^\/api\/v1\/assistant\/sessions\/([^/]+)(?:\/(turns|cancel))?$/);
   if(match){const session=sessions.get(match[1]);if(!session)return json(res,{error:'not found'},404);
    if(req.method==='GET'&&!match[2])return json(res,session);
    if(req.method==='POST'&&match[2]==='cancel'){
@@ -110,14 +115,28 @@ try{
  await assistant.locator('.lm-assistant-tools .ant-collapse-header').last().click();
  await expect(assistant.locator('.lm-assistant-terminal').last()).toContainText('ssh fixture-host');
  await expect(assistant.locator('.lm-assistant-answer').last()).toContainText('Final answer');
- await screenshot('desktop-light.png');
+ const failedRow=assistant.locator('.lm-assistant-session-row').filter({hasText:'Failed analysis'});
+ await failedRow.getByRole('combobox',{name:'对话分类'}).fill('运维任务');
+ await page.keyboard.press('Enter');
+
+ await expect.poll(()=>[...sessions.values()].find(session=>session.title==='Failed analysis')?.category).toBe('运维任务');
+ await expect(assistant.locator('.lm-assistant-history-group').filter({hasText:'运维任务'})).toContainText('Failed analysis');
  await assistant.getByRole('button',{name:'新对话'}).click();
+ const tempBox=assistant.locator('.lm-assistant-composer textarea');await tempBox.fill('temporary');
+ await assistant.getByRole('button',{name:'发送',exact:true}).click();
+ await expect.poll(()=>nextSession).toBe(2);
+ const reviewRow=assistant.locator('.lm-assistant-session-row').filter({hasText:'temporary'});
+ await reviewRow.getByRole('button',{name:'删除对话'}).click();
+ await assistant.getByRole('button',{name:'新对话'}).click();
+ await expect.poll(()=>nextSession===2 && ![...sessions.values()].some(session=>session.title==='temporary')).toBe(true);
+ await expect(assistant.locator('.lm-assistant-session-row').filter({hasText:'temporary'})).toHaveCount(0);
+ await screenshot('desktop-light.png');
  const png=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=1;canvas.height=1;canvas.getContext('2d').fillRect(0,0,1,1);return canvas.toDataURL('image/png').split(',')[1]});
  await assistant.locator('.lm-assistant-file-input').setInputFiles([{name:'screen.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')},{name:'report.pdf',mimeType:'application/pdf',buffer:pdf()}]);
  await expect(assistant.locator('.lm-assistant-attachments .lm-assistant-attachment')).toHaveCount(2);
  await box.fill('analyze attachment');await assistant.getByRole('button',{name:'发送',exact:true}).click();
- await expect.poll(()=>turns.length).toBe(6);
- const attached=turns.at(-1).attachments;expect(attached.map(item=>item.kind)).toEqual(['image','pdf']);
+ await expect.poll(()=>turns.filter(turn=>turn.text==='analyze attachment').length).toBe(1);
+ const attached=turns.find(turn=>turn.text==='analyze attachment').attachments;expect(attached.map(item=>item.kind)).toEqual(['image','pdf']);
  expect(attached[0].data.length).toBeGreaterThan(10);expect(attached[1].text).toContain('PDF fixture text');
  await page.setViewportSize({width:375,height:812});
  await page.evaluate(()=>{localStorage.setItem('lightmoni.appearance','dark');window.dispatchEvent(new StorageEvent('storage',{key:'lightmoni.appearance'}));});

@@ -596,21 +596,25 @@ export function registerAssistant(
       };
       const items = store
         .sessions(`session/${ctx.user.id}/`)
-        .map((s) => ({ ...s, status: sessionStatus(s, active.has(key(ctx.user.id, s.id)), currentReview), messages: null, events: null }));
+        .map((s) => ({ ...s, category: s.category ?? "", status: sessionStatus(s, active.has(key(ctx.user.id, s.id)), currentReview), messages: null, events: null }));
       ctx.json({ items });
     }, "cannot list assistant sessions"),
   );
   deps.router.post(
     route + "/sessions",
     safe(async (ctx) => {
-      const input = await body(ctx, ["title"], 4096),
-        title = text(input.title).trim();
+      const input = await body(ctx, ["title", "category"], 4096),
+        title = text(input.title).trim(),
+        category = text(input.category).trim();
       if (bytes(title) > 240)
         throw new AssistantError(400, "session title is too long");
+      if (bytes(category) > 32 || control(category))
+        throw new AssistantError(400, "invalid session category");
       const value: Session = {
         id: id(),
         user_id: ctx.user.id,
         title: title || "新对话",
+        category,
         created_at: now(),
         updated_at: now(),
         messages: [],
@@ -619,6 +623,48 @@ export function registerAssistant(
       save(value);
       ctx.json(value, 201);
     }, "cannot save assistant session"),
+  );
+  deps.router.patch(
+    route + "/sessions/:id",
+    safe(async (ctx) => {
+      const sessionKey = key(ctx.user.id, ctx.params.id);
+      if (active.has(sessionKey))
+        throw new AssistantError(
+          409,
+          "cannot change a conversation while its turn is running",
+        );
+      const input = await body(ctx, ["title", "category"], 4096),
+        value = session(ctx);
+      if (input.title != null) {
+        const title = text(input.title).trim();
+        if (!title || bytes(title) > 240)
+          throw new AssistantError(400, "session title is too long or empty");
+        value.title = title;
+      }
+      if (input.category != null) {
+        const category = text(input.category).trim();
+        if (bytes(category) > 32 || control(category))
+          throw new AssistantError(400, "invalid session category");
+        value.category = category;
+      }
+      save(value);
+      ctx.json(value);
+    }, "cannot update assistant session"),
+  );
+  deps.router.delete(
+    route + "/sessions/:id",
+    safe((ctx) => {
+      const sessionKey = key(ctx.user.id, ctx.params.id);
+      if (active.has(sessionKey))
+        throw new AssistantError(
+          409,
+          "cancel the running turn before deleting this conversation",
+        );
+      const value = session(ctx);
+      store.delete(sessionKey);
+      store.deletePrefix(`attachment/${ctx.user.id}/${value.id}/`);
+      ctx.json({ deleted: true });
+    }, "cannot delete assistant session"),
   );
   deps.router.get(
     route + "/sessions/:id",

@@ -4,12 +4,12 @@ import {chinese} from '../alerts/translation';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {useNavigate} from 'react-router-dom';
 import {MessageScroller} from '@shadcn/react/message-scroller';
-import { ArrowUpOutlined, CheckOutlined, CloseOutlined, CodeOutlined, CopyOutlined, FilePdfOutlined, HistoryOutlined, LoadingOutlined, MessageOutlined, PaperClipOutlined, PictureOutlined, PlusOutlined, ReloadOutlined, SettingOutlined, SlidersOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { ArrowUpOutlined, CheckOutlined, CloseOutlined, CodeOutlined, CopyOutlined, DeleteOutlined, FolderOutlined, FilePdfOutlined, HistoryOutlined, LoadingOutlined, MessageOutlined, PaperClipOutlined, PictureOutlined, PlusOutlined, ReloadOutlined, SettingOutlined, SlidersOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import XMarkdown, { type ComponentProps } from '@ant-design/x-markdown';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
 import {useAppearance} from '../../shared/appearance';
-import { App, Alert, Button, Checkbox, Collapse, Drawer, Input, Modal, Popover, Select, Space, Spin, Table, Tag, Tooltip } from '../../shared/ui';
+import { App, Alert, Button, Checkbox, Collapse, Drawer, Input, Modal, Popconfirm, Popover, Select, Space, Spin, Table, Tag, Tooltip } from '../../shared/ui';
 import { api } from '../../shared/api';
 import {boundedMonitoringContext} from '../../shared/assistant-context';
 import type { CatalogTable, QueryResponse, TimeRange, User } from '../../shared/types';
@@ -253,6 +253,8 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [newCategory, setNewCategory] = useState("");
+  const [deletingIds, setDeletingIds] = useState<string[]>([]);
   const [draft, setDraft] = useState<DashboardDraft | null>(null);
   const [draftError, setDraftError] = useState('');
   const [draftSaving, setDraftSaving] = useState(false);
@@ -340,7 +342,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
       creatingRef.current=true;
       ++selectionVersion.current;
       setCreating(true);
-      try { const session=await api<AssistantSession>('/assistant/sessions',{method:'POST',body:JSON.stringify({title:item.text.slice(0,60)})}); id=session.id; selectedSession.current=id;setSessionId(id);setSessions(previous=>[session,...previous]);setEvents([]);eventCache.current.set(id,[]); }
+      try { const session=await api<AssistantSession>('/assistant/sessions',{method:'POST',body:JSON.stringify({title:item.text.slice(0,60),category:newCategory})}); id=session.id; selectedSession.current=id;setSessionId(id);setSessions(previous=>[session,...previous]);setEvents([]);eventCache.current.set(id,[]); }
       catch(problem){setError(errorText(problem,t));return;}
       finally{creatingRef.current=false;setCreating(false);}
     }
@@ -392,7 +394,50 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     } catch (problem) { setDraftError(errorText(problem,t)); } finally { setDraftSaving(false); }
   }
   function newConversation() { ++selectionVersion.current;setLoading(false);drafts.current.set(selectedSession.current??'new',{text,attachments});selectedSession.current=null;setSessionId(null);setEvents([]);const draft=drafts.current.get('new');setText(draft?.text??'');setAttachments(draft?.attachments??[]);setError('');setHistoryOpen(false); }
-  function historyContent() { return <><Button block icon={<PlusOutlined />} disabled={creating} onClick={newConversation}>{t("新对话","New conversation")}</Button><Input allowClear size="small" placeholder={t("搜索对话","Search conversations")} value={search} onChange={event => setSearch(event.target.value)} className="lm-assistant-history-search" />{sessions.filter(session => session.title.toLowerCase().includes(search.toLowerCase())).map(session => { const status=runningIds.includes(session.id)?'running':session.status;return <button className={`lm-assistant-session ${sessionId === session.id ? 'active' : ''}`} key={session.id} disabled={creating} onClick={() => void loadSession(session.id)}><MessageOutlined aria-hidden="true"/><span className="lm-assistant-session-name">{session.title}</span>{status&&status!=='idle'&&<span className={`lm-assistant-session-status ${status}`} aria-label={status==='running'?t('响应中','Responding'):status==='failed'?t('失败','Failed'):t('待确认','Needs review')}>{status==='running'?<LoadingOutlined spin/>:status==='failed'?t('失败','Failed'):t('待确认','Review')}</span>}</button>})}{!sessions.length && <div className="lm-assistant-history-empty">{t("对话会保存在这里","Conversations are saved here")}</div>}</>; }
+  const categoryLabel=(value?:string)=>value?.trim()?value.trim():t("未分类","Uncategorized");
+  const categoryOptions=useMemo(()=>{const base=[t("未分类","Uncategorized"),t("监控","Monitoring"),t("Agent 与主机","Agents & hosts"),t("运维任务","Operations"),t("研究","Research")];const values=[...new Set([...base,...sessions.map(session=>session.category?.trim()||"").filter(Boolean)])];return values.map(value=>({value:value===t("未分类","Uncategorized")?"":value,label:categoryLabel(value)}));},[sessions,t]);
+  const categoryOptionsFor=(value?:string)=>categoryOptions.some(option=>option.value===(value||""))?categoryOptions:[...categoryOptions,{value:value||"",label:categoryLabel(value)}];
+  async function updateSessionCategory(id:string,category:string){
+    try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"PATCH",body:JSON.stringify({category})}); setSessions(previous=>previous.map(session=>session.id===id?{...session,category}:session)); if(selectedSession.current===id)void loadSession(id); }
+    catch(problem){ setError(errorText(problem,t)); void message.error(errorText(problem,t)); }
+  }
+  async function deleteSession(id:string){
+    setDeletingIds(previous=>[...new Set([...previous,id])]);
+    try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"DELETE"}); setSessions(previous=>previous.filter(session=>session.id!==id)); eventCache.current.delete(id);drafts.current.delete(id); if(sessionId===id)newConversation(); void message.success(t("对话已删除","Conversation deleted")); }
+    catch(problem){ setError(errorText(problem,t)); void message.error(errorText(problem,t)); }
+    finally { setDeletingIds(previous=>previous.filter(value=>value!==id)); }
+  }
+  function historyContent() {
+    const visible=sessions.filter(session=>session.title.toLowerCase().includes(search.toLowerCase())||categoryLabel(session.category).toLowerCase().includes(search.toLowerCase()));
+    const groups=[...new Set(visible.map(session=>session.category?.trim()||""))].sort((a,b)=>Number(!a)-Number(!b)||a.localeCompare(b));
+    return <div className="lm-assistant-history">
+      <Button block icon={<PlusOutlined />} disabled={creating} onClick={newConversation}>{t("新对话","New conversation")}</Button>
+      <Input allowClear size="small" placeholder={t("搜索对话","Search conversations")} value={search} onChange={event=>setSearch(event.target.value)} className="lm-assistant-history-search" />
+      <label className="lm-assistant-category-picker">
+        <span><FolderOutlined aria-hidden="true"/>{t("新对话分类","New conversation category")}</span>
+        <Select className="lm-assistant-category-input" mode="tags" maxCount={1} size="small" value={newCategory?[newCategory]:[]} showSearch onChange={values=>setNewCategory(values.at(-1)??'')} options={categoryOptions} disabled={creating} tokenSeparators={[',']} aria-label={t("新对话分类","New conversation category")} />
+      </label>
+      {groups.map(category=>{
+        const items=visible.filter(session=>(session.category?.trim()||"")===category);
+        return <section className="lm-assistant-history-group" key={category||"uncategorized"}>
+          <header><span>{categoryLabel(category)}</span><small>{items.length}</small></header>
+          {items.map(session=>{
+            const status=runningIds.includes(session.id)?'running':session.status;
+            const deleting=deletingIds.includes(session.id), running=status==='running';
+            return <div className={`lm-assistant-session-row ${sessionId===session.id?'active':''}`} key={session.id}>
+              <button className={`lm-assistant-session ${sessionId===session.id?'active':''}`} disabled={creating||deleting} onClick={()=>void loadSession(session.id)}>
+                <MessageOutlined aria-hidden="true"/><span className="lm-assistant-session-name">{session.title}</span>
+                {status&&status!=='idle'&&<span className={`lm-assistant-session-status ${status}`} aria-label={status==='running'?t('响应中','Responding'):status==='failed'?t('失败','Failed'):t('待确认','Needs review')}>{status==='running'?<LoadingOutlined spin/>:status==='failed'?t('失败','Failed'):t('待确认','Review')}</span>}
+              </button>
+              <Select className="lm-assistant-category-select" mode="tags" maxCount={1} size="small" value={session.category?.trim()?[session.category.trim()]:[]} options={categoryOptionsFor(session.category)} showSearch disabled={deleting||running} onChange={values=>void updateSessionCategory(session.id,values.at(-1)??'')} onClick={event=>event.stopPropagation()} aria-label={t('对话分类','Conversation category')} />
+              <Button className="lm-assistant-session-delete" type="text" size="small" danger icon={<DeleteOutlined/>} loading={deleting} disabled={deleting||running} aria-label={t("删除对话","Delete conversation")} onClick={()=>void deleteSession(session.id)}/>
+            </div>;
+          })}
+        </section>;
+      })}
+      {!visible.length && <div className="lm-assistant-history-empty">{t("对话会保存在这里","Conversations are saved here")}</div>}
+    </div>;
+  }
 
   const scopeControls=<div className="lm-assistant-scope"><div className="lm-assistant-scope-heading"><strong>{t('分析范围与设置','Analysis scope and settings')}</strong>{config?.enabled&&<span>{config.model}</span>}</div><label>{t('数据表','Data table')}<Select showSearch allowClear placeholder={t('全部数据表','All data tables')} value={context.table} onChange={value => setContext(previous => ({ ...previous, table: value, service: undefined }))} options={tables.map(item => ({ value: item.name, label: item.name }))} /></label><label>{t('服务','Service')}<Select showSearch allowClear placeholder={t('全部服务','All services')} value={context.service} onChange={value => setContext(previous => ({ ...previous, service: value }))} options={(table?.services ?? [...new Set(tables.flatMap(item => item.services))]).map(service => ({ value: service, label: service }))} /></label>{context.range ? <div className="lm-assistant-scope-fixed">{t('当前页面时间范围','Current page time range')}</div> : <label>{t('时间范围','Time range')}<Select value={lookback} options={[{ value: .25, label: t('最近 15 分钟','Last 15 minutes') }, { value: 1, label: t('最近 1 小时','Last hour') }, { value: 6, label: t('最近 6 小时','Last 6 hours') }, { value: 24, label: t('最近 24 小时','Last 24 hours') }]} onChange={setLookback} /></label>}{user?.role === 'admin' && config?.code_tasks_enabled && <label>{t('代码工作区','Code workspace')}<Input aria-label={t('代码工作区','Code workspace')} value={codeWorkspace} onChange={event => setCodeWorkspace(event.target.value)} placeholder="." maxLength={512} /><small>{t('代码任务在隔离副本中运行，审批后应用修改。','Code tasks run in an isolated copy and apply changes after approval.')}</small></label>}{user?.role === 'admin' && <Button type="text" icon={<SettingOutlined/>} onClick={openSettings}>{t('模型连接设置','Model connection settings')}</Button>}</div>;
 
