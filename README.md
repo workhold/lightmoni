@@ -185,18 +185,18 @@ LIGHTMONI_DATA=.local-dev/node-dev/state LIGHTMONI_ADDR=127.0.0.1:18880 LIGHTMON
 需要测试下载与安装时，单独生成发布包（默认输出 `runtime/downloads`）：
 
 ```sh
-npm run release:agent -- 0.1.23
-npm run release:sdk -- 0.1.23
+npm run release:agent -- 0.1.24
+npm run release:sdk -- 0.1.24
 ```
 
 ### 版本号与 AI 发布检查
 
-根 `package.json.version` 是平台、Agent 和随镜像分发 SDK 的统一版本事实来源。AI/自动化代理在**每次推送前**必须运行 `npm run version:check`；检查失败时先补齐遗漏，不得直接推送或发布。普通提交不需要机械涨版，只有发布 PR 才递增版本：修复使用补丁号，例如当前为 `0.1.23`，下一个补丁版本示例为 `0.1.23`。
+根 `package.json.version` 是平台、Agent 和随镜像分发 SDK 的统一版本事实来源。AI/自动化代理在**每次推送前**必须运行 `npm run version:check`；检查失败时先补齐遗漏，不得直接推送或发布。普通提交不需要机械涨版，只有发布 PR 才递增版本：修复使用补丁号，例如当前为 `0.1.24`，下一个补丁版本示例为 `0.1.24`。
 
 ```sh
 # 每次推送前检查；发布 PR 中先递增，再复查。
 npm run version:check
-npm run version:bump -- 0.1.23
+npm run version:bump -- 0.1.24
 npm run version:check
 ```
 
