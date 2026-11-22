@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-version=${1:-0.1.21}
+version=${1:-0.1.22}
 output=${2:-runtime/downloads}
 mkdir -p "$output"
 release_dir=$(cd "$output" && pwd)

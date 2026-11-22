@@ -30,7 +30,7 @@ export default function MachineBatchDialog({action,targets,onClose,onRefresh,onS
  const [runtimeMode,setRuntimeMode]=useState<'root'|'user'>('root'),runtimeModeCustomized=useRef(false);
  const [autoAccount,setAutoAccount]=useState(true);
  const [accountEditor,setAccountEditor]=useState<{targetID:string;action:'add'|'manage'}>();
- const [version,setVersion]=useState('0.1.21'),[reason,setReason]=useState(''),[reviewed,setReviewed]=useState(false),[notice,setNotice]=useState(''),[now,setNow]=useState(Date.now());
+ const [version,setVersion]=useState('0.1.22'),[reason,setReason]=useState(''),[reviewed,setReviewed]=useState(false),[notice,setNotice]=useState(''),[now,setNow]=useState(Date.now());
  const isPlan=needsBatchPlan(action),limitExceeded=snapshot.length>MAX_BATCH_TARGETS;
  const title=({ssh_check:t('批量 SSH 安装检查','Batch SSH installation checks'),install:t('批量部署 LightMoni Agent','Batch deploy LightMoni Agent'),uninstall:t('卸载 Agent','Uninstall Agent'),remove_node:t('移除节点','Remove nodes'),delete_host:t('删除主机','Delete hosts')})[action];
  const errorText=(error:unknown)=>error instanceof Error?error.message:t('请求失败','Request failed');
