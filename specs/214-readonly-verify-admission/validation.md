@@ -24,6 +24,13 @@
 
 - 待部署后补充：`ops_cluster_instances.last_seen` 恢复刷新、`reconciliation_resources` 4 项实例资源离开 `reconciliation_failed`、`/applications` 卡片回「运行中」；zz-bj-1 的 4 条 unknown `task_runs` 留待管理员按既有流程在 UI 核对（写围栏保持）。
 
+## 生产验证（0.1.28 最终，15:24–15:25 UTC）
+
+- 部署 `v0.1.28-20261122-151325-amd64`（digest `sha256:fb366691…`，revision `c167bfb3`，容器 healthy）。
+- **4/4 实例 `last_seen` 恢复秒级刷新**（15:24:20–15:25:20，此前自 02:47 冻结 12 小时+）；全部 `state=running`、`healthy=1`——含自晨间起 `healthy=0` 的「小猪绘本」（SDD213 的 2xx/3xx 探针默认值修复了重定向探针误判）。
+- reconciliation：3 项 in_sync、1 项（小猪绘本）`pending/verifying_deployment`（其配置存在真实漂移，诚实显示待核实；写修复在 zz-bj-1 剩余 1 条未核对 unknown `task_run` 人工处理前保持围栏——这是设计边界而非缺陷）。
+- zz-bj-1 剩余待办：管理员在 UI 按既有流程核对 1 条 unknown task_run（950bc57b，02:47 产生）后，写通道完全恢复。
+
 ## 0.1.26 部署验证与追加修复（FR-005）
 
 - 0.1.26（仅含 FR-001/003）部署后：registry 侧 verify 派发成功（小猪绘本实例 `current_run_id` 已被新巡检覆盖，其余 3 实例资源离开 `reconciliation_failed` 转为 pending），但巡检卡在 agent_jobs `queued` 无人领取——受管链路还有两层围栏：
