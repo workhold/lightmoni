@@ -161,7 +161,7 @@ public sealed class Client
                 "logs" => ("resourceLogs", "scopeLogs", "logRecords"),
                 _ => ("resourceSpans", "scopeSpans", "spans")
             };
-            return Encode(Obj(resource, new[] { Obj("resource", Resource, scope, new[] { Obj("scope", Obj("name", "lightmoni/sdk/dotnet", "version", "0.1.26"), field, rows) }) }));
+            return Encode(Obj(resource, new[] { Obj("resource", Resource, scope, new[] { Obj("scope", Obj("name", "lightmoni/sdk/dotnet", "version", "0.1.27"), field, rows) }) }));
         }
         internal void Collect()
         {
@@ -211,7 +211,7 @@ public sealed class Client
             long clock=Stopwatch.GetTimestamp();
             if(!Limits.SelfTelemetry || (SelfLast!=long.MinValue && Stopwatch.GetElapsedTime(SelfLast,clock).TotalSeconds<30))return;
             SelfLast=clock;string time=Nano(),at=DateTimeOffset.UtcNow.ToString("O");
-            var attributes=Attrs(new Dictionary<string,object>{["lightmoni.component"]="sdk",["sdk.language"]="dotnet",["sdk.version"]="0.1.26"});
+            var attributes=Attrs(new Dictionary<string,object>{["lightmoni.component"]="sdk",["sdk.language"]="dotnet",["sdk.version"]="0.1.27"});
             var values=new Dictionary<string,long>{{"heartbeat",1}};
             foreach(string name in new[]{"pending_batches","pending_bytes","retried_batches","dropped_records","rejected_records","invalid_records","overflow_records"})values[name]=Stats[name];
             EnqueueSelf("metrics",values.Select(p=>(object)Obj("name","lightmoni.sdk."+p.Key,"gauge",Obj("dataPoints",new[]{Obj("timeUnixNano",time,"asDouble",p.Value,"attributes",attributes)}))).ToList(),at);
