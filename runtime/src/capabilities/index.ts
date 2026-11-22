@@ -456,13 +456,19 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     const entry=this.proposalIndex.get(id);if(!entry)fail(404,"resource_not_found");return{proposal:this.domainProposal(p,entry)};
   }
   private plan(p:Principal,i:any,c:InvocationContext):any {
+    // Assistant models often mirror dispatch's top-level host_ids when drafting a
+    // task.create/update. Normalize that redundant form onto the task target so
+    // the exact same reviewed host list is preserved, without widening scope.
+    let taskTarget: any;
     if(["task.create","task.update"].includes(i.operation)) {
-      if(!i.task||i.run_id||i.host_ids||i.operation==="task.create"&&i.task_id||i.operation==="task.update"&&!i.task_id)fail(400,"invalid_input");
-      if(i.operation==="task.create")this.assertStaticTaskTargets(p,i.task);
+      if(!i.task||i.run_id||i.operation==="task.create"&&i.task_id||i.operation==="task.update"&&!i.task_id)fail(400,"invalid_input");
+      taskTarget=structuredClone(i.task);
+      if(i.host_ids)taskTarget.host_ids=[...new Set([...taskTarget.host_ids??[],...i.host_ids])].sort();
+      if(i.operation==="task.create")this.assertStaticTaskTargets(p,taskTarget);
       else {
         const current=this.options.taskCenter.nodes.getTask(i.task_id);
         this.assertStaticTaskTargets(p,current);
-        this.assertStaticTaskTargets(p,{...current,...i.task});
+        this.assertStaticTaskTargets(p,{...current,...taskTarget});
       }
     } else if(i.operation==="task.dispatch") {
       if(!i.task_id||i.run_id)fail(400,"invalid_input");
@@ -475,6 +481,10 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       this.host(p,this.options.taskCenter.get(i.run_id).host_id);
     }
     const {idempotency_key,...intent}=i;
+    if(taskTarget) {
+      intent.task=taskTarget;
+      delete intent.host_ids;
+    }
     if(intent.host_ids)intent.host_ids=[...intent.host_ids].sort();
     const keyHash=digest(idempotency_key),inputHash=digest(intent);
     return this.deps.db.transaction(()=>{
