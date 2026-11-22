@@ -127,7 +127,17 @@ export default function WorkbenchInspector({tab,onTabChange,context,session,cate
     <div className="lm-inspector-note">{t('只读上下文不会自动授权任何写入操作。','Read-only context never grants write access.')}</div>
    </>}
    {tab==='artifacts'&&<div className="lm-inspector-list">
-    {!artifacts.length&&<div className="lm-inspector-empty">{t('本会话还没有工具产物。','No tool artifacts in this session yet.')}</div>}
+    {!artifacts.length&&<>
+     <div className="lm-inspector-empty">
+      <strong>{t('还没有工具产物','No tool artifacts yet')}</strong>
+      <span>{t('发送一个监控、主机或代码任务后，工具证据会出现在这里。','Send a monitoring, host, or code task and tool evidence will appear here.')}</span>
+     </div>
+     <div className="lm-inspector-quick">
+      <button type="button" onClick={()=>onNavigate('/machines')}><strong>{t('检查主机','Inspect hosts')}</strong><span>{t('SSH 预检、Agent 状态和生命周期','SSH checks, Agent state, lifecycle')}</span></button>
+      <button type="button" onClick={()=>onNavigate('/dashboards')}><strong>{t('分析监控','Analyze monitoring')}</strong><span>{t('指标、大盘和异常趋势','Metrics, dashboards, trends')}</span></button>
+      <button type="button" onClick={()=>onNavigate('/logs')}><strong>{t('排查日志','Investigate logs')}</strong><span>{t('关键词、SQL 和事件定位','Keywords, SQL, event triage')}</span></button>
+     </div>
+    </>}
     {artifacts.map(item=>{
      const status=statusMeta(item.status,t);
      return <button key={item.id} type="button" className={`lm-inspector-item ${active?.id===item.id?'active':''}`} onClick={()=>onSelectArtifact(item.id)}>
