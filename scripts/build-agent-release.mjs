@@ -20,7 +20,7 @@ import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { includeAgentRuntimeEntry, includeAgentRuntimeHashEntry } from "./agent-release-content.mjs";
 const repo = resolve(fileURLToPath(new URL("..", import.meta.url))),
-  version = process.argv[2] ?? "0.1.27",
+  version = process.argv[2] ?? "0.1.28",
   output = resolve(process.argv[3] ?? join(repo, "runtime/downloads")),
   nodeVersion = "24.15.0";
 if (!/^[0-9A-Za-z._-]+$/.test(version)) throw Error("Invalid fixed version");
