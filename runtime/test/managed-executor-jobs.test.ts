@@ -379,3 +379,31 @@ test('registry secret uses the signed current lease, never the journal payload; 
   for(const table of ['privileged_jobs','privileged_request_nonces','task_runs'])assert(!JSON.stringify(f.db.all('SELECT * FROM '+table)).includes('signed-fixture-password'));
  }finally{f.close();}
 });
+test('an unresolved unknown managed outcome fences writes but read-only observations still bridge',()=>{
+  const f=fixture();try{
+    // An unresolved unknown privileged job occupies the machine's write fence.
+    const policy=Number(f.db.get<any>('SELECT generation AS g FROM privileged_machine_policies WHERE machine_id=?','host')?.g??1), at=f.deps.now().toISOString();
+    f.db.run(`INSERT INTO privileged_jobs(id,task_run_id,machine_id,agent_id,executor_id,install_generation,policy_generation,capability,payload_enc,payload_sha256,authorization_id,state,phase,lease_id,lease_expires_at,created_at,expires_at,started_at,finished_at,cancel_requested,code,output_enc,event_sequence,resolved_at,resolved_by,resolution_reason)
+      VALUES('stuck-unknown','stuck-unknown','host','agent-host',?,?,?,'operations.managed.v1','x','${'a'.repeat(64)}','auth','unknown','verifying','','',?,?, '','',0,'unknown_execution_result','',0,'','','')`,
+      f.enrolled.executor_id,f.enrolled.install_generation,policy,at,new Date(f.deps.now().getTime()+600000).toISOString());
+    const enqueueWithTask=(task:string,readOnly?:boolean)=>{
+      const operation=randomBytes(16).toString('hex'),resource=randomBytes(16).toString('hex');
+      const job=f.jobs.enqueue({agentID:'agent-host',deploymentID:'platform-'+resource,operationID:operation,actions:[{kind:'operations',domain:'platform',operation_id:operation}],capabilities:['operations.platform'],target:{operations_resource_id:resource},...(readOnly?{readOnlyObservation:true}:{})});
+      f.payloads.set(operation,{version:1,operation_id:operation,operation:task.split('.').at(-1)!,resource:{id:resource,kind:'platform',name:'QA',agent_id:'agent-host',revision:1,config:{task,cluster_id:resource},created_at:f.deps.now().toISOString(),updated_at:f.deps.now().toISOString()},input:{}});
+      f.db.run('INSERT INTO ops_platform_runs VALUES(?,?,?)',operation,job.id,'admin');
+      return job;
+    };
+    // The executor claims through the signed channel: the read-only
+    // observation bridges and leases despite the unresolved unknown, while
+    // a later write stays queued and unbridged behind the same fence.
+    const observe=enqueueWithTask('workload.inspect',true);
+    const claim=f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v));
+    assert.ok(claim.job?.plan,'read-only observation is claimed through the unknown fence');
+    assert.ok(f.db.get<any>('SELECT id FROM privileged_jobs WHERE id=?',observe.id));
+    assert.equal(f.db.get<any>('SELECT state FROM agent_jobs WHERE id=?',observe.id)?.state,'leased');
+    const write=enqueueWithTask('backup.create');
+    f.request('jobs/claim',{}).invoke((e,v)=>f.store.claim(e,v));
+    assert.equal(f.db.get<any>('SELECT state FROM agent_jobs WHERE id=?',write.id)?.state,'queued','write work stays queued behind the unknown fence');
+    assert.equal(f.db.get<any>('SELECT id FROM privileged_jobs WHERE id=?',write.id),undefined,'write work is not bridged');
+  }finally{f.close();}
+});

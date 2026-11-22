@@ -72,18 +72,23 @@ export function connectManagedExecutorJobs(deps:Dependencies,options:{jobs:Agent
   executors.managed={
     prepare(executor) {
       if(db.get("SELECT id FROM privileged_jobs WHERE executor_id=? AND state='queued'",executor.id))return;
-      const row=db.get<Row>("SELECT id FROM agent_jobs WHERE agent_id=? AND execution_principal='privileged_executor' AND state='queued' AND expires_at>? AND NOT EXISTS(SELECT 1 FROM privileged_jobs p WHERE p.id=agent_jobs.id) ORDER BY created_at,id LIMIT 1",executor.agent_id,now());
-      if(!row)return;
-      try{const job=jobs.get(row.id),approved=source(job);executors.enqueueManaged(job,approved.payload,approved.actor);}
-      catch(error){
-        if(!(error instanceof HTTPError))throw error;
-        // A busy execution lane only blocks this dispatch round; the approval itself
-        // stays valid, so the job must remain queued instead of being cancelled.
-        if(error.message==='machine_execution_locked')return;
-        if(error.message==='agent_upgrade_required'){
-          if(!jobs.failQueuedSSH)throw error;
-          jobs.failQueuedSSH(row.id,'agent_upgrade_required');
-        }else jobs.cancel(row.id,'approval_invalid: '+error.message);
+      const rows=db.all<Row>("SELECT id FROM agent_jobs WHERE agent_id=? AND execution_principal='privileged_executor' AND state='queued' AND expires_at>? AND NOT EXISTS(SELECT 1 FROM privileged_jobs p WHERE p.id=agent_jobs.id) ORDER BY created_at,id LIMIT 10",executor.agent_id,now());
+      for(const row of rows){
+        if(!db.get("SELECT 1 FROM agent_jobs WHERE id=?",row.id))continue;
+        try{const job=jobs.get(row.id),approved=source(job);executors.enqueueManaged(job,approved.payload,approved.actor);return;}
+        catch(error){
+          if(!(error instanceof HTTPError))throw error;
+          // A busy or unknown-fenced execution lane only blocks this candidate;
+          // the approval stays valid, so the job remains queued. Later
+          // read-only candidates may still bridge past an unknown fence
+          // (SDD214) — keep scanning instead of abandoning the round.
+          if(error.message==='machine_execution_locked')continue;
+          if(error.message==='agent_upgrade_required'){
+            if(!jobs.failQueuedSSH)throw error;
+            jobs.failQueuedSSH(row.id,'agent_upgrade_required');
+          }else jobs.cancel(row.id,'approval_invalid: '+error.message);
+          return;
+        }
       }
     },
     validate(root) {

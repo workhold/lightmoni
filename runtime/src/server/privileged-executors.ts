@@ -149,17 +149,30 @@ export class PrivilegedExecutorStore {
     return row;
   }
   private hasTable(name: string) { return !!this.deps.db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", name); }
-  private idle(machine: string, agent: string, excludingJob = "") {
+  /** Inspect/logs platform tasks observe without mutating the host. */
+  private readOnlyObservation(job: Row): boolean {
+    try {
+      const payload = parseStrictJSON(this.deps.decrypt(job.payload_enc)) as Row;
+      return /\.(inspect|logs)$/.test(String(payload.operation_payload?.resource?.config?.task ?? ""));
+    } catch { return false; }
+  }
+  private idle(machine: string, agent: string, excludingJob = "", readOnlyObservation = false) {
     if(hasPendingExecutorLifecycle(this.deps.db,machine,agent)) fail(409,"executor_lifecycle_pending");
     assertNoPendingMachineInstallation(this.deps.db, machine, agent);
     assertNoPendingMachineUninstallation(this.deps.db, machine, agent);
     assertNoPendingAgentUpdate(this.deps.db, agent, machine);
     assertNoDockerInstallation(this.deps.db, machine, agent);
-    if (this.deps.db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND id<>? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at=''))", machine, excludingJob)) fail(409, "machine_execution_locked");
+    // An unresolved unknown outcome fences writes: the lane may still be
+    // occupied by a task whose result was lost. A read-only observation may
+    // still run — it never mutates the host and the executor serializes
+    // locally (system-design ch.116/214). Queued/running lane occupancy
+    // always blocks; unknown blocks writes only.
+    const fence = readOnlyObservation ? 0 : 1;
+    if (this.deps.db.get("SELECT id FROM privileged_jobs WHERE machine_id=? AND id<>? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='' AND ?))", machine, excludingJob, fence)) fail(409, "machine_execution_locked");
     if(this.hasTable("agent_jobs")) {
-      if(this.deps.db.get(`SELECT id FROM agent_jobs WHERE agent_id=? AND id<>? AND ${blockingAgentJobSQL(this.deps.db)} AND (state<>'queued' OR execution_principal='ordinary_agent') LIMIT 1`,agent,excludingJob))fail(409,"machine_execution_locked");
+      if(this.deps.db.get(`SELECT id FROM agent_jobs WHERE agent_id=? AND id<>? AND ${blockingAgentJobSQL(this.deps.db)} AND (state<>'queued' OR execution_principal='ordinary_agent') AND (state<>'unknown' OR ?) LIMIT 1`,agent,excludingJob,fence))fail(409,"machine_execution_locked");
     }
-    if (this.hasTable("task_runs") && this.deps.db.get("SELECT id FROM task_runs WHERE host_id=? AND id<>? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='' AND superseded_by='')) LIMIT 1", machine, excludingJob)) fail(409, "machine_execution_locked");
+    if (this.hasTable("task_runs") && this.deps.db.get("SELECT id FROM task_runs WHERE host_id=? AND id<>? AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='' AND superseded_by='' AND ?)) LIMIT 1", machine, excludingJob, fence)) fail(409, "machine_execution_locked");
   }
   private policy(machine: string): Row {
     return this.deps.db.get<Row>("SELECT * FROM privileged_machine_policies WHERE machine_id=?", machine) ?? { machine_id: machine, generation: 0, capabilities_json: "[]", agent_id: "" };
@@ -479,7 +492,9 @@ export class PrivilegedExecutorStore {
     this.actor(actor);this.requireManagedReady(job.agent_id);
     if(payload.kind!=='managed'||payload.job.id!==job.id)fail(400,'managed_job_mismatch');
     const h=this.deps.db.get<Row>("SELECT id,name,agent_id FROM managed_machines WHERE agent_id=?",job.agent_id)!;
-    this.idle(h.id,h.agent_id,job.id);
+    // Inspect/logs platform tasks observe the host without mutating it and
+    // must pass an unresolved unknown lane fence (system-design ch.214).
+    this.idle(h.id,h.agent_id,job.id,/\.(inspect|logs)$/.test(String((payload as any).operation_payload?.resource?.config?.task ?? "")));
     const executor=this.getStatus(h.id).executor!,policy=this.policy(h.id),revision=sha256(canonicalJSON(payload)),authorization=randomUUID();
     this.deps.db.run("INSERT INTO privileged_grants(id,job_id,revision,approved_by,state,expires_at) VALUES(?,?,?,?,'reserved',?)",authorization,job.id,revision,actor,job.expires_at);
     this.deps.db.run("INSERT INTO privileged_jobs(id,task_run_id,machine_id,agent_id,executor_id,install_generation,policy_generation,capability,payload_enc,payload_sha256,authorization_id,state,created_at,expires_at) VALUES(?,?,?,?,?,?,?,'operations.managed.v1',?,?,?,'queued',?,?)",job.id,job.id,h.id,h.agent_id,executor.id,executor.install_generation,policy.generation,this.deps.encrypt(canonicalJSON(payload)),revision,authorization,this.now(),job.expires_at);
@@ -565,14 +580,20 @@ export class PrivilegedExecutorStore {
   }
   claim(executor: Row, value: unknown) {
     const request=object(value, ["job_id"], []),requestedJobID=request.job_id??"";
-    if(typeof requestedJobID!=="string"||requestedJobID&& !/^[a-f0-9-]{32,36}$/.test(requestedJobID))fail(400,"invalid_job_id");
+    if(typeof requestedJobID!=="string"||requestedJobID&& !/^[A-Za-z0-9-]{32,36}$/.test(requestedJobID))fail(400,"invalid_job_id");
     this.sweep();
     if(this.sshOnly&&!requestedJobID)return {job:null};
-    if (this.deps.db.get("SELECT id FROM privileged_jobs WHERE executor_id=? AND (state='running' OR (state='unknown' AND resolved_at=''))", executor.id)) return { job: null };
+    // A running job owns the lane. An unresolved unknown only fences writes:
+    // read-only observations (inspect/logs) are the sanctioned way to keep
+    // verifying state while the unknown awaits resolution (ch.116/214).
+    if (this.deps.db.get("SELECT id FROM privileged_jobs WHERE executor_id=? AND state='running'", executor.id)) return { job: null };
+    const laneUnknown = !!this.deps.db.get("SELECT id FROM privileged_jobs WHERE executor_id=? AND state='unknown' AND resolved_at=''", executor.id);
     this.managed?.prepare(executor);
     const jobs = this.deps.db.all<Row>("SELECT * FROM privileged_jobs WHERE executor_id=? AND state='queued' AND (?='' OR id=?) ORDER BY created_at,id LIMIT 50", executor.id,requestedJobID,requestedJobID);
     for (const job of jobs) {
-      try { this.authority(job, executor); this.idle(job.machine_id, job.agent_id, job.id); }
+      const readOnly = this.readOnlyObservation(job);
+      if (laneUnknown && !readOnly) continue;
+      try { this.authority(job, executor); this.idle(job.machine_id, job.agent_id, job.id, readOnly); }
       catch (error) {
         if (!(error instanceof HTTPError)) throw error;
         this.deps.db.run("UPDATE privileged_jobs SET state='cancelled',finished_at=?,code='authorization_unavailable' WHERE id=?", this.now(), job.id); this.sync(this.row(job.id)); continue;
