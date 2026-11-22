@@ -5,6 +5,7 @@ import type {Translator} from '../../shared/i18n';
 import type { AssistantContext, AssistantSession, TurnView } from './types';
 import type { QueryResponse, TimeRange } from '../../shared/types';
 import { AuditOutlined, DatabaseOutlined, FileTextOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { formatElapsed } from './tool-summary';
 
 export type WorkbenchTab='context'|'artifacts'|'activity';
 export interface WorkbenchInspectorProps {
@@ -161,9 +162,10 @@ export default function WorkbenchInspector({tab,onTabChange,context,session,cate
     {!turns.length&&<div className="lm-inspector-empty">{t('还没有执行活动。','No activity yet.')}</div>}
     {[...turns].reverse().map(turn=>{
      const status=statusMeta(turn.status,t);
+     const elapsed=formatElapsed(turn.startedAt,turn.endedAt,Date.now());
      return <div key={turn.id} className="lm-inspector-card">
       <div className="lm-inspector-detail-head"><strong>{turn.text||t('任务','Task')}</strong><Tag color={status.color}>{status.label}</Tag></div>
-      <p>{t(`${turn.tools.length} 次工具调用`,`${turn.tools.length} tool calls`)}</p>
+      <p>{t(`${turn.tools.length} 次工具调用`,`${turn.tools.length} tool calls`)}{elapsed?` · ${t('已用','elapsed')} ${elapsed}`:''}</p>
       {(turn.usage||turn.compactionUsage)&&<p>{turn.usage?`${t('用量','Usage')} ${turn.usage.total_tokens??'—'}`:''}{turn.compactionUsage?`${turn.usage?' · ':''}${t('整理','Summary')} ${turn.compactionUsage.total_tokens??'—'}`:''}</p>}
       {turn.error&&<Alert type={turn.status==='cancelled'?'info':'error'} title={turn.error} showIcon/>}
      </div>;})}

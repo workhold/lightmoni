@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { assistantTimeline, queryRangeFromTurn } from './timeline.ts';
-import { streamTurn } from './client.ts';
+import { streamTurn, TurnStreamError } from './client.ts';
 
 function event(sequence, type, data = {}, turn_id = 'turn-1') { return { sequence, type, data, turn_id, session_id: 'session-1', timestamp: '2026-10-10T00:00:00Z' }; }
 
@@ -89,4 +89,36 @@ test('degraded history compaction remains explicit in the timeline', () => {
  assert.equal(turn.compacted,true);
  assert.equal(turn.degraded,true);
  assert.equal(turn.compacting,false);
+});
+
+test('timeline records turn and tool start/end timestamps for elapsed display', () => {
+  const stamps = ['2026-10-10T00:00:00Z', '2026-10-10T00:00:10Z', '2026-10-10T00:00:30Z', '2026-10-10T00:01:00Z'];
+  const stampEvent = (sequence, type, data = {}) => ({ sequence, type, data, turn_id: 'turn-t', session_id: 'session-1', timestamp: stamps[sequence] ?? stamps.at(-1) });
+  const [turn] = assistantTimeline([
+    stampEvent(0, 'user.message', { text: '长任务' }),
+    stampEvent(1, 'tool.call', { call_id: 'call-1', tool: 'slow_tool' }),
+    stampEvent(2, 'tool.result', { call_id: 'call-1', status: 'success', value: { ok: true } }),
+    stampEvent(3, 'turn.completed'),
+  ]);
+  assert.equal(turn.startedAt, stamps[0]);
+  assert.equal(turn.endedAt, stamps[3]);
+  assert.equal(turn.tools[0].startedAt, stamps[1]);
+  assert.equal(turn.tools[0].endedAt, stamps[2]);
+  const [running] = assistantTimeline([stampEvent(0, 'user.message', { text: 'x' }), { ...stampEvent(1, 'tool.call', { call_id: 'c', tool: 'run_query' }) }]);
+  assert.equal(running.endedAt, undefined);
+  assert.equal(running.tools[0].endedAt, undefined);
+});
+
+test('stream failures are recognizable disconnects the UI can recover from', async () => {
+  const originalFetch = globalThis.fetch;
+  const events = [event(0, 'assistant.delta', { text: 'partial' })];
+  globalThis.fetch = async () => new Response(`data: ${JSON.stringify(events[0])}\n\n`, { headers: { 'Content-Type': 'text/event-stream' } });
+  try {
+    let failure;
+    try { await streamTurn('session-1', 'test', undefined, () => {}, new AbortController().signal); }
+    catch (problem) { failure = problem; }
+    assert.ok(failure instanceof TurnStreamError);
+    assert.equal(failure.code, 'disconnected');
+    assert.match(failure.message, /连接已中断/);
+  } finally { globalThis.fetch = originalFetch; }
 });
