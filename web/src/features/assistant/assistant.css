@@ -341,3 +341,5 @@
 .lm-inspector-quick button:hover{border-color:color-mix(in srgb,var(--lm-accent) 32%,transparent);background:color-mix(in srgb,var(--lm-accent) 5%,var(--lm-surface))}
 .lm-inspector-quick strong{color:var(--lm-text);font-size:12px;line-height:1.35}
 .lm-inspector-quick span{color:var(--lm-muted);font-size:11px;line-height:1.45}
+
+.lm-assistant-category-create{display:inline-flex;align-items:center;gap:6px;color:var(--lm-primary,#1677ff);font-weight:560}

@@ -125,11 +125,15 @@ try{
  await screenshot('desktop-light.png');
  const failedRow=assistant.locator('.lm-assistant-session-row').filter({hasText:'Failed analysis'});
  await failedRow.getByRole('combobox',{name:'对话分类'}).fill('客户系统');
+ await expect(failedRow.getByRole('combobox',{name:'对话分类'})).toHaveValue('客户系统');
  await failedRow.getByRole('combobox',{name:'对话分类'}).press('Enter');
  await expect.poll(()=>[...sessions.values()].find(session=>session.title==='Failed analysis')?.category).toBe('客户系统');
  await expect(assistant.locator('.lm-assistant-history-group').filter({hasText:'客户系统'})).toContainText('Failed analysis');
  await assistant.getByRole('button',{name:'新对话'}).click();
- await assistant.getByRole('combobox',{name:'新对话分类'}).fill('客户系统');
+ const newCategoryField=assistant.getByRole('combobox',{name:'新对话分类'});
+ await newCategoryField.click();await newCategoryField.pressSequentially('新客户系统');
+ await expect(page.locator('.ant-select-dropdown').last()).toContainText('创建新分类：新客户系统');
+ await newCategoryField.press('Enter');
  const tempBox=assistant.locator('.lm-assistant-composer textarea');await tempBox.fill('temporary');
  await assistant.getByRole('button',{name:'发送',exact:true}).click();
  await expect.poll(()=>nextSession).toBe(2);
