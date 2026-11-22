@@ -260,6 +260,16 @@ export class Store {
       Buffer.from(encode(value)),
     );
   }
+  delete(id: string): void {
+    this.db.run("DELETE FROM assistant_records WHERE id=?", id);
+  }
+  deletePrefix(prefix: string): void {
+    this.db.run(
+      "DELETE FROM assistant_records WHERE substr(id,1,?)=?",
+      prefix.length,
+      prefix,
+    );
+  }
   sessions(prefix: string): Session[] {
     return this.db
       .all<{

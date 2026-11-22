@@ -203,27 +203,35 @@ trap 'rm -rf "$recovery_dir"' EXIT HUP INT TERM
 
 export function workerStopEvidenceCommand(operationID: string): string {
   const unit = `lightmoni-agent-update-${operationID}.service`;
+  // Keep this command read-only and aligned with the recovery runner's worker
+  // proof: no active unit job, no systemd PIDs, and an empty/residual cgroup.
   return [
     "PATH=/usr/sbin:/usr/bin:/sbin:/bin",
     `unit=${JSON.stringify(unit)}`,
     "set +e",
     "active=$(systemctl is-active \"$unit\" 2>/dev/null)",
     "active_rc=$?",
-    "state=$(systemctl show \"$unit\" --property=LoadState,MainPID,ControlPID,Job 2>/dev/null)",
+    "state=$(systemctl show \"$unit\" --property=LoadState,ActiveState,MainPID,ControlPID,ControlGroup,Job 2>/dev/null)",
     "show_rc=$?",
-    "load=$(printf '%s\\n' \"$state\" | sed -n 's/^LoadState=//p' | head -n1)",
-    "main=$(printf '%s\\n' \"$state\" | sed -n 's/^MainPID=//p' | head -n1)",
-    "control=$(printf '%s\\n' \"$state\" | sed -n 's/^ControlPID=//p' | head -n1)",
-    "job=$(printf '%s\\n' \"$state\" | sed -n 's/^Job=//p' | head -n1)",
-    "[ \"$active\" != active ] || exit 21",
+    "prop() { printf '%s\\n' \"$state\" | sed -n \"s/^$1=//p\" | head -n1; }",
+    "load=$(prop LoadState); state_name=$(prop ActiveState); main=$(prop MainPID); control=$(prop ControlPID); group=$(prop ControlGroup); job=$(prop Job)",
+    "expected_group=/system.slice/$unit",
+    "[ \"$state_name\" != active ] && [ \"$state_name\" != activating ] && [ \"$state_name\" != deactivating ] && [ \"$state_name\" != reloading ] || exit 21",
     "[ \"$load\" = loaded ] || [ \"$load\" = not-found ] || [ \"$load\" = masked ] || exit 22",
     "[ -z \"$main\" ] || [ \"$main\" = 0 ] || exit 23",
     "[ -z \"$control\" ] || [ \"$control\" = 0 ] || exit 24",
     "[ -z \"$job\" ] || [ \"$job\" = 0 ] || exit 25",
-    "printf 'workerStopped=true active=%s load=%s show_rc=%s active_rc=%s\\n' \"$active\" \"$load\" \"$show_rc\" \"$active_rc\"",
+    "[ -z \"$group\" ] || [ \"$group\" = \"$expected_group\" ] || exit 26",
+    "cgroup=/sys/fs/cgroup${group:-$expected_group}",
+    "events=$(cat \"$cgroup/cgroup.events\" 2>/dev/null); events_rc=$?",
+    "procs=$(cat \"$cgroup/cgroup.procs\" 2>/dev/null); procs_rc=$?",
+    "if [ \"$events_rc\" = 0 ] || [ \"$procs_rc\" = 0 ]; then",
+    "  printf '%s\\n' \"$events\" | grep -q '^populated 0$' || exit 27",
+    "  [ -z \"$(printf '%s' \"$procs\" | tr -d '[:space:]')\" ] || exit 28",
+    "elif [ \"$load\" != not-found ]; then printf '%s\\n' 'recovery_worker_running' >&2; exit 29; fi",
+    "printf 'workerStopped=true active=%s state=%s load=%s main=%s control=%s job=%s group=%s populated=%s procs=%s\\n' \"$active\" \"$state_name\" \"$load\" \"$main\" \"$control\" \"$job\" \"$group\" \"$events_rc\" \"$procs_rc\"",
   ].join("\n");
 }
-
 export function lifecycleLockCleanupCommand(): string {
   return [
     "set -eu",
@@ -235,5 +243,5 @@ export function lifecycleLockCleanupCommand(): string {
     "fi",
     "[ ! -e /run/lightmoni-agent-lifecycle.lock ] && [ ! -L /run/lightmoni-agent-lifecycle.lock ] || exit 33",
     "printf 'lifecycleLockClear=true\\n'",
-  ].join("\\n");
+   ].join("\n");
 }

@@ -12,6 +12,7 @@ import type { Dependencies } from "../src/shared/types.js";
 import { registerManagedMachines, type SSHRunner } from "../src/server/managed-machines.js";
 import { NodeStore } from "../src/server/nodes-model.js";
 import { createAgentUpdatesSchema } from "../src/server/machine-agent-updates.js";
+import { SSHError } from "../src/server/machine-ssh.js";
 import { AgentReleaseCatalog } from "../src/server/machine-agent-updates-catalog.js";
 import { assertNoPendingAgentUpdate, hasPendingAgentUpdate } from "../src/server/machine-agent-updates-guard.js";
 import { TaskRunStore } from "../src/server/task-center.js";
@@ -47,6 +48,9 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
   router.auth = deps.auth;
   const nodes = new NodeStore(db, deps.now), modes = new Map<string, Mode>(), calls: any[] = [], observations = new Map<string, any>(), states = new Map<string, any>(), helpers = new Map<string, any>();
   const credentials = { has: () => true, authenticate: () => ({}) } as any;
+  const stoppedWorkerEvidence = "workerStopped=true active=inactive state=inactive load=loaded main=0 control=0 job=0 group=/system.slice/unit populated=0 procs=0";
+  let workerEvidence = stoppedWorkerEvidence, lifecycleLockCleanupCalls = 0;
+  let recoveryUnavailable = false;
   let recoveryHook: ((input:any,operation:any)=>Promise<any>)|undefined;
   let probeHook: ((input:any)=>Promise<void>)|undefined;
   let downloadHook: ((input: any, operation: any) => Promise<void>) | undefined;
@@ -77,6 +81,17 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
     if(input.command.includes('lightmoni-agent-recovery.XXXXXX')){
       if(!recoveryHook)throw Error('fixture recovery hook missing');
       return {stdout:JSON.stringify(await recoveryHook(input,operation)),stderr:'',stages:['recover']};
+    }
+    if (input.command.includes("cgroup.events") && input.command.includes("lightmoni-agent-update-")) {
+      if (recoveryUnavailable) throw new SSHError("ssh_failed", { remote_exit_code: 28, remote_reason_code: "recovery_worker_running" });
+      if (workerEvidence.startsWith("exit ")) throw Error(workerEvidence.slice(5));
+      return { stdout: workerEvidence, stderr: "", stages: ["worker_evidence"] };
+    }
+    if (input.command.includes("lightmoni-agent-lifecycle.lock")) {
+      lifecycleLockCleanupCalls++;
+      const observation = observations.get(mid);
+      if (observation) observation.lifecycle_locked = false;
+      return { stdout: "lifecycleLockClear=true\n", stderr: "", stages: ["lock_cleanup"] };
     }
     if (input.command.includes(".update-bootstrap.XXXXXX")) {
       if (downloadHook) await downloadHook(input, operation);
@@ -171,6 +186,8 @@ async function fixture(t: any, healthTimeout = 300, uninstallerUpdated?: boolean
   return { taskStore, helper, helpers, directory, downloads, release, db, deps, user, nodes, machines, request, host, plan, apply, settle, modes, calls, observations, states, credentials,
     advance(seconds: number) { clock = new Date(clock.getTime() + seconds * 1000); },
     setRecoveryHook(hook: typeof recoveryHook){recoveryHook=hook;},
+    setWorkerEvidence(value:string){workerEvidence=value;}, setRecoveryUnavailable(value:boolean){recoveryUnavailable=value;},
+    get lifecycleLockCleanupCalls(){return lifecycleLockCleanupCalls;},
     setProbeHook(hook: typeof probeHook){probeHook=hook;},
     setDownloadHook(hook: typeof downloadHook) { downloadHook = hook; }, origin };
 }
@@ -996,4 +1013,36 @@ test('changed approval revision during recovery is retained unknown and requires
   f.db.run('UPDATE machine_agent_updates SET plan_json=? WHERE id=?',JSON.stringify(plan),operation.id);return state;});
  const result=await f.recover({confirm:true,expected_revision:read.recovery_revision});assert.equal(result.status,409,result.raw);assert.match(result.raw,/agent_update_recovery_revision_changed/);
  const after=(await f.current()).data;assert.equal(after.status,'unknown');assert.notEqual(after.recovery_revision,read.recovery_revision);assert.equal(after.recovery_requires_verification,true);
+});
+
+test("verified stale lifecycle lock is cleaned only after worker stop evidence", async t => {
+  const f=await fixture(t),h=await f.host();f.modes.set(h.id,"rollback_failed_unhealthy");
+  const p=(await f.plan(h.id)).data;await f.apply(h.id,p.id);await f.settle(h.id,p.id);
+  const receipt=JSON.parse(f.db.get<any>("SELECT receipt_json FROM machine_agent_updates WHERE id=?",p.id).receipt_json);
+  receipt.rollback_error_code="recovery_original_unhealthy";
+  f.db.run("UPDATE machine_agent_updates SET status='unknown',finished_at='' WHERE id=?",p.id);
+  f.db.run("UPDATE machine_agent_updates SET receipt_json=? WHERE id=?",JSON.stringify(receipt),p.id);
+  f.observations.get(h.id).lifecycle_locked=true;
+  f.setRecoveryUnavailable(false); f.setWorkerEvidence("workerStopped=true active=inactive state=inactive load=loaded main=0 control=0 job=0 group=/system.slice/unit populated=0 procs=0");
+  const closed=await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`,"POST",{});
+  assert.equal(closed.status,200,closed.raw);assert.equal(closed.data.status,"rolled_back");
+  assert.equal(f.lifecycleLockCleanupCalls,1);
+  assert.equal(closed.data.receipt.lifecycle_lock_cleanup.after_fingerprint,f.observations.get(h.id).current.fingerprint);
+  assert.match(closed.data.receipt.lifecycle_lock_cleanup.worker_evidence,/workerStopped=true .*populated=0 procs=0/);
+});
+
+test("populated worker cgroup refuses stale lock cleanup without replay", async t => {
+  const f=await fixture(t),h=await f.host();f.modes.set(h.id,"rollback_failed_unhealthy");
+  const p=(await f.plan(h.id)).data;await f.apply(h.id,p.id);await f.settle(h.id,p.id);
+  const receipt=JSON.parse(f.db.get<any>("SELECT receipt_json FROM machine_agent_updates WHERE id=?",p.id).receipt_json);
+  receipt.rollback_error_code="recovery_original_unhealthy";
+  f.db.run("UPDATE machine_agent_updates SET status='unknown',finished_at='' WHERE id=?",p.id);
+  f.db.run("UPDATE machine_agent_updates SET receipt_json=? WHERE id=?",JSON.stringify(receipt),p.id);
+  f.observations.get(h.id).lifecycle_locked=true;
+  f.setRecoveryUnavailable(true); f.setWorkerEvidence("exit recovery_worker_running");
+  const refused=await f.request(`/machines/${h.id}/agent-updates/${p.id}/reconcile`,"POST",{});
+  assert.equal(refused.status,409,refused.raw);assert.match(refused.raw,/recovery_worker_running/);
+  assert.equal(f.lifecycleLockCleanupCalls,0);
+  const current=await f.request(`/machines/${h.id}/agent-updates/${p.id}`);
+  assert.equal(current.data.status,"unknown");assert.equal(current.data.recovery_requires_verification,false);
 });

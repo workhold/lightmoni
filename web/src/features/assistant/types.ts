@@ -11,7 +11,7 @@ export interface ModelConnectionTestResult { ok: true; base_url: string; protoco
 export interface AssistantEvent { sequence: number; session_id: string; turn_id: string; type: string; timestamp: string; data: Record<string, unknown> }
 export interface Attachment { kind: 'image' | 'pdf'; name: string; mime_type: string; pages?: number; data?: string; text?: string }
 export interface AssistantMessage { role: 'user' | 'assistant' | 'tool'; content: string; attachments?: Attachment[]; tool_calls?: unknown[]; tool_call_id?: string }
-export interface AssistantSession { id: string; user_id: string; title: string; created_at: string; updated_at: string; status?: 'running' | 'needs_action' | 'failed' | 'idle'; messages: AssistantMessage[] | null; events: AssistantEvent[] | null }
+export interface AssistantSession { id: string; user_id: string; title: string; category?: string; created_at: string; updated_at: string; status?: 'running' | 'needs_action' | 'failed' | 'idle'; messages: AssistantMessage[] | null; events: AssistantEvent[] | null }
 export interface AssistantContext { table?: string; service?: string; services?: string[]; filters?: unknown[]; range?: TimeRange; dashboard_id?: string; selected_logs?: unknown[]; code_workspace?: string;
   page?: {path: string; title: string}; dashboard_title?: string;
   panels?: {id: string; title: string; type: string; queries: SQLQuery[]}[];

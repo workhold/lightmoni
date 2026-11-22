@@ -1,15 +1,15 @@
 import {useI18n} from '../../shared/i18n';
 import type {Translator} from '../../shared/i18n';
 import {chinese} from '../alerts/translation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {useNavigate} from 'react-router-dom';
 import {MessageScroller} from '@shadcn/react/message-scroller';
-import { ArrowUpOutlined, CheckOutlined, CloseOutlined, CodeOutlined, CopyOutlined, FilePdfOutlined, HistoryOutlined, LoadingOutlined, MessageOutlined, PaperClipOutlined, PictureOutlined, PlusOutlined, ReloadOutlined, SettingOutlined, SlidersOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { ArrowUpOutlined, CheckOutlined, CloseOutlined, CodeOutlined, CopyOutlined, DeleteOutlined, FolderOutlined, FilePdfOutlined, HistoryOutlined, LoadingOutlined, MessageOutlined, PaperClipOutlined, PictureOutlined, PlusOutlined, PicRightOutlined, ReloadOutlined, SettingOutlined, SlidersOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import XMarkdown, { type ComponentProps } from '@ant-design/x-markdown';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
 import {useAppearance} from '../../shared/appearance';
-import { App, Alert, Button, Checkbox, Collapse, Drawer, Input, Modal, Popover, Select, Space, Spin, Table, Tag, Tooltip } from '../../shared/ui';
+import { App, Alert, AutoComplete, Button, Checkbox, Collapse, Drawer, Input, Modal, Popconfirm, Popover, Select, Space, Spin, Table, Tag, Tooltip } from '../../shared/ui';
 import { api } from '../../shared/api';
 import {boundedMonitoringContext} from '../../shared/assistant-context';
 import type { CatalogTable, QueryResponse, TimeRange, User } from '../../shared/types';
@@ -18,6 +18,7 @@ import { readAttachment } from './attachments';
 import { assistantTimeline, queryRangeFromTurn } from './timeline';
 import SSHCheckSummary,{type SSHCheckResult} from '../../shared/SSHCheckSummary';
 import AgentUpdateProgress from './AgentUpdateProgress';
+import WorkbenchInspector,{type WorkbenchTab} from './WorkbenchInspector';
 import {agentUpdateToolValue} from './agent-update-progress';
 import AlertProposalProgress from './AlertProposalProgress';
 import type { AssistantConfig, AssistantContext, AssistantEvent, AssistantSession, Attachment, CodeTaskResult, DashboardDraft, DraftPanel, ToolTrace, TurnView } from './types';
@@ -217,6 +218,33 @@ function ToolActivity({turn,onDraft,canUseCodeTasks,canApproveAgentUpdate}:{turn
   return <div className="lm-assistant-activity"><button type="button" className="lm-assistant-activity-trigger" aria-expanded={open} onClick={()=>setManual(!open)}><span className={`lm-assistant-activity-indicator ${failedStep?'failed':turn.status}`} aria-hidden="true"/><span>{label}</span><span className="lm-assistant-activity-chevron" aria-hidden="true">⌄</span></button>{open&&<div className="lm-assistant-activity-content"><ToolProgress turn={turn} onDraft={onDraft} canUseCodeTasks={canUseCodeTasks} canApproveAgentUpdate={canApproveAgentUpdate}/></div>}</div>;
 }
 
+type CategoryOption={value:string;label:ReactNode;create?:boolean};
+
+function CategoryField({value,options,className,onCommit,ariaLabel,placeholder,disabled}:{value:string;options:{value:string;label:ReactNode}[];className?:string;onCommit:(value:string)=>void;ariaLabel:string;placeholder:string;disabled?:boolean}) {
+  const {t}=useI18n(),[draft,setDraft]=useState(value.trim()),committed=useRef(value.trim());
+  useEffect(()=>{committed.current=value.trim();setDraft(value.trim())},[value]);
+  const commit=(next:string)=>{const normalized=next.trim();if(normalized===committed.current)return;committed.current=normalized;onCommit(normalized);};
+  const text=draft.trim();
+  const categoryOptions:CategoryOption[]=(():CategoryOption[]=>{
+    if(!text||options.some(option=>option.value===text))return options;
+    return [{value:text,label:<span className="lm-assistant-category-create"><PlusOutlined aria-hidden="true"/>{t(`创建新分类：${text}`,`Create new category: ${text}`)}</span>,create:true},...options];
+  })();
+  return <AutoComplete
+    className={className}
+    value={draft}
+    options={categoryOptions}
+    disabled={disabled}
+    onChange={next=>setDraft(String(next))}
+    onSelect={next=>{const nextText=String(next).trim();setDraft(nextText);commit(nextText)}}
+    onBlur={()=>commit(draft)}
+    onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();commit(text)}}}
+    filterOption={(input,option)=>Boolean((option as CategoryOption).create)||String(option?.value||'').toLowerCase().includes(input.toLowerCase())}
+    defaultActiveFirstOption={Boolean(text)&&!options.some(option=>option.value===text)}
+    placeholder={placeholder}
+    aria-label={ariaLabel}
+  />;
+}
+
 export function AssistantPanel({ compact = false, initialContext, initialPrompt, onDashboardDraft, onSQL }: AssistantPanelProps) {
  const {language,t}=useI18n();
  const pageTitles:Record<string,string>={
@@ -253,6 +281,12 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [newCategory, setNewCategory] = useState("");
+  const [deletingIds, setDeletingIds] = useState<string[]>([]);
+  const [inspectorTab,setInspectorTab]=useState<WorkbenchTab>('context');
+  const [selectedArtifact,setSelectedArtifact]=useState<string>();
+  const [inspectorOpen,setInspectorOpen]=useState(!compact);
+  const [narrow,setNarrow]=useState(false);
   const [draft, setDraft] = useState<DashboardDraft | null>(null);
   const [draftError, setDraftError] = useState('');
   const [draftSaving, setDraftSaving] = useState(false);
@@ -290,6 +324,14 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     }, 3000);
     return () => { alive = false; window.clearInterval(timer); };
   }, []);
+  useEffect(()=>{
+    const query=window.matchMedia('(max-width: 1080px)');
+    setNarrow(query.matches);
+    if(query.matches)setInspectorOpen(false);
+    const changed=(event:MediaQueryListEvent)=>{setNarrow(event.matches);if(event.matches)setInspectorOpen(false);};
+    query.addEventListener('change',changed);
+    return()=>query.removeEventListener('change',changed);
+  },[]);
   useEffect(()=>{if(error)void message.error(error);},[error,message]);
   useEffect(() => { if (initialPrompt !== undefined) setText(initialPrompt); }, [initialPrompt]);
   useEffect(() => { if (initialContext) { setContext(initialContext); if (initialContext.code_workspace !== undefined) setCodeWorkspace(initialContext.code_workspace); } }, [initialContext]);
@@ -340,7 +382,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
       creatingRef.current=true;
       ++selectionVersion.current;
       setCreating(true);
-      try { const session=await api<AssistantSession>('/assistant/sessions',{method:'POST',body:JSON.stringify({title:item.text.slice(0,60)})}); id=session.id; selectedSession.current=id;setSessionId(id);setSessions(previous=>[session,...previous]);setEvents([]);eventCache.current.set(id,[]); }
+      try { const session=await api<AssistantSession>('/assistant/sessions',{method:'POST',body:JSON.stringify({title:item.text.slice(0,60),category:newCategory})}); id=session.id; selectedSession.current=id;setSessionId(id);setSessions(previous=>[session,...previous]);setEvents([]);eventCache.current.set(id,[]); }
       catch(problem){setError(errorText(problem,t));return;}
       finally{creatingRef.current=false;setCreating(false);}
     }
@@ -375,7 +417,10 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
 
   function openSettings() { navigate('/admin?tab=models'); }
 
-  function openDraft(value: DashboardDraft, analysisRange?: TimeRange) { const copy = JSON.parse(JSON.stringify(value)) as DashboardDraft; setDraft({ ...copy, range: copy.range ?? analysisRange ?? context.range ?? rangeFor(context.query?.lookback_hours ?? lookback) }); setDraftError(''); setPreview({});  }
+  const selectedSessionData=sessions.find(session=>session.id===sessionId);
+  const sessionRunning=!!sessionId&&(activeTurns.current.has(sessionId)||runningIds.includes(sessionId));
+  function openDraft(value: DashboardDraft, analysisRange?: TimeRange) {
+    setInspectorTab('artifacts');setInspectorOpen(true); const copy = JSON.parse(JSON.stringify(value)) as DashboardDraft; setDraft({ ...copy, range: copy.range ?? analysisRange ?? context.range ?? rangeFor(context.query?.lookback_hours ?? lookback) }); setDraftError(''); setPreview({});  }
   function updatePanel(index: number, update: Partial<DraftPanel>) { setDraft(previous => previous ? { ...previous, panels: previous.panels.map((panel, panelIndex) => panelIndex === index ? { ...panel, ...update } : panel) } : previous); setPreview({}); }
   async function previewDraft() {
     if (!draft) return; setPreviewing(true); setDraftError(''); const abort = new AbortController(); previewController.current = abort;
@@ -392,13 +437,86 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     } catch (problem) { setDraftError(errorText(problem,t)); } finally { setDraftSaving(false); }
   }
   function newConversation() { ++selectionVersion.current;setLoading(false);drafts.current.set(selectedSession.current??'new',{text,attachments});selectedSession.current=null;setSessionId(null);setEvents([]);const draft=drafts.current.get('new');setText(draft?.text??'');setAttachments(draft?.attachments??[]);setError('');setHistoryOpen(false); }
-  function historyContent() { return <><Button block icon={<PlusOutlined />} disabled={creating} onClick={newConversation}>{t("新对话","New conversation")}</Button><Input allowClear size="small" placeholder={t("搜索对话","Search conversations")} value={search} onChange={event => setSearch(event.target.value)} className="lm-assistant-history-search" />{sessions.filter(session => session.title.toLowerCase().includes(search.toLowerCase())).map(session => { const status=runningIds.includes(session.id)?'running':session.status;return <button className={`lm-assistant-session ${sessionId === session.id ? 'active' : ''}`} key={session.id} disabled={creating} onClick={() => void loadSession(session.id)}><MessageOutlined aria-hidden="true"/><span className="lm-assistant-session-name">{session.title}</span>{status&&status!=='idle'&&<span className={`lm-assistant-session-status ${status}`} aria-label={status==='running'?t('响应中','Responding'):status==='failed'?t('失败','Failed'):t('待确认','Needs review')}>{status==='running'?<LoadingOutlined spin/>:status==='failed'?t('失败','Failed'):t('待确认','Review')}</span>}</button>})}{!sessions.length && <div className="lm-assistant-history-empty">{t("对话会保存在这里","Conversations are saved here")}</div>}</>; }
+  const categoryLabel=(value?:string)=>value?.trim()?value.trim():t("未分类","Uncategorized");
+  const categoryOptions=useMemo(()=>{const base=[t("未分类","Uncategorized"),t("监控","Monitoring"),t("Agent 与主机","Agents & hosts"),t("运维任务","Operations"),t("研究","Research")];const values=[...new Set([...base,...sessions.map(session=>session.category?.trim()||"").filter(Boolean)])];return values.map(value=>({value:value===t("未分类","Uncategorized")?"":value,label:categoryLabel(value)}));},[sessions,t]);
+  const categoryOptionsFor=(value?:string)=>categoryOptions.some(option=>option.value===(value||""))?categoryOptions:[...categoryOptions,{value:value||"",label:categoryLabel(value)}];
+  async function updateSessionCategory(id:string,category:string){
+    try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"PATCH",body:JSON.stringify({category})}); setSessions(previous=>previous.map(session=>session.id===id?{...session,category}:session)); if(selectedSession.current===id)void loadSession(id); }
+    catch(problem){ setError(errorText(problem,t)); void message.error(errorText(problem,t)); }
+  }
+  async function deleteSession(id:string){
+    setDeletingIds(previous=>[...new Set([...previous,id])]);
+    try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"DELETE"}); setSessions(previous=>previous.filter(session=>session.id!==id)); eventCache.current.delete(id);drafts.current.delete(id); if(sessionId===id)newConversation(); void message.success(t("对话已删除","Conversation deleted")); }
+    catch(problem){ setError(errorText(problem,t)); void message.error(errorText(problem,t)); }
+    finally { setDeletingIds(previous=>previous.filter(value=>value!==id)); }
+  }
+  function historyContent() {
+    const visible=sessions.filter(session=>session.title.toLowerCase().includes(search.toLowerCase())||categoryLabel(session.category).toLowerCase().includes(search.toLowerCase()));
+    const groups=[...new Set(visible.map(session=>session.category?.trim()||""))].sort((a,b)=>Number(!a)-Number(!b)||a.localeCompare(b));
+    return <div className="lm-assistant-history">
+      <Button block icon={<PlusOutlined />} disabled={creating} onClick={newConversation}>{t("新对话","New conversation")}</Button>
+      <Input allowClear size="small" placeholder={t("搜索对话","Search conversations")} value={search} onChange={event=>setSearch(event.target.value)} className="lm-assistant-history-search" />
+      <label className="lm-assistant-category-picker">
+        <span><FolderOutlined aria-hidden="true"/>{t("新对话分类","New conversation category")}</span>
+        <CategoryField
+          className="lm-assistant-category-input"
+          value={newCategory}
+          options={categoryOptions}
+          disabled={creating}
+          onCommit={setNewCategory}
+          ariaLabel={t("新对话分类","New conversation category")}
+          placeholder={t("输入新分类，回车确认","Type a category, then press Enter")}
+        />
+      </label>
+      {groups.map(category=>{
+        const items=visible.filter(session=>(session.category?.trim()||"")===category);
+        return <section className="lm-assistant-history-group" key={category||"uncategorized"}>
+          <header><span>{categoryLabel(category)}</span><small>{items.length}</small></header>
+          {items.map(session=>{
+            const status=runningIds.includes(session.id)?'running':session.status;
+            const deleting=deletingIds.includes(session.id), running=status==='running';
+            return <div className={`lm-assistant-session-row ${sessionId===session.id?'active':''}`} key={session.id}>
+              <button className={`lm-assistant-session ${sessionId===session.id?'active':''}`} disabled={creating||deleting} onClick={()=>void loadSession(session.id)}>
+                <MessageOutlined aria-hidden="true"/>
+                <span className="lm-assistant-session-name">
+                  <span>{session.title}</span>
+                  <small>{categoryLabel(session.category)} · {new Date(session.updated_at).toLocaleString(language)}</small>
+                </span>
+                {status&&status!=='idle'&&<span className={`lm-assistant-session-status ${status}`} aria-label={status==='running'?t('响应中','Responding'):status==='failed'?t('失败','Failed'):t('待确认','Needs review')}>{status==='running'?<LoadingOutlined spin/>:status==='failed'?t('失败','Failed'):t('待确认','Review')}</span>}
+              </button>
+              <CategoryField
+                className="lm-assistant-category-select"
+                value={session.category||''}
+                options={categoryOptionsFor(session.category)}
+                disabled={deleting||running}
+                onCommit={category=>void updateSessionCategory(session.id,category)}
+                ariaLabel={t('对话分类','Conversation category')}
+                placeholder={t('未分类','Uncategorized')}
+              />
+              <Button className="lm-assistant-session-delete" type="text" size="small" danger icon={<DeleteOutlined/>} loading={deleting} disabled={deleting||running} aria-label={t("删除对话","Delete conversation")} onClick={()=>void deleteSession(session.id)}/>
+            </div>;
+          })}
+        </section>;
+      })}
+      {!visible.length && <div className="lm-assistant-history-empty">{t("对话会保存在这里","Conversations are saved here")}</div>}
+    </div>;
+  }
 
   const scopeControls=<div className="lm-assistant-scope"><div className="lm-assistant-scope-heading"><strong>{t('分析范围与设置','Analysis scope and settings')}</strong>{config?.enabled&&<span>{config.model}</span>}</div><label>{t('数据表','Data table')}<Select showSearch allowClear placeholder={t('全部数据表','All data tables')} value={context.table} onChange={value => setContext(previous => ({ ...previous, table: value, service: undefined }))} options={tables.map(item => ({ value: item.name, label: item.name }))} /></label><label>{t('服务','Service')}<Select showSearch allowClear placeholder={t('全部服务','All services')} value={context.service} onChange={value => setContext(previous => ({ ...previous, service: value }))} options={(table?.services ?? [...new Set(tables.flatMap(item => item.services))]).map(service => ({ value: service, label: service }))} /></label>{context.range ? <div className="lm-assistant-scope-fixed">{t('当前页面时间范围','Current page time range')}</div> : <label>{t('时间范围','Time range')}<Select value={lookback} options={[{ value: .25, label: t('最近 15 分钟','Last 15 minutes') }, { value: 1, label: t('最近 1 小时','Last hour') }, { value: 6, label: t('最近 6 小时','Last 6 hours') }, { value: 24, label: t('最近 24 小时','Last 24 hours') }]} onChange={setLookback} /></label>}{user?.role === 'admin' && config?.code_tasks_enabled && <label>{t('代码工作区','Code workspace')}<Input aria-label={t('代码工作区','Code workspace')} value={codeWorkspace} onChange={event => setCodeWorkspace(event.target.value)} placeholder="." maxLength={512} /><small>{t('代码任务在隔离副本中运行，审批后应用修改。','Code tasks run in an isolated copy and apply changes after approval.')}</small></label>}{user?.role === 'admin' && <Button type="text" icon={<SettingOutlined/>} onClick={openSettings}>{t('模型连接设置','Model connection settings')}</Button>}</div>;
 
   return <div className={`lm-assistant ${compact ? 'is-compact' : ''}`}>
     {!compact && <aside className="lm-assistant-sidebar"><div className="lm-assistant-sidebar-title"><HistoryOutlined /><span>{t("对话历史","Conversation history")}</span></div>{historyContent()}</aside>}
     <main className="lm-assistant-main">
+      <header className="lm-workbench-head">
+        <div className="lm-workbench-title">
+          <span className="lm-workbench-mark"><ThunderboltOutlined/></span>
+          <div>
+            <strong>{sessionId?(selectedSessionData?.title||t('当前任务','Current task')):t('新任务','New task')}</strong>
+            <small>{config?.model||t('模型未配置','Model not configured')} · {sessionRunning?t('运行中','Running'):selectedSessionData?.status==='needs_action'?t('待确认','Needs review'):selectedSessionData?.status==='failed'?t('失败','Failed'):t('空闲','Idle')}</small>
+          </div>
+        </div>
+        <Button className="lm-workbench-inspector-toggle" type={inspectorOpen?'primary':'default'} size="small" icon={<PicRightOutlined/>} aria-pressed={inspectorOpen} onClick={()=>setInspectorOpen(value=>!value)}>{t('检查器','Inspector')}</Button>
+      </header>
       {context.page&&<div className="lm-assistant-page-context"><span>{t("当前页面","Current page")}</span><strong>{context.dashboard_title??pageTitles[context.page.title]??context.page.title}</strong>{context.panels&&<Tag>{context.panels.length} {t("个面板"," panels")}</Tag>}{context.log_query?.keyword&&<Tag>{t("关键词：","Keyword: ")}{context.log_query.keyword}</Tag>}{!!context.selected_logs?.length&&<Tag>{t("已选日志","Selected log")}</Tag>}{context.query&&<Tag>{t("当前 SQL","Current SQL")}</Tag>}{context.context_truncated&&<Tag>{t("上下文已精简","Context trimmed")}</Tag>}</div>}
       {!loading && !config?.enabled && <Alert type="info" showIcon title={t("连接 AI 模型后开始使用","Connect an AI model to get started")} description={user?.role === 'admin' ? t("填写模型服务地址和 API Key，自动获取模型并选择调用协议。密钥由后端保管。","Enter a model service URL and API key, fetch available models and choose the API protocol. Keys are stored by the backend.") : t("请联系管理员配置并启用 AI 模型。","Ask an administrator to configure and enable an AI model.")} action={user?.role === 'admin' ? <Button onClick={openSettings}>{t("配置模型","Configure model")}</Button> : undefined} />}
       <MessageScroller.Provider key={sessionId??'new'} autoScroll defaultScrollPosition="end" scrollPreviousItemPeek={56}>
@@ -434,6 +552,8 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
         </div>
       </div>
     </main>
+    {!compact&&!narrow&&inspectorOpen&&<WorkbenchInspector tab={inspectorTab} onTabChange={setInspectorTab} context={context} session={selectedSessionData} categoryLabel={categoryLabel(selectedSessionData?.category)} running={sessionRunning} model={config?.model} turns={turns} selectedArtifact={selectedArtifact} onSelectArtifact={id=>{setSelectedArtifact(id);setInspectorTab('artifacts');}} onOpenDashboard={openDraft} onUseSql={sql=>{onSQL?.(sql);void message.success(t('SQL 已填入查询编辑器','SQL moved to the query editor'));}} onNavigate={url=>navigate(url)}/>}
+    <Drawer title={t('助手检查器','Assistant inspector')} className="lm-inspector-drawer" open={inspectorOpen&&(compact||narrow)} onClose={()=>setInspectorOpen(false)} size="default" destroyOnHidden>{(compact||narrow)&&<WorkbenchInspector tab={inspectorTab} onTabChange={setInspectorTab} context={context} session={selectedSessionData} categoryLabel={categoryLabel(selectedSessionData?.category)} running={sessionRunning} model={config?.model} turns={turns} selectedArtifact={selectedArtifact} onSelectArtifact={id=>{setSelectedArtifact(id);setInspectorTab('artifacts');}} onOpenDashboard={value=>{openDraft(value);setInspectorOpen(false);}} onUseSql={sql=>{onSQL?.(sql);setInspectorOpen(false);}} onNavigate={url=>{navigate(url);setInspectorOpen(false);}}/>}</Drawer>
     <Drawer title={t("对话历史","Conversation history")} open={historyOpen} onClose={() => setHistoryOpen(false)} size="default" destroyOnHidden>{historyContent()}</Drawer>
     <Modal open={!!draft} title={t("审阅大盘草稿","Review dashboard draft")} width={880} onCancel={() => { if (!draftSaving) { previewController.current?.abort(); setDraft(null); } }} footer={<Space><Button onClick={() => void previewDraft()} loading={previewing} disabled={draftSaving}>{t("运行查询预览","Run query preview")}</Button><Button onClick={() => { previewController.current?.abort(); setDraft(null); }} disabled={draftSaving}>{t("取消","Cancel")}</Button><Button type="primary" onClick={() => void saveDraft()} loading={draftSaving} disabled={previewing || !draft?.title.trim()}>{t("确认保存大盘","Save dashboard")}</Button></Space>} destroyOnHidden>{draft && <div className="lm-assistant-draft"><Alert type="info" title={t("检查查询和面板配置，确认后保存","Review queries and panel settings, then confirm to save")} showIcon />{draft.range && <p className="lm-assistant-draft-range">{t("分析时间（UTC）：","Analysis time (UTC): ")}{draft.range.from} → {draft.range.to}</p>}<label>{t("大盘名称","Dashboard name")}<Input value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>{draft.panels.map((panel, index) => <div className="lm-assistant-draft-panel" key={panel.id ?? index}><div className="lm-assistant-draft-panel-title"><Input value={panel.title} onChange={event => updatePanel(index, { title: event.target.value })} /><Select value={panel.type} options={['timeseries', 'bar', 'pie', 'stat', 'table', 'heatmap', 'gauge'].map(type => ({ value: type, label: type }))} onChange={type => updatePanel(index, { type })} /></div>{panel.queries.map((query, queryIndex) => <div className="lm-assistant-draft-query" key={query.refId}><span>{t("查询","Query")}{query.refId}</span><Input.TextArea value={query.sql} rows={4} onChange={event => updatePanel(index, { queries: panel.queries.map((item, itemIndex) => itemIndex === queryIndex ? { ...item, sql: event.target.value } : item) })} /></div>)}{preview[index]?.results.map(result => <div key={result.refId}><Space><Tag color={result.status === 'error' ? 'error' : 'success'}>{result.refId} · {result.status}</Tag><small>{result.elapsed_ms} ms</small>{result.truncated && <Tag color="warning">{t("结果已截断","Results truncated")}</Tag>}</Space>{result.error && <Alert type="error" title={result.error} />}{result.frames.map((frame, frameIndex) => <Table key={frameIndex} size="small" scroll={{ x: true }} pagination={{ pageSize: 5, size: 'small' }} columns={frame.columns.map((column, columnIndex) => ({ title: column.name, key: column.name, render: (_: unknown, row: unknown[]) => readable(row[columnIndex]) }))} dataSource={frame.rows} rowKey={(_, rowIndex) => String(rowIndex)} />)}</div>)}</div>)}{draftError && <Alert type="error" title={draftError} showIcon />}</div>}</Modal>
   </div>;

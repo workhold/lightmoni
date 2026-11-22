@@ -6,10 +6,11 @@
     "second",
     "hold stop",
     "ssh test",
+    "temporary",
     "analyze attachment"
   ],
   "cancel_count": 2,
-  "composer_width": 840,
+  "composer_width": 628,
   "mobile_composer_width": 323,
   "mobile_theme": "dark",
   "attachment_kinds": [
