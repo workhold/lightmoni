@@ -16,6 +16,7 @@ import {Alert,App,Button,Descriptions,Drawer,Empty,Form,Input,InputNumber,Modal,
 import {api,ApiError} from '../shared/api';
 import {useI18n} from '../shared/i18n';
 import type {User} from '../shared/types';
+import {readOpsOverviewCache,writeOpsOverviewCache} from './ops-overview-cache';
 import ResourceFields from './ops/ResourceFields';
 import ApplicationInstallDrawer from './ops/ApplicationInstallDrawer';
 import {installDiagnostic} from './ops/install-state';
@@ -47,9 +48,9 @@ export default function OperationsPage({user}:{user:User}){
  const appView=params.get('view')==='store'?'store':'installed';
  const chooseAppView=(view:string)=>{const next=new URLSearchParams(params);if(view==='store')next.set('view','store');else next.delete('view');setParams(next)};
  const editorErrorRef=useRef<HTMLDivElement>(null);
- const observationRequest=useRef(0),activeObservation=useRef<AbortController|null>(null),overviewReady=useRef(false),[hostApplications,setHostApplications]=useState<string[]>([]),[inventoryMachineId,setInventoryMachineId]=useState('');
+ const observationRequest=useRef(0),activeObservation=useRef<AbortController|null>(null),overviewReady=useRef(!!readOpsOverviewCache()),[hostApplications,setHostApplications]=useState<string[]>([]),[inventoryMachineId,setInventoryMachineId]=useState('');
  const [quickRequest,setQuickRequest]=useState<QuickRequest>(),[catalogOpen,setCatalogOpen]=useState(false),[sharedTab,setSharedTab]=useState<string>('main'),[entryManager,setEntryManager]=useState(false);
- const [overview,setOverview]=useState<Overview>({resources:[],agents:[],runs:[]}),[loading,setLoading]=useState(true),[statusReady,setStatusReady]=useState(false),[inventoryLoading,setInventoryLoading]=useState(false),[inventoryError,setInventoryError]=useState(''),[error,setError]=useState(''),[search,setSearch]=useState(''),[appState,setAppState]=useState('all');
+ const [overview,setOverview]=useState<Overview>(()=>readOpsOverviewCache()??{resources:[],agents:[],runs:[]}),[loading,setLoading]=useState(!readOpsOverviewCache()),[statusReady,setStatusReady]=useState(!!readOpsOverviewCache()),[inventoryLoading,setInventoryLoading]=useState(false),[inventoryError,setInventoryError]=useState(''),[error,setError]=useState(''),[search,setSearch]=useState(''),[appState,setAppState]=useState('all');
  const [editor,setEditor]=useState<{kind:ResourceKind;resource?:Resource;defaults?:Spec}>(),[editorError,setEditorError]=useState(''),[busy,setBusy]=useState(false),[form]=Form.useForm();
  useEffect(()=>{if(editorError)editorErrorRef.current?.scrollIntoView({block:'nearest'})},[editorError]);
  const [logoResource,setLogoResource]=useState<Resource>(),[logoLoading,setLogoLoading]=useState(false);
@@ -98,7 +99,9 @@ export default function OperationsPage({user}:{user:User}){
   try{
    const data=await api<Overview>('/ops/overview',{signal:controller.signal});
    if(current!==observationRequest.current)return;
-   setOverview({...data,resources:data.resources??[],agents:data.agents??[],runs:data.runs??[]});
+   const next={...data,resources:data.resources??[],agents:data.agents??[],runs:data.runs??[]};
+   setOverview(next);
+   writeOpsOverviewCache(next);
    overviewReady.current=true;
    setStatusReady(true);
    setError('');
