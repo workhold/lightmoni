@@ -245,6 +245,26 @@ function CategoryField({value,options,className,onCommit,ariaLabel,placeholder,d
   />;
 }
 
+function CategoryManager({baseCategories,sessions,onRequestDelete}:{baseCategories:{key:string;value:string}[];sessions:{category?:string}[];onRequestDelete:(value:string)=>void}) {
+  const {t}=useI18n(),[open,setOpen]=useState(false);
+  const values=[...new Set([...baseCategories.map(item=>item.value),...sessions.map(session=>session.category?.trim()||"").filter(Boolean)])];
+  return <>
+    <button type="button" className="lm-assistant-category-manage" onClick={()=>setOpen(true)}><SlidersOutlined aria-hidden="true"/><span>{t("管理分类","Manage categories")}</span></button>
+    <Modal open={open} title={t("管理分类","Manage categories")} footer={null} onCancel={()=>setOpen(false)} destroyOnHidden>
+      <div className="lm-assistant-category-manager">
+        {values.map(value=>{
+          const count=sessions.filter(session=>(session.category?.trim()||"")===value).length;
+          return <div className="lm-assistant-category-manager-row" key={value}>
+            <span className="lm-assistant-category-manager-name">{value}</span>
+            <small>{t(`${count} 个对话`,`${count} conversations`)}</small>
+            <Button type="text" size="small" danger icon={<DeleteOutlined/>} aria-label={t(`删除分类 ${value}`,`Delete category ${value}`)} onClick={()=>onRequestDelete(value)}/>
+          </div>;
+        })}
+      </div>
+    </Modal>
+  </>;
+}
+
 export function AssistantPanel({ compact = false, initialContext, initialPrompt, onDashboardDraft, onSQL }: AssistantPanelProps) {
  const {language,t}=useI18n();
  const pageTitles:Record<string,string>={
@@ -283,6 +303,9 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const [historyOpen, setHistoryOpen] = useState(false);
   const [newCategory, setNewCategory] = useState("");
   const [deletingIds, setDeletingIds] = useState<string[]>([]);
+  const [hiddenBaseCategories,setHiddenBaseCategories]=useState<string[]>([]);
+  const [categoryDelete,setCategoryDelete]=useState<{value:string;count:number;baseKey?:string}>();
+  const [deletingCategory,setDeletingCategory]=useState(false);
   const [inspectorTab,setInspectorTab]=useState<WorkbenchTab>('context');
   const [selectedArtifact,setSelectedArtifact]=useState<string>();
   const [inspectorOpen,setInspectorOpen]=useState(!compact);
@@ -438,8 +461,47 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   }
   function newConversation() { ++selectionVersion.current;setLoading(false);drafts.current.set(selectedSession.current??'new',{text,attachments});selectedSession.current=null;setSessionId(null);setEvents([]);const draft=drafts.current.get('new');setText(draft?.text??'');setAttachments(draft?.attachments??[]);setError('');setHistoryOpen(false); }
   const categoryLabel=(value?:string)=>value?.trim()?value.trim():t("未分类","Uncategorized");
-  const categoryOptions=useMemo(()=>{const base=[t("未分类","Uncategorized"),t("监控","Monitoring"),t("Agent 与主机","Agents & hosts"),t("运维任务","Operations"),t("研究","Research")];const values=[...new Set([...base,...sessions.map(session=>session.category?.trim()||"").filter(Boolean)])];return values.map(value=>({value:value===t("未分类","Uncategorized")?"":value,label:categoryLabel(value)}));},[sessions,t]);
+  const baseCategories=useMemo(()=>[
+    {key:'monitoring',value:t("监控","Monitoring")},
+    {key:'agents-hosts',value:t("Agent 与主机","Agents & hosts")},
+    {key:'operations',value:t("运维任务","Operations")},
+    {key:'research',value:t("研究","Research")},
+  ],[t]);
+  const hiddenCategoryStorageKey=user?`lightmoni.assistant.hiddenCategories.${user.id}`:'';
+  useEffect(()=>{if(!user)return;try{const raw=localStorage.getItem(`lightmoni.assistant.hiddenCategories.${user.id}`);setHiddenBaseCategories(raw?JSON.parse(raw):[]);}catch{setHiddenBaseCategories([]);}},[user]);
+  const categoryOptions=useMemo(()=>{
+    const suggested=baseCategories.filter(item=>!hiddenBaseCategories.includes(item.key)).map(item=>item.value);
+    const used=sessions.map(session=>session.category?.trim()||"").filter(Boolean);
+    const values=[...new Set([t("未分类","Uncategorized"),...suggested,...used])];
+    return values.map(value=>({value:value===t("未分类","Uncategorized")?"":value,label:categoryLabel(value)}));
+  },[baseCategories,hiddenBaseCategories,sessions,t]);
   const categoryOptionsFor=(value?:string)=>categoryOptions.some(option=>option.value===(value||""))?categoryOptions:[...categoryOptions,{value:value||"",label:categoryLabel(value)}];
+  function requestDeleteCategory(value:string){
+    const normalized=value.trim();
+    if(!normalized)return;
+    setCategoryDelete({value:normalized,count:sessions.filter(session=>(session.category?.trim()||"")===normalized).length,baseKey:baseCategories.find(item=>item.value===normalized)?.key});
+  }
+  async function deleteCategory(){
+    const target=categoryDelete;
+    if(!target)return;
+    setDeletingCategory(true);
+    try {
+      const result=await api<{updated_count:number;skipped_count:number;skipped_session_ids:string[]}>(`/assistant/categories/${encodeURIComponent(target.value)}`,{method:'DELETE'});
+      setSessions(previous=>previous.map(session=>(session.category?.trim()||"")===target.value&&!result.skipped_session_ids.includes(session.id)?{...session,category:""}:session));
+      if(target.baseKey){
+        setHiddenBaseCategories(previous=>{
+          const next=[...new Set([...previous,target.baseKey!])];
+          try{localStorage.setItem(`lightmoni.assistant.hiddenCategories.${user?.id}`,JSON.stringify(next));}catch{}
+          return next;
+        });
+      }
+      setCategoryDelete(undefined);
+      if(result.skipped_count)void message.warning(t(`分类已部分删除；${result.skipped_count} 个正在响应的对话保持原分类`, `Category partially deleted; ${result.skipped_count} responding conversations kept their category`));
+      else void message.success(t('分类已删除','Category deleted'));
+    }
+    catch(problem){setError(errorText(problem,t));void message.error(errorText(problem,t));}
+    finally{setDeletingCategory(false);}
+  }
   async function updateSessionCategory(id:string,category:string){
     try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"PATCH",body:JSON.stringify({category})}); setSessions(previous=>previous.map(session=>session.id===id?{...session,category}:session)); if(selectedSession.current===id)void loadSession(id); }
     catch(problem){ setError(errorText(problem,t)); void message.error(errorText(problem,t)); }
@@ -468,6 +530,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
           placeholder={t("输入新分类，回车确认","Type a category, then press Enter")}
         />
       </label>
+      <CategoryManager baseCategories={baseCategories} sessions={sessions} onRequestDelete={requestDeleteCategory}/>
       {groups.map(category=>{
         const items=visible.filter(session=>(session.category?.trim()||"")===category);
         return <section className="lm-assistant-history-group" key={category||"uncategorized"}>
@@ -490,7 +553,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
                 options={categoryOptionsFor(session.category)}
                 disabled={deleting||running}
                 onCommit={category=>void updateSessionCategory(session.id,category)}
-                ariaLabel={t('对话分类','Conversation category')}
+                      ariaLabel={t('对话分类','Conversation category')}
                 placeholder={t('未分类','Uncategorized')}
               />
               <Button className="lm-assistant-session-delete" type="text" size="small" danger icon={<DeleteOutlined/>} loading={deleting} disabled={deleting||running} aria-label={t("删除对话","Delete conversation")} onClick={()=>void deleteSession(session.id)}/>
@@ -555,6 +618,22 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     {!compact&&!narrow&&inspectorOpen&&<WorkbenchInspector tab={inspectorTab} onTabChange={setInspectorTab} context={context} session={selectedSessionData} categoryLabel={categoryLabel(selectedSessionData?.category)} running={sessionRunning} model={config?.model} turns={turns} selectedArtifact={selectedArtifact} onSelectArtifact={id=>{setSelectedArtifact(id);setInspectorTab('artifacts');}} onOpenDashboard={openDraft} onUseSql={sql=>{onSQL?.(sql);void message.success(t('SQL 已填入查询编辑器','SQL moved to the query editor'));}} onNavigate={url=>navigate(url)}/>}
     <Drawer title={t('助手检查器','Assistant inspector')} className="lm-inspector-drawer" open={inspectorOpen&&(compact||narrow)} onClose={()=>setInspectorOpen(false)} size="default" destroyOnHidden>{(compact||narrow)&&<WorkbenchInspector tab={inspectorTab} onTabChange={setInspectorTab} context={context} session={selectedSessionData} categoryLabel={categoryLabel(selectedSessionData?.category)} running={sessionRunning} model={config?.model} turns={turns} selectedArtifact={selectedArtifact} onSelectArtifact={id=>{setSelectedArtifact(id);setInspectorTab('artifacts');}} onOpenDashboard={value=>{openDraft(value);setInspectorOpen(false);}} onUseSql={sql=>{onSQL?.(sql);setInspectorOpen(false);}} onNavigate={url=>{navigate(url);setInspectorOpen(false);}}/>}</Drawer>
     <Drawer title={t("对话历史","Conversation history")} open={historyOpen} onClose={() => setHistoryOpen(false)} size="default" destroyOnHidden>{historyContent()}</Drawer>
+    <Modal
+      open={!!categoryDelete}
+      title={t("删除分类","Delete category")}
+      onCancel={()=>{if(!deletingCategory)setCategoryDelete(undefined);}}
+      confirmLoading={deletingCategory}
+      okText={t("删除分类","Delete category")}
+      cancelText={t("取消","Cancel")}
+      okButtonProps={{danger:true}}
+      destroyOnHidden
+      onOk={()=>void deleteCategory()}
+    >
+      {categoryDelete&&<div className="lm-assistant-category-delete-confirm">
+        <p><strong>{categoryDelete.value}</strong></p>
+        {categoryDelete.count?<Alert showIcon type="warning" title={t(`有 ${categoryDelete.count} 个对话将变为未分类`,`${categoryDelete.count} conversations will become uncategorized`)} description={t('对话、消息和附件都会保留。','Conversations, messages and attachments are preserved.')} />:<Alert showIcon type="info" title={t('该分类当前没有对话','No conversations currently use this category')} description={t('确认后会从新对话建议中移除。','It will be removed from new-conversation suggestions after confirmation.')} />}
+      </div>}
+    </Modal>
     <Modal open={!!draft} title={t("审阅大盘草稿","Review dashboard draft")} width={880} onCancel={() => { if (!draftSaving) { previewController.current?.abort(); setDraft(null); } }} footer={<Space><Button onClick={() => void previewDraft()} loading={previewing} disabled={draftSaving}>{t("运行查询预览","Run query preview")}</Button><Button onClick={() => { previewController.current?.abort(); setDraft(null); }} disabled={draftSaving}>{t("取消","Cancel")}</Button><Button type="primary" onClick={() => void saveDraft()} loading={draftSaving} disabled={previewing || !draft?.title.trim()}>{t("确认保存大盘","Save dashboard")}</Button></Space>} destroyOnHidden>{draft && <div className="lm-assistant-draft"><Alert type="info" title={t("检查查询和面板配置，确认后保存","Review queries and panel settings, then confirm to save")} showIcon />{draft.range && <p className="lm-assistant-draft-range">{t("分析时间（UTC）：","Analysis time (UTC): ")}{draft.range.from} → {draft.range.to}</p>}<label>{t("大盘名称","Dashboard name")}<Input value={draft.title} onChange={event => setDraft({ ...draft, title: event.target.value })} /></label>{draft.panels.map((panel, index) => <div className="lm-assistant-draft-panel" key={panel.id ?? index}><div className="lm-assistant-draft-panel-title"><Input value={panel.title} onChange={event => updatePanel(index, { title: event.target.value })} /><Select value={panel.type} options={['timeseries', 'bar', 'pie', 'stat', 'table', 'heatmap', 'gauge'].map(type => ({ value: type, label: type }))} onChange={type => updatePanel(index, { type })} /></div>{panel.queries.map((query, queryIndex) => <div className="lm-assistant-draft-query" key={query.refId}><span>{t("查询","Query")}{query.refId}</span><Input.TextArea value={query.sql} rows={4} onChange={event => updatePanel(index, { queries: panel.queries.map((item, itemIndex) => itemIndex === queryIndex ? { ...item, sql: event.target.value } : item) })} /></div>)}{preview[index]?.results.map(result => <div key={result.refId}><Space><Tag color={result.status === 'error' ? 'error' : 'success'}>{result.refId} · {result.status}</Tag><small>{result.elapsed_ms} ms</small>{result.truncated && <Tag color="warning">{t("结果已截断","Results truncated")}</Tag>}</Space>{result.error && <Alert type="error" title={result.error} />}{result.frames.map((frame, frameIndex) => <Table key={frameIndex} size="small" scroll={{ x: true }} pagination={{ pageSize: 5, size: 'small' }} columns={frame.columns.map((column, columnIndex) => ({ title: column.name, key: column.name, render: (_: unknown, row: unknown[]) => readable(row[columnIndex]) }))} dataSource={frame.rows} rowKey={(_, rowIndex) => String(rowIndex)} />)}</div>)}</div>)}{draftError && <Alert type="error" title={draftError} showIcon />}</div>}</Modal>
   </div>;
 }

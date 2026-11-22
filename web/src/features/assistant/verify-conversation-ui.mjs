@@ -6,14 +6,16 @@ import {resolve,extname} from 'node:path';
 const publicDirectory=resolve(import.meta.dirname,'../../../../runtime/public');
 const output=resolve(import.meta.dirname,'../../../../specs/188-ai-assistant-conversation/evidence');
 await mkdir(output,{recursive:true});
+await mkdir(resolve(import.meta.dirname,'../../../../specs/212-assistant-category-deletion/evidence'),{recursive:true});
 const user={id:'fixture-user',name:'Fixture',role:'admin'};
 const config={enabled:true,model:'fixture-model',base_url:'https://fixture.invalid/v1',has_key:false,code_tasks_enabled:false};
 const now='2026-11-19T00:00:00Z';
 const sessions=new Map([
  ['needs-review',{id:'needs-review',user_id:user.id,title:'Approval needed',category:'Review',created_at:now,updated_at:now,status:'needs_action',messages:[],events:[]}],
  ['failed',{id:'failed',user_id:user.id,title:'Failed analysis',category:'',created_at:now,updated_at:now,status:'failed',messages:[],events:[]}],
+ ['partial',{id:'partial',user_id:user.id,title:'Running category',category:'Partial',created_at:now,updated_at:now,status:'running',messages:[],events:[]}],
 ]);
-const turns=[];const cancels=[];const active=new Map();const errors=[];
+const turns=[];const cancels=[];const active=new Map();active.set('partial',{});const errors=[];
 let nextSession=0,nextTurn=0;
 function json(res,value,status=200){res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(value));}
 function writeEvent(session,turn,res,type,data={}){
@@ -32,6 +34,13 @@ const server=createServer(async(req,res)=>{
   if(req.method==='POST'&&path==='/api/v1/assistant/sessions'){
    let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(raw);
    const id=`new-${++nextSession}`,session={id,user_id:user.id,title:input.title,category:input.category||'',created_at:now,updated_at:now,status:'idle',messages:[],events:[]};sessions.set(id,session);return json(res,session,201);
+  }
+  let categoryMatch=path.match(/^\/api\/v1\/assistant\/categories\/([^/]+)$/);
+  if(categoryMatch&&req.method==='DELETE'){
+   const category=decodeURIComponent(categoryMatch[1]);
+   const values=[...sessions.values()];const skipped=values.filter(session=>active.has(session.id));const updated=values.filter(session=>session.category===category&&!active.has(session.id));
+   for(const session of updated)session.category='';
+   return json(res,{category,updated_count:updated.length,skipped_count:skipped.length,skipped_session_ids:skipped.map(session=>session.id)});
   }
   let match=path.match(/^\/api\/v1\/assistant\/sessions\/([^/]+)$/);
   if(match){const session=sessions.get(match[1]);if(!session)return json(res,{error:'not found'},404);
@@ -85,6 +94,9 @@ try{
  await screenshot('desktop-welcome.png');
  await expect(assistant.locator('.lm-assistant-header,.lm-assistant-context')).toHaveCount(0);
  await assistant.getByRole('button',{name:'分析范围与设置'}).click();
+ const partialDelete=await page.evaluate(async()=>{const response=await fetch('/api/v1/assistant/categories/'+encodeURIComponent('Partial'),{method:'DELETE'});return {status:response.status,...await response.json()};});
+ expect(partialDelete.status).toBe(200);expect(partialDelete.updated_count).toBe(0);expect(partialDelete.skipped_count).toBe(1);expect([...sessions.values()].find(session=>session.id==='partial')?.category).toBe('Partial');
+ active.delete('partial');sessions.get('partial').category='';
  await expect(page.locator('.lm-assistant-scope:visible')).toContainText('fixture-model');
  await expect.poll(()=>page.locator('.ant-popover:visible').last().evaluate(element=>getComputedStyle(element).opacity)).toBe('1');
  await screenshot('desktop-scope.png');
@@ -129,9 +141,29 @@ try{
  await failedRow.getByRole('combobox',{name:'对话分类'}).press('Enter');
  await expect.poll(()=>[...sessions.values()].find(session=>session.title==='Failed analysis')?.category).toBe('客户系统');
  await expect(assistant.locator('.lm-assistant-history-group').filter({hasText:'客户系统'})).toContainText('Failed analysis');
+ const managerButton=assistant.getByRole('button',{name:'管理分类'});
+ await managerButton.click();await expect(page.locator('.ant-modal').filter({hasText:'管理分类'})).toBeVisible();
+ const manager=page.locator('.ant-modal').filter({hasText:'管理分类'});
+ await manager.getByRole('button',{name:'删除分类 监控'}).click();
+ const confirm=page.locator('.ant-modal').filter({hasText:'该分类当前没有对话'});
+ await expect(confirm).toBeVisible();
+ await confirm.getByRole('button',{name:'删除分类',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>localStorage.getItem('lightmoni.assistant.hiddenCategories.fixture-user'))).toBe(JSON.stringify(['monitoring']));
+ await manager.getByRole('button',{name:'删除分类 Review'}).click();
+ const reviewConfirm=page.locator('.ant-modal').filter({hasText:'有 1 个对话将变为未分类'});
+ await expect(reviewConfirm).toBeVisible();
+ await reviewConfirm.getByRole('button',{name:'删除分类',exact:true}).click();
+ await expect.poll(()=>[...sessions.values()].find(session=>session.title==='Approval needed')?.category).toBe('');
+ await expect(assistant.locator('.lm-assistant-history-group').filter({hasText:'未分类'})).toContainText('Approval needed');
+ await manager.getByRole('button',{name:'关闭'}).click();await expect(manager).toBeHidden();
+ await page.reload();await expect(assistant).toBeVisible();
+ const suggestionField=assistant.getByRole('combobox',{name:'新对话分类'});
+ await suggestionField.click();await suggestionField.pressSequentially('监控');
+ await expect(page.locator('.ant-select-dropdown').last()).toContainText('创建新分类：监控');
+ await suggestionField.press('Escape');
  await assistant.getByRole('button',{name:'新对话'}).click();
  const newCategoryField=assistant.getByRole('combobox',{name:'新对话分类'});
- await newCategoryField.click();await newCategoryField.pressSequentially('新客户系统');
+ await newCategoryField.click({clickCount:3});await newCategoryField.pressSequentially('新客户系统');
  await expect(page.locator('.ant-select-dropdown').last()).toContainText('创建新分类：新客户系统');
  await newCategoryField.press('Enter');
  const tempBox=assistant.locator('.lm-assistant-composer textarea');await tempBox.fill('temporary');

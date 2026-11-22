@@ -624,6 +624,39 @@ export function registerAssistant(
       ctx.json(value, 201);
     }, "cannot save assistant session"),
   );
+  deps.router.delete(
+    route + "/categories/:category",
+    safe((ctx) => {
+      const category = text(ctx.params.category).trim();
+      if (!category || bytes(category) > 32 || control(category))
+        throw new AssistantError(400, "invalid session category");
+      const sessions = store.sessions(`session/${ctx.user.id}/`);
+      const skipped = sessions.filter(
+        (value) =>
+          (value.category ?? "").trim() === category &&
+          active.has(key(ctx.user.id, value.id)),
+      );
+      const updates = sessions
+        .filter(
+          (value) =>
+            (value.category ?? "").trim() === category &&
+            !active.has(key(ctx.user.id, value.id)),
+        )
+        .map((value) => ({ ...value, category: "" }));
+      deps.db.transaction(() => {
+        for (const value of updates) {
+          value.updated_at = now();
+          store.put(key(value.user_id, value.id), value);
+        }
+      });
+      ctx.json({
+        category,
+        updated_count: updates.length,
+        skipped_count: skipped.length,
+        skipped_session_ids: skipped.map((value) => value.id),
+      });
+    }, "cannot delete assistant category"),
+  );
   deps.router.patch(
     route + "/sessions/:id",
     safe(async (ctx) => {
