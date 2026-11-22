@@ -15,24 +15,26 @@ import {navigationLinks} from './navigation';
 import SidebarNavigation from './SidebarNavigation';
 import {loginDestination,useDefaultHomepage} from './default-homepage';
 import BrandMark from './BrandMark';
+import {loadAdminPage,loadAssistantPage,loadBackupTools,loadConnectionCredentialsPage,loadDashboardPage,loadHostMonitoring,loadHostsNodesPage,loadImageManagementPage,loadLogExplorePage,loadMcpAccessPage,loadOperationsPage,loadSystemMonitoring,loadTracePage,loadAlertsPage,loadDataManagementPage,schedulePreloadAllRoutes} from './route-preload';
+import {clearOpsOverviewCache} from './ops-overview-cache';
 import './navigation.css';
-const McpAccessPage=lazy(()=>import('./McpAccessPage'));
-const McpAuthorizationPage=lazy(()=>import('./McpAccessPage').then(module=>({default:module.McpAuthorizationPage})));
-const AdminPage=lazy(()=>import('./AdminPage'));
-const HostMonitoring=lazy(()=>import('./HostMonitoring'));
-const SystemMonitoring=lazy(()=>import('./SystemMonitoring'));
-const BackupTools=lazy(()=>import('./BackupTools'));
-const DashboardPage=lazy(()=>import('../features/dashboards/DashboardPage'));
-const LogExplorePage=lazy(()=>import('../features/logs/LogExplorePage'));
-const AlertsPage=lazy(()=>import('../features/alerts/AlertsPage'));
-const TracePage=lazy(()=>import('../features/alerts/TracePage'));
-const AssistantPage=lazy(()=>import('../features/assistant/AssistantPage'));
-const AssistantPanel=lazy(()=>import('../features/assistant/AssistantPage').then(module=>({default:module.AssistantPanel})));
-const ImageManagementPage=lazy(()=>import('./ImageManagementPage'));
-const OperationsPage=lazy(()=>import('./OperationsPage'));
-const HostsNodesPage=lazy(()=>import('./HostsNodesPage'));
-const DataManagementPage=lazy(()=>import('./DataManagementPage'));
-const ConnectionCredentialsPage=lazy(()=>import('./ConnectionCredentialsPage'));
+const McpAccessPage=lazy(loadMcpAccessPage);
+const McpAuthorizationPage=lazy(()=>loadMcpAccessPage().then(module=>({default:module.McpAuthorizationPage})));
+const AdminPage=lazy(loadAdminPage);
+const HostMonitoring=lazy(loadHostMonitoring);
+const SystemMonitoring=lazy(loadSystemMonitoring);
+const BackupTools=lazy(loadBackupTools);
+const DashboardPage=lazy(loadDashboardPage);
+const LogExplorePage=lazy(loadLogExplorePage);
+const AlertsPage=lazy(loadAlertsPage);
+const TracePage=lazy(loadTracePage);
+const AssistantPage=lazy(loadAssistantPage);
+const AssistantPanel=lazy(()=>loadAssistantPage().then(module=>({default:module.AssistantPanel})));
+const ImageManagementPage=lazy(loadImageManagementPage);
+const OperationsPage=lazy(loadOperationsPage);
+const HostsNodesPage=lazy(loadHostsNodesPage);
+const DataManagementPage=lazy(loadDataManagementPage);
+const ConnectionCredentialsPage=lazy(loadConnectionCredentialsPage);
 
 function ClaimLanding(){const {token}=useParams(),{search}=useLocation(),params=new URLSearchParams(search);params.set('claim',token??'');return <Navigate to={'/alerts?'+params} replace/>}
 
@@ -55,6 +57,7 @@ export default function Root(){
  function toggleNavigation(){setNavCollapsed(value=>{try{localStorage.setItem('lightmoni.nav.collapsed',String(!value))}catch{}return !value})}
  useEffect(()=>{if(location.pathname==='/settings')setAssistant(false)},[location.pathname]);
  useEffect(()=>{let alive=true;api<User>('/auth/me').then(u=>{if(alive)setUser(u)}).catch(()=>{if(alive)setUser(null)}).finally(()=>{if(alive)setLoading(false)});return()=>{alive=false}},[]);
+ useEffect(()=>{if(!user)return;return schedulePreloadAllRoutes()},[user]);
  if(loading)return <div className="lm-loading"><Spin size="large"/></div>;
  if(!user)return <LoginPage onLogin={u=>{setUser(u);navigate(loginDestination(u,location.pathname,location.search),{replace:true})}}/>;
  return <MonitoringScope.Provider value={{publish:setPublishedScope}}><div className={`lm-shell ${navCollapsed?'is-nav-collapsed':'is-nav-expanded'} ${/^\/dashboards\/[^/]+\/panels\//.test(location.pathname)?'is-panel-standalone':''}`}>
@@ -63,7 +66,7 @@ export default function Root(){
    <SidebarNavigation pathname={location.pathname} role={user.role} collapsed={navCollapsed}/>
    <Button className="lm-nav-collapse" type="text" aria-label={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} title={navCollapsed?t('展开导航','Expand navigation'):t('收起导航','Collapse navigation')} icon={navCollapsed?<MenuUnfoldOutlined/>:<MenuFoldOutlined/>} onClick={toggleNavigation}>{!navCollapsed&&t('收起导航','Collapse navigation')}</Button>
   </aside>
-  <main className="lm-main"><WorkspaceHeader user={user} title={currentPage} onLoggedOut={()=>setUser(null)}/><div className="lm-route-content"><Suspense fallback={<div className="lm-page"><Spin/></div>}><Routes>
+  <main className="lm-main"><WorkspaceHeader user={user} title={currentPage} onLoggedOut={()=>{clearOpsOverviewCache();setUser(null)}}/><div className="lm-route-content"><Suspense fallback={<div className="lm-page"><Spin/></div>}><Routes>
     <Route path="/" element={<Navigate to={homepage} replace/>}/>
     <Route path="/overview" element={<OverviewPage/>}/>
     <Route path="/data" element={<DataPage user={user}/>}/>
