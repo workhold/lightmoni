@@ -658,6 +658,46 @@ export function registerAssistant(
     }, "cannot delete assistant category"),
   );
   deps.router.patch(
+    route + "/categories/:category",
+    safe(async (ctx) => {
+      const category = text(ctx.params.category).trim();
+      if (!category || bytes(category) > 32 || control(category))
+        throw new AssistantError(400, "invalid session category");
+      const input = await body(ctx, ["category"], 1024),
+        newCategory = text(input.category).trim();
+      if (!newCategory || bytes(newCategory) > 32 || control(newCategory))
+        throw new AssistantError(400, "invalid session category");
+      const sessions = category === newCategory
+        ? []
+        : store.sessions(`session/${ctx.user.id}/`);
+      const skipped = sessions.filter(
+        (value) =>
+          (value.category ?? "").trim() === category &&
+          active.has(key(ctx.user.id, value.id)),
+      );
+      const updates = sessions
+        .filter(
+          (value) =>
+            (value.category ?? "").trim() === category &&
+            !active.has(key(ctx.user.id, value.id)),
+        )
+        .map((value) => ({ ...value, category: newCategory }));
+      deps.db.transaction(() => {
+        for (const value of updates) {
+          value.updated_at = now();
+          store.put(key(value.user_id, value.id), value);
+        }
+      });
+      ctx.json({
+        category,
+        new_category: newCategory,
+        updated_count: updates.length,
+        skipped_count: skipped.length,
+        skipped_session_ids: skipped.map((value) => value.id),
+      });
+    }, "cannot rename assistant category"),
+  );
+  deps.router.patch(
     route + "/sessions/:id",
     safe(async (ctx) => {
       const sessionKey = key(ctx.user.id, ctx.params.id);

@@ -42,6 +42,13 @@ const server=createServer(async(req,res)=>{
    for(const session of updated)session.category='';
    return json(res,{category,updated_count:updated.length,skipped_count:skipped.length,skipped_session_ids:skipped.map(session=>session.id)});
   }
+  let renameMatch=path.match(/^\/api\/v1\/assistant\/categories\/([^/]+)$/);
+  if(renameMatch&&req.method==='PATCH'){
+   const category=decodeURIComponent(renameMatch[1]);let raw='';for await(const chunk of req)raw+=chunk;const next=JSON.parse(raw).category.trim();
+   const values=[...sessions.values()];const skipped=values.filter(session=>session.category===category&&active.has(session.id));const updated=values.filter(session=>session.category===category&&!active.has(session.id));
+   for(const session of updated)session.category=next;
+   return json(res,{category,new_category:next,updated_count:updated.length,skipped_count:skipped.length,skipped_session_ids:skipped.map(session=>session.id)});
+  }
   let match=path.match(/^\/api\/v1\/assistant\/sessions\/([^/]+)$/);
   if(match){const session=sessions.get(match[1]);if(!session)return json(res,{error:'not found'},404);
    if(req.method==='PATCH'){let raw='';for await(const chunk of req)raw+=chunk;const input=JSON.parse(raw);session.title=input.title??session.title;session.category=input.category??session.category;return json(res,session);}
@@ -94,6 +101,11 @@ try{
  await screenshot('desktop-welcome.png');
  await expect(assistant.locator('.lm-assistant-header,.lm-assistant-context')).toHaveCount(0);
  await assistant.getByRole('button',{name:'分析范围与设置'}).click();
+ active.set('partial',{});sessions.get('partial').category='Partial';
+ const partialRename=await page.evaluate(async()=>{const response=await fetch('/api/v1/assistant/categories/'+encodeURIComponent('Partial'),{method:'PATCH',body:JSON.stringify({category:'PartialRenamed'})});return {status:response.status,...await response.json()};});
+ expect(partialRename.status).toBe(200);expect(partialRename.updated_count).toBe(0);expect(partialRename.skipped_count).toBe(1);expect([...sessions.values()].find(session=>session.id==='partial')?.category).toBe('Partial');
+ active.delete('partial');sessions.get('partial').category='';
+ active.set('partial',{});sessions.get('partial').category='Partial';
  const partialDelete=await page.evaluate(async()=>{const response=await fetch('/api/v1/assistant/categories/'+encodeURIComponent('Partial'),{method:'DELETE'});return {status:response.status,...await response.json()};});
  expect(partialDelete.status).toBe(200);expect(partialDelete.updated_count).toBe(0);expect(partialDelete.skipped_count).toBe(1);expect([...sessions.values()].find(session=>session.id==='partial')?.category).toBe('Partial');
  active.delete('partial');sessions.get('partial').category='';
@@ -142,13 +154,23 @@ try{
  await expect.poll(()=>[...sessions.values()].find(session=>session.title==='Failed analysis')?.category).toBe('客户系统');
  await expect(assistant.locator('.lm-assistant-history-group').filter({hasText:'客户系统'})).toContainText('Failed analysis');
  const managerButton=assistant.getByRole('button',{name:'管理分类'});
+ await page.emulateMedia({reducedMotion:'no-preference'});
  await managerButton.click();await expect(page.locator('.ant-modal').filter({hasText:'管理分类'})).toBeVisible();
+ await page.waitForTimeout(500);await page.screenshot({path:resolve(import.meta.dirname,'../../../../specs/213-assistant-category-rename/evidence/category-manager-rename.png'),fullPage:false});
  const manager=page.locator('.ant-modal').filter({hasText:'管理分类'});
  await manager.getByRole('button',{name:'删除分类 监控'}).click();
  const confirm=page.locator('.ant-modal').filter({hasText:'该分类当前没有对话'});
  await expect(confirm).toBeVisible();
  await confirm.getByRole('button',{name:'删除分类',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>localStorage.getItem('lightmoni.assistant.hiddenCategories.fixture-user'))).toBe(JSON.stringify(['monitoring']));
+ await manager.getByRole('button',{name:'重命名分类 Agent 与主机'}).click();
+ const fixedRename=page.locator('.ant-modal').filter({hasText:'重命名分类'});
+ await expect(fixedRename).toBeVisible();
+ await fixedRename.getByRole('textbox',{name:'新分类名'}).fill('Host Ops');
+ await fixedRename.getByRole('button',{name:'重命名',exact:true}).click();
+ await expect.poll(()=>page.evaluate(()=>localStorage.getItem('lightmoni.assistant.hiddenCategories.fixture-user'))).toBe(JSON.stringify(['monitoring','agents-hosts']));
+ await expect.poll(()=>page.evaluate(()=>localStorage.getItem('lightmoni.assistant.customCategories.fixture-user'))).toBe(JSON.stringify(['Host Ops']));
+ await page.keyboard.press('Escape');await expect(fixedRename).toBeHidden();
  await manager.getByRole('button',{name:'删除分类 Review'}).click();
  const reviewConfirm=page.locator('.ant-modal').filter({hasText:'有 1 个对话将变为未分类'});
  await expect(reviewConfirm).toBeVisible();
@@ -156,6 +178,7 @@ try{
  await expect.poll(()=>[...sessions.values()].find(session=>session.title==='Approval needed')?.category).toBe('');
  await expect(assistant.locator('.lm-assistant-history-group').filter({hasText:'未分类'})).toContainText('Approval needed');
  await manager.getByRole('button',{name:'关闭'}).click();await expect(manager).toBeHidden();
+ await page.emulateMedia({reducedMotion:'reduce'});
  await page.reload();await expect(assistant).toBeVisible();
  const suggestionField=assistant.getByRole('combobox',{name:'新对话分类'});
  await suggestionField.click();await suggestionField.pressSequentially('监控');
@@ -174,6 +197,16 @@ try{
  await assistant.getByRole('button',{name:'新对话'}).click();
  await expect.poll(()=>nextSession===2 && ![...sessions.values()].some(session=>session.title==='temporary')).toBe(true);
  await expect(assistant.locator('.lm-assistant-session-row').filter({hasText:'temporary'})).toHaveCount(0);
+ const renameManagerButton=assistant.getByRole('button',{name:'管理分类'});
+ await renameManagerButton.click();
+ const renameManager=page.locator('.ant-modal').filter({hasText:'管理分类'});
+ await renameManager.getByRole('button',{name:'重命名分类 客户系统'}).click();
+ const renameDialog=page.locator('.ant-modal').filter({hasText:'重命名分类'});
+ await expect(renameDialog).toBeVisible();
+ await renameDialog.getByRole('textbox',{name:'新分类名'}).fill('客户系统A');
+ await renameDialog.getByRole('button',{name:'重命名',exact:true}).click();
+ await expect.poll(()=>[...sessions.values()].find(session=>session.title==='Failed analysis')?.category).toBe('客户系统A');
+ await renameManager.getByRole('button',{name:'关闭'}).click();await expect(renameManager).toBeHidden();
  const png=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=1;canvas.height=1;canvas.getContext('2d').fillRect(0,0,1,1);return canvas.toDataURL('image/png').split(',')[1]});
  await assistant.locator('.lm-assistant-file-input').setInputFiles([{name:'screen.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')},{name:'report.pdf',mimeType:'application/pdf',buffer:pdf()}]);
  await expect(assistant.locator('.lm-assistant-attachments .lm-assistant-attachment')).toHaveCount(2);
