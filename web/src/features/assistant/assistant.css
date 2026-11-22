@@ -84,12 +84,9 @@
 .lm-assistant-session-row:hover,.lm-assistant-session-row.active,.lm-assistant-session-row:focus-within{background:var(--primary-soft,#eff6ff)}
 .lm-assistant-session-row .lm-assistant-session{flex:1;min-width:0;background:transparent}
 .lm-assistant-session-row:hover .lm-assistant-session,.lm-assistant-session-row.active .lm-assistant-session{background:transparent}
-.lm-assistant-category-select{width:78px;flex:none;opacity:0;transition:opacity .15s}
-.lm-assistant-category-select .ant-select-selection-item{font-size:11px;padding-inline-start:5px!important;padding-inline-end:18px!important}
-.lm-assistant-session-row:hover .lm-assistant-category-select,.lm-assistant-session-row:focus-within .lm-assistant-category-select,.lm-assistant-session-row.active .lm-assistant-category-select{opacity:1}
 .lm-assistant-session-delete{width:26px;height:26px;flex:none;padding:0;opacity:0;transition:opacity .15s}
 .lm-assistant-session-row:hover .lm-assistant-session-delete,.lm-assistant-session-row:focus-within .lm-assistant-session-delete{opacity:1}
-@media(max-width:700px){.lm-assistant-category-select,.lm-assistant-session-delete{opacity:1}}
+@media(max-width:700px){.lm-assistant-session-delete{opacity:1}}
 
 /* Claude-style conversation system: one card grammar, no per-widget shapes. */
 .lm-assistant{
@@ -266,12 +263,10 @@
 .lm-assistant-session-row .lm-assistant-session{flex:1;min-width:0;background:transparent}
 .lm-assistant-session-row .lm-assistant-session-name{display:block}
 .lm-assistant-session-row:hover .lm-assistant-session{background:transparent}
-.lm-assistant-category-select{width:76px;flex:none;opacity:0;transition:opacity .15s}
-.lm-assistant-session-row:hover .lm-assistant-category-select,.lm-assistant-session-row:focus-within .lm-assistant-category-select,.lm-assistant-session-row.active .lm-assistant-category-select{opacity:1}
 .lm-assistant-session-delete{width:26px;height:26px;flex:none;padding:0;opacity:0;transition:opacity .15s}
 .lm-assistant-session-row:hover .lm-assistant-session-delete,.lm-assistant-session-row:focus-within .lm-assistant-session-delete{opacity:1}
 .lm-assistant-history-group>header span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-@media(max-width:700px){.lm-assistant-category-select,.lm-assistant-session-delete{opacity:1}}
+@media(max-width:700px){.lm-assistant-session-delete{opacity:1}}
 
 /* Codex/ChatGPT-like workbench shell. */
 .lm-workbench-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 24px 12px;border-bottom:1px solid var(--lm-border);background:var(--lm-surface)}
@@ -355,3 +350,13 @@
 
 .lm-assistant-category-rename{display:grid;gap:10px}
 .lm-assistant-category-rename p{margin:0}
+
+/* SDD216: title-first history and header editing. */
+.lm-assistant-session-name{min-width:0}
+.lm-assistant-session-title{display:block;min-width:0;max-width:min(32ch,100%);font-size:13px;line-height:1.35;white-space:nowrap;overflow-x:auto;overflow-y:hidden;text-overflow:clip;scrollbar-width:thin;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch}
+.lm-assistant-session-title::-webkit-scrollbar{height:3px}
+.lm-assistant-session-title::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--lm-muted) 45%,transparent);border-radius:999px}
+.lm-session-header-editor{display:grid;grid-template-columns:minmax(160px,minmax(0,1fr));gap:5px;min-width:0;flex:1}
+.lm-session-category-input{min-width:0}
+.lm-session-category-input .ant-select{width:100%}
+@media(min-width:720px){.lm-session-header-editor{grid-template-columns:minmax(220px,minmax(0,1fr)) minmax(150px,200px);align-items:center}}
