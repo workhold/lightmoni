@@ -1,7 +1,7 @@
 import {useI18n} from '../../shared/i18n';
 import type {Translator} from '../../shared/i18n';
 import {chinese} from '../alerts/translation';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {useNavigate} from 'react-router-dom';
 import {MessageScroller} from '@shadcn/react/message-scroller';
 import { ArrowUpOutlined, CheckOutlined, CloseOutlined, CodeOutlined, CopyOutlined, DeleteOutlined, FolderOutlined, FilePdfOutlined, HistoryOutlined, LoadingOutlined, MessageOutlined, PaperClipOutlined, PictureOutlined, PlusOutlined, PicRightOutlined, ReloadOutlined, SettingOutlined, SlidersOutlined, ThunderboltOutlined } from '@ant-design/icons';
@@ -218,20 +218,28 @@ function ToolActivity({turn,onDraft,canUseCodeTasks,canApproveAgentUpdate}:{turn
   return <div className="lm-assistant-activity"><button type="button" className="lm-assistant-activity-trigger" aria-expanded={open} onClick={()=>setManual(!open)}><span className={`lm-assistant-activity-indicator ${failedStep?'failed':turn.status}`} aria-hidden="true"/><span>{label}</span><span className="lm-assistant-activity-chevron" aria-hidden="true">⌄</span></button>{open&&<div className="lm-assistant-activity-content"><ToolProgress turn={turn} onDraft={onDraft} canUseCodeTasks={canUseCodeTasks} canApproveAgentUpdate={canApproveAgentUpdate}/></div>}</div>;
 }
 
-function CategoryField({value,options,className,onCommit,ariaLabel,placeholder,disabled}:{value:string;options:{value:string;label:string}[];className?:string;onCommit:(value:string)=>void;ariaLabel:string;placeholder:string;disabled?:boolean}) {
+type CategoryOption={value:string;label:ReactNode;create?:boolean};
+
+function CategoryField({value,options,className,onCommit,ariaLabel,placeholder,disabled}:{value:string;options:{value:string;label:ReactNode}[];className?:string;onCommit:(value:string)=>void;ariaLabel:string;placeholder:string;disabled?:boolean}) {
   const {t}=useI18n(),[draft,setDraft]=useState(value.trim()),committed=useRef(value.trim());
   useEffect(()=>{committed.current=value.trim();setDraft(value.trim())},[value]);
   const commit=(next:string)=>{const normalized=next.trim();if(normalized===committed.current)return;committed.current=normalized;onCommit(normalized);};
+  const text=draft.trim();
+  const categoryOptions:CategoryOption[]=(():CategoryOption[]=>{
+    if(!text||options.some(option=>option.value===text))return options;
+    return [{value:text,label:<span className="lm-assistant-category-create"><PlusOutlined aria-hidden="true"/>{t(`创建新分类：${text}`,`Create new category: ${text}`)}</span>,create:true},...options];
+  })();
   return <AutoComplete
     className={className}
     value={draft}
-    options={options}
+    options={categoryOptions}
     disabled={disabled}
     onChange={next=>setDraft(String(next))}
-    onSelect={next=>{const text=String(next);setDraft(text);commit(text)}}
+    onSelect={next=>{const nextText=String(next).trim();setDraft(nextText);commit(nextText)}}
     onBlur={()=>commit(draft)}
-    onKeyDown={event=>{if(event.key==='Enter')commit(draft)}}
-    filterOption={(input,option)=>String(option?.value||'').toLowerCase().includes(input.toLowerCase())}
+    onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();commit(text)}}}
+    filterOption={(input,option)=>Boolean((option as CategoryOption).create)||String(option?.value||'').toLowerCase().includes(input.toLowerCase())}
+    defaultActiveFirstOption={Boolean(text)&&!options.some(option=>option.value===text)}
     placeholder={placeholder}
     aria-label={ariaLabel}
   />;
