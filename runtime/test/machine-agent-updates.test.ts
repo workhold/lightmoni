@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DB } from "../src/shared/sqlite.js";
@@ -262,6 +262,21 @@ test('forced upgrade pins an old unknown job and rejects new work or remote lock
  assert.equal(f.db.get<any>("SELECT state FROM agent_jobs WHERE id='old-inspection'")?.state,'unknown','historical result is preserved');
 });
 
+test('creating an update plan prunes unreferenced cache pins',async t=>{
+ const f=await fixture(t),first=await f.host();
+ const planned=await f.plan(first.id);assert.equal(planned.status,201,planned.raw);
+ const cache=join(f.directory,'agent-update-cache'),old=new Date('2020-01-01T00:00:00Z');
+ const stale=Array.from({length:10},(_,index)=>'f'.repeat(63)+index.toString(16));
+ for(const [index,name] of stale.entries()){const path=join(cache,name);writeFileSync(path,'stale');utimesSync(path,old,new Date(old.getTime()+index*1000));}
+ const second=await f.host('cache-prune-second'),again=await f.plan(second.id);assert.equal(again.status,201,again.raw);
+ // 10 stale pins are the oldest: the 8 newest files are the real pins plus the 5 newest stale entries.
+ for(const name of stale.slice(0,5))assert.ok(!existsSync(join(cache,name)),`stale pin ${name} pruned`);
+ for(const name of stale.slice(5))assert.ok(existsSync(join(cache,name)),`recent stale pin ${name} kept`);
+ for(const host of [first.id,second.id]){
+   const row=f.db.get<any>("SELECT plan_json FROM machine_agent_updates WHERE machine_id=? ORDER BY rowid DESC LIMIT 1",host)!;
+   for(const file of Object.values(JSON.parse(row.plan_json).files))assert.ok(existsSync(join(cache,file.sha256)),'active plan pins survive pruning');
+ }
+});
 test('one request chooses the probed architecture, starts upgrade and retains stage events',async t=>{
  const f=await fixture(t),h=await f.host();
  const arm={...f.release,arch:'arm64',file:'lightmoni-agent_0.1.0_linux_arm64.tar.gz',build_id:'0.1.0-arm-build',build_time:'2026-10-31T00:00:00Z'};

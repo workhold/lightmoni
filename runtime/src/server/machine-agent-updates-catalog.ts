@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, chmodSync } from "node:fs";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, chmodSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fail } from "../shared/http.js";
 
@@ -110,5 +110,25 @@ export class AgentReleaseCatalog {
     const path = this.path(file);
     if (safeFile(path).size !== file.size || this.fileHash(path, true) !== file.sha256) fail(409, "已审批发行缓存不完整或被修改，停止执行");
     return path;
+  }
+  /** Pins are immutable and referenced by approved plans; drop only unreferenced old ones. */
+  prune(retained: Set<string>, keep = 8) {
+    if (!existsSync(this.cache)) return 0;
+    const entries: { name: string; path: string; mtimeMs: number }[] = [];
+    for (const name of readdirSync(this.cache)) {
+      if (!SHA.test(name)) continue;
+      const path = join(this.cache, name), stat = lstatSync(path);
+      if (!stat.isFile() || stat.isSymbolicLink()) continue;
+      entries.push({ name, path, mtimeMs: stat.mtimeMs });
+    }
+    entries.sort((a, b) => b.mtimeMs - a.mtimeMs);
+    let removed = 0;
+    for (const [index, entry] of entries.entries()) {
+      if (index < keep || retained.has(entry.name)) continue;
+      rmSync(entry.path, { force: true });
+      this.verified.delete(entry.path);
+      removed++;
+    }
+    return removed;
   }
 }

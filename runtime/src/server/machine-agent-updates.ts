@@ -93,6 +93,9 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   const { db, router } = deps, at = () => deps.now().toISOString();
   const human=(ctx:Context)=>{deps.auth.requireAdmin(ctx);if(ctx.req.headers.authorization||!ctx.req.headers.cookie?.split(';').some(part=>part.trim().startsWith('lm_session='))||deps.auth.user(ctx.req)?.id!==ctx.user.id)fail(403,'human_admin_session_required');};
   const catalog = new AgentReleaseCatalog(options.downloadsDir, join(options.dataDir, "agent-update-cache"));
+  // Cache maintenance is best-effort: it must never block plan creation or startup.
+  const pruneCache = () => { try { catalog.prune(new Set(db.all<{plan_json:string}>("SELECT plan_json FROM machine_agent_updates WHERE status IN " + ACTIVE).flatMap(row => String(row.plan_json).match(/[a-f0-9]{64}/g) ?? []))); } catch {} };
+  pruneCache();
   const controller = new AbortController(), running = new Map<string, Promise<void>>(), rolloutWorkers = new Map<string, Promise<void>>();
   const pollInterval = options.pollIntervalMs ?? 3000, healthTimeout = options.healthTimeoutMs ?? 1260_000;
   const table = (name: string) => Boolean(db.get("SELECT name FROM sqlite_master WHERE type='table' AND name=?", name));
@@ -283,6 +286,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
           operationID, machine.id, machine.agent_id, credential.id, input.action, JSON.stringify(planBody), at(), actorID);
         event(operationID,"ready");
       });
+      pruneCache();
       return view(row(machine.id, operationID));
     } finally { preparation.release();if(laneHeld)access.busy.delete(machine.id); }
   };
