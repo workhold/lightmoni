@@ -115,6 +115,14 @@ try{
  await assistant.locator('.lm-assistant-tools .ant-collapse-header').last().click();
  await expect(assistant.locator('.lm-assistant-terminal').last()).toContainText('ssh fixture-host');
  await expect(assistant.locator('.lm-assistant-answer').last()).toContainText('Final answer');
+ await expect(assistant.locator('.lm-inspector')).toBeVisible();
+ await expect(assistant.locator('.lm-inspector-tabs button').filter({hasText:'上下文'})).toBeVisible();
+ await expect(assistant.locator('.lm-inspector-chips')).toContainText('助手页');
+ await assistant.locator('.lm-inspector-tabs button').filter({hasText:'产物'}).click();
+ await expect(assistant.locator('.lm-inspector-item')).toHaveCount(1);
+ await assistant.locator('.lm-inspector-item').first().click();
+ await expect(assistant.locator('.lm-inspector-detail')).toContainText('主机检查');
+ await screenshot('desktop-light.png');
  const failedRow=assistant.locator('.lm-assistant-session-row').filter({hasText:'Failed analysis'});
  await failedRow.getByRole('combobox',{name:'对话分类'}).fill('运维任务');
  await page.keyboard.press('Enter');
@@ -130,7 +138,6 @@ try{
  await assistant.getByRole('button',{name:'新对话'}).click();
  await expect.poll(()=>nextSession===2 && ![...sessions.values()].some(session=>session.title==='temporary')).toBe(true);
  await expect(assistant.locator('.lm-assistant-session-row').filter({hasText:'temporary'})).toHaveCount(0);
- await screenshot('desktop-light.png');
  const png=await page.evaluate(()=>{const canvas=document.createElement('canvas');canvas.width=1;canvas.height=1;canvas.getContext('2d').fillRect(0,0,1,1);return canvas.toDataURL('image/png').split(',')[1]});
  await assistant.locator('.lm-assistant-file-input').setInputFiles([{name:'screen.png',mimeType:'image/png',buffer:Buffer.from(png,'base64')},{name:'report.pdf',mimeType:'application/pdf',buffer:pdf()}]);
  await expect(assistant.locator('.lm-assistant-attachments .lm-assistant-attachment')).toHaveCount(2);
