@@ -176,7 +176,7 @@ test("expired Agent leases become unknown and cannot be completed", () => {
   const unknown = f.jobs.get(job.id);
   assert.equal(unknown.state, "unknown");
   assert.equal(unknown.receipt.code, "unknown_execution_result");
-  assert.throws(() => f.jobs.result("agent-1", job.id, { lease_id: leased!.lease_id, state: "succeeded", summary: "late" }), /lease is invalid|expired/);
+  assert.throws(() => f.jobs.result("agent-1", job.id, { lease_id: leased!.lease_id, state: "succeeded", summary: "late" }), /resolved unknown execution|lease is invalid|expired/);
   f.db.close();
 });
 

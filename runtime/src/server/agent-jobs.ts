@@ -290,8 +290,11 @@ export function registerAgentJobs(
       at,
     )) {
       transact(() => {
+        // lease_id survives the sweep on purpose: a late read-only receipt can
+        // still prove the original lease holder's observation (see result()).
+        // lease_expires_at is cleared so the lease is no longer active.
         const changed = db.run(
-          "UPDATE agent_jobs SET state='unknown',receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND state IN ('leased','accepted','preflighting','staging','activating','verifying')",
+          "UPDATE agent_jobs SET state='unknown',receipt_json=?,updated_at=?,lease_expires_at='' WHERE id=? AND state IN ('leased','accepted','preflighting','staging','activating','verifying')",
           json({ state: "unknown", code: "unknown_execution_result", summary: "Agent lease expired; execution result is unknown" }), at, old.id,
         );
         if (changed.changes) {
@@ -467,6 +470,67 @@ export function registerAgentJobs(
     });
     return view(row(jobID));
   };
+  // A lease timeout must not discard a late read-only observation: transient
+  // heartbeat gaps would otherwise freeze an application's status until a
+  // manual agent recovery. The exact original lease may still settle an
+  // unknown inspect/logs job as verified fact; write jobs keep the review
+  // boundary unchanged.
+  const LATE_RECEIPT_SECONDS = 600;
+  const readOnlyObservationJob = (job: any) => {
+    try {
+      if (!JSON.parse(job.actions_json || "[]").some((a: any) => a?.kind === "operations")) return false;
+      const run = db.get<any>("SELECT payload_cipher FROM ops_platform_runs WHERE job_id=?", job.id);
+      if (!run) return false;
+      const task = String(JSON.parse(deps.decrypt(run.payload_cipher))?.resource?.config?.task ?? "");
+      return task.endsWith(".inspect") || task.endsWith(".logs");
+    } catch {
+      return false;
+    }
+  };
+  const lateObservationResult = (stored: any, value: Record<string, any>, lease: string) => {
+    if (!lease || !stored.lease_id || stored.lease_id !== lease) fail(409, "agent job lease is invalid");
+    if (
+      deps.now().getTime() - Date.parse(stored.updated_at) > LATE_RECEIPT_SECONDS * 1000 ||
+      !readOnlyObservationJob(stored)
+    )
+      fail(409, "agent job result requires a resolved unknown execution");
+    let state = text(value.state, "state", 32) as AgentJobState;
+    if (!["succeeded", "failed"].includes(state)) fail(400, "invalid late result state");
+    const code = text(value.code ?? "", "code", 128, false),
+      summary = eventSummary(value.summary),
+      snapshot = value.snapshot == null ? {} : object(value.snapshot, "snapshot");
+    const action = JSON.parse(stored.actions_json || "[]").find((a: any) => a?.kind === "operations");
+    if (
+      snapshot.operations?.operation_id !== action?.operation_id ||
+      snapshot.operations?.resource_id !== JSON.parse(stored.target_json || "{}").operations_resource_id
+    )
+      fail(409, "invalid_operations_receipt");
+    if (state === "succeeded" && (snapshot as any).health?.healthy !== true) fail(409, "invalid_agent_sequence");
+    const receipt = {
+      state, code, summary, snapshot,
+      started_at: text(value.started_at ?? "", "started_at", 64, false),
+      finished_at: text(value.finished_at ?? iso(deps), "finished_at", 64, false),
+    };
+    const occurred = iso(deps);
+    return transact(() => {
+      const changed = db.run(
+        "UPDATE agent_jobs SET state=?,receipt_json=?,updated_at=?,lease_id='',lease_expires_at='' WHERE id=? AND state='unknown' AND lease_id=?",
+        state, json(receipt), occurred, stored.id, lease,
+      );
+      if (!changed.changes) return view(row(stored.id));
+      const next = Number(db.get<any>("SELECT COALESCE(MAX(sequence),0)+1 AS sequence FROM agent_job_events WHERE job_id=?", stored.id)?.sequence ?? 1);
+      db.run(
+        "INSERT OR IGNORE INTO agent_job_events(job_id,sequence,phase,code,summary,snapshot_json,occurred_at) VALUES(?,?,?,?,?,?,?)",
+        stored.id, next, state, code, "Late read-only receipt settled an unknown lease timeout", json(receipt.snapshot), occurred,
+      );
+      notify(row(stored.id), state as AgentJobEventPhase, code, {
+        healthVerified: state === "succeeded" && (snapshot as any).health?.healthy === true,
+        previousState: "unknown",
+        snapshot: snapshot as Record<string, unknown>,
+      });
+      return view(row(stored.id));
+    });
+  };
   const result = (agentID: string, jobID: string, input: Record<string, any>) => {
     assertAgentActive(db, agentID);
     const value = object(input, "result"), lease = text(value.lease_id, "lease_id", 256), stored = row(jobID);
@@ -474,10 +538,11 @@ export function registerAgentJobs(
     // A lost HTTP response may cause the Agent to retry its final receipt.
     // Return the durable terminal receipt instead of requiring a lease that
     // was deliberately cleared after the first commit.
-    // Unknown is intentionally a hard boundary: a late completion after a
-    // lease timeout must not overwrite the centre's need to re-probe. Other
-    // terminal receipts are safe to return for idempotent retries.
+    // Unknown remains a boundary for events and write results: a late
+    // completion must not overwrite the centre's need to re-probe. Read-only
+    // observations are the exception — see lateObservationResult.
     if (terminal(stored.state as AgentJobState) && stored.state !== "unknown") return view(stored);
+    if (stored.state === "unknown") return lateObservationResult(stored, value, lease);
     const current = leaseRow(agentID, jobID, lease);
     let state = text(value.state, "state", 32) as AgentJobState;
     if (!["succeeded", "failed", "cancelled", "unknown"].includes(state)) fail(400, "invalid result state");
