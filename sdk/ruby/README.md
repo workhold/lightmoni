@@ -5,7 +5,7 @@ Ruby 2.7+，标准库，生成本地 gem：
 ~~~sh
 cd sdk/ruby
 gem build lightmoni.gemspec
-gem install ./lightmoni-sdk-0.1.20.gem
+gem install ./lightmoni-sdk-0.1.21.gem
 ~~~
 
 ~~~ruby
