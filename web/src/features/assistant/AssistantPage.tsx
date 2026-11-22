@@ -9,7 +9,7 @@ import XMarkdown, { type ComponentProps } from '@ant-design/x-markdown';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
 import {useAppearance} from '../../shared/appearance';
-import { App, Alert, Button, Checkbox, Collapse, Drawer, Input, Modal, Popconfirm, Popover, Select, Space, Spin, Table, Tag, Tooltip } from '../../shared/ui';
+import { App, Alert, AutoComplete, Button, Checkbox, Collapse, Drawer, Input, Modal, Popconfirm, Popover, Select, Space, Spin, Table, Tag, Tooltip } from '../../shared/ui';
 import { api } from '../../shared/api';
 import {boundedMonitoringContext} from '../../shared/assistant-context';
 import type { CatalogTable, QueryResponse, TimeRange, User } from '../../shared/types';
@@ -216,6 +216,25 @@ function ToolActivity({turn,onDraft,canUseCodeTasks,canApproveAgentUpdate}:{turn
   const open=manual??(turn.status==='running'||turn.status==='failed'||attention);
   const label=turn.status==='running'?t(`正在执行 ${turn.tools.length} 项操作`,`Working on ${turn.tools.length} steps`):attention?t(`${turn.tools.length} 项操作需要查看`,`${turn.tools.length} steps need review`):failedStep||turn.status==='failed'?t(`${turn.tools.length} 项操作 · 含失败`,`${turn.tools.length} steps · includes a failure`):t(`已完成 ${turn.tools.length} 项操作`,`Completed ${turn.tools.length} steps`);
   return <div className="lm-assistant-activity"><button type="button" className="lm-assistant-activity-trigger" aria-expanded={open} onClick={()=>setManual(!open)}><span className={`lm-assistant-activity-indicator ${failedStep?'failed':turn.status}`} aria-hidden="true"/><span>{label}</span><span className="lm-assistant-activity-chevron" aria-hidden="true">⌄</span></button>{open&&<div className="lm-assistant-activity-content"><ToolProgress turn={turn} onDraft={onDraft} canUseCodeTasks={canUseCodeTasks} canApproveAgentUpdate={canApproveAgentUpdate}/></div>}</div>;
+}
+
+function CategoryField({value,options,className,onCommit,ariaLabel,placeholder,disabled}:{value:string;options:{value:string;label:string}[];className?:string;onCommit:(value:string)=>void;ariaLabel:string;placeholder:string;disabled?:boolean}) {
+  const {t}=useI18n(),[draft,setDraft]=useState(value.trim()),committed=useRef(value.trim());
+  useEffect(()=>{committed.current=value.trim();setDraft(value.trim())},[value]);
+  const commit=(next:string)=>{const normalized=next.trim();if(normalized===committed.current)return;committed.current=normalized;onCommit(normalized);};
+  return <AutoComplete
+    className={className}
+    value={draft}
+    options={options}
+    disabled={disabled}
+    onChange={next=>setDraft(String(next))}
+    onSelect={next=>{const text=String(next);setDraft(text);commit(text)}}
+    onBlur={()=>commit(draft)}
+    onKeyDown={event=>{if(event.key==='Enter')commit(draft)}}
+    filterOption={(input,option)=>String(option?.value||'').toLowerCase().includes(input.toLowerCase())}
+    placeholder={placeholder}
+    aria-label={ariaLabel}
+  />;
 }
 
 export function AssistantPanel({ compact = false, initialContext, initialPrompt, onDashboardDraft, onSQL }: AssistantPanelProps) {
@@ -431,7 +450,15 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
       <Input allowClear size="small" placeholder={t("搜索对话","Search conversations")} value={search} onChange={event=>setSearch(event.target.value)} className="lm-assistant-history-search" />
       <label className="lm-assistant-category-picker">
         <span><FolderOutlined aria-hidden="true"/>{t("新对话分类","New conversation category")}</span>
-        <Select className="lm-assistant-category-input" mode="tags" maxCount={1} size="small" value={newCategory?[newCategory]:[]} showSearch onChange={values=>setNewCategory(values.at(-1)??'')} options={categoryOptions} disabled={creating} tokenSeparators={[',']} aria-label={t("新对话分类","New conversation category")} />
+        <CategoryField
+          className="lm-assistant-category-input"
+          value={newCategory}
+          options={categoryOptions}
+          disabled={creating}
+          onCommit={setNewCategory}
+          ariaLabel={t("新对话分类","New conversation category")}
+          placeholder={t("输入新分类，回车确认","Type a category, then press Enter")}
+        />
       </label>
       {groups.map(category=>{
         const items=visible.filter(session=>(session.category?.trim()||"")===category);
@@ -442,10 +469,22 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
             const deleting=deletingIds.includes(session.id), running=status==='running';
             return <div className={`lm-assistant-session-row ${sessionId===session.id?'active':''}`} key={session.id}>
               <button className={`lm-assistant-session ${sessionId===session.id?'active':''}`} disabled={creating||deleting} onClick={()=>void loadSession(session.id)}>
-                <MessageOutlined aria-hidden="true"/><span className="lm-assistant-session-name">{session.title}</span>
+                <MessageOutlined aria-hidden="true"/>
+                <span className="lm-assistant-session-name">
+                  <span>{session.title}</span>
+                  <small>{categoryLabel(session.category)} · {new Date(session.updated_at).toLocaleString(language)}</small>
+                </span>
                 {status&&status!=='idle'&&<span className={`lm-assistant-session-status ${status}`} aria-label={status==='running'?t('响应中','Responding'):status==='failed'?t('失败','Failed'):t('待确认','Needs review')}>{status==='running'?<LoadingOutlined spin/>:status==='failed'?t('失败','Failed'):t('待确认','Review')}</span>}
               </button>
-              <Select className="lm-assistant-category-select" mode="tags" maxCount={1} size="small" value={session.category?.trim()?[session.category.trim()]:[]} options={categoryOptionsFor(session.category)} showSearch disabled={deleting||running} onChange={values=>void updateSessionCategory(session.id,values.at(-1)??'')} onClick={event=>event.stopPropagation()} aria-label={t('对话分类','Conversation category')} />
+              <CategoryField
+                className="lm-assistant-category-select"
+                value={session.category||''}
+                options={categoryOptionsFor(session.category)}
+                disabled={deleting||running}
+                onCommit={category=>void updateSessionCategory(session.id,category)}
+                ariaLabel={t('对话分类','Conversation category')}
+                placeholder={t('未分类','Uncategorized')}
+              />
               <Button className="lm-assistant-session-delete" type="text" size="small" danger icon={<DeleteOutlined/>} loading={deleting} disabled={deleting||running} aria-label={t("删除对话","Delete conversation")} onClick={()=>void deleteSession(session.id)}/>
             </div>;
           })}
