@@ -41,6 +41,9 @@ export interface AgentJobInput {
   capabilities?: string[];
   target?: Record<string, unknown>;
   expiresInSeconds?: number;
+  /** Read-only observation (inspect/logs): exempt from the managed write
+   * admission fence so unknown outcomes can always be re-verified (SDD214). */
+  readOnlyObservation?: boolean;
 }
 
 export interface AgentJobUpdate {
@@ -334,8 +337,11 @@ export function registerAgentJobs(
     if(sshOnly&&!privileged&&!agentOnceReady(agentID))fail(409,'agent_upgrade_required');
     if (privileged) { if (!privilegedReady) fail(409,"privileged_executor_required"); privilegedReady(agentID); }
     assertNoPendingMachineInstallation(db,"",agentID);
-    if (privileged) assertManagedJobAdmission(db,agentID);
-    else assertNoPrivilegedExecution(db,"",agentID);
+    // Read-only observations (inspect/logs) pass an unresolved managed write
+    // fence: they never mutate the host and are the sanctioned way to
+    // re-verify an unknown execution (system-design ch.116/213/214).
+    if (privileged && !input.readOnlyObservation) assertManagedJobAdmission(db,agentID);
+    else if (!privileged) assertNoPrivilegedExecution(db,"",agentID);
     assertNoPendingAgentUpdate(db, agentID);
     assertNoDockerInstallation(db,"",agentID);
     if (uninstallBlocked(agentID)) fail(409, "agent_uninstallation_blocks_jobs");

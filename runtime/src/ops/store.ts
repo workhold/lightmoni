@@ -600,6 +600,9 @@ export class OperationsPlatformStore implements PlatformStore {
         ],
         target: { operations_resource_id: resource.id },
         expiresInSeconds: 900,
+        // Inspect/logs tasks observe the host; they must pass the managed
+        // admission fence so unknown outcomes stay re-verifiable (SDD214).
+        readOnlyObservation: /\.(inspect|logs)$/.test(String(config.task ?? "")),
       });
       this.deps.db.run(
         "INSERT INTO ops_platform_runs VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)",

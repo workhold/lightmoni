@@ -225,3 +225,76 @@ test("execution-environment failures keep the last verified state instead of rep
   f.finish("a", { code: "image_pull_backoff" }, "failed");
   assert.equal(f.instance(a.id).state, "failed", "business failures still report failed");
 });
+
+test("an unresolved unknown managed task fences writes but not read-only verification", async t => {
+  const f = await fixture(t, true);
+  f.db.run("UPDATE agents SET heartbeat=? WHERE id='a'", JSON.stringify({ operations_capabilities: ["operations.platform.reconciliation.v1"] }));
+  const c = f.createCluster(), a = f.app(c);
+  await f.action(a, "deploy");
+  f.finish("a");
+
+  // A redeploy that loses its lease leaves the instance unknown.
+  await f.action(a, "deploy");
+  const apply = f.jobs.claim("a", CAPABILITIES)!;
+  assert.ok(apply);
+  f.advance(46000);
+  f.jobs.expireLeases?.();
+  assert.equal(f.instance(a.id).state, "unknown");
+
+  // The agent now also carries an unresolved unknown managed task.
+  if (!f.db.get("SELECT 1 FROM sqlite_master WHERE name='task_runs'"))
+    f.db.exec("CREATE TABLE task_runs(id TEXT PRIMARY KEY, agent_id TEXT, host_id TEXT, execution_principal TEXT, state TEXT, resolved_at TEXT NOT NULL DEFAULT '')");
+  f.db.run("INSERT INTO task_runs VALUES('tr-unknown','a','ma','privileged_executor','unknown','')");
+
+  f.advance(31000);
+  f.heartbeat();
+  await f.reconciliation.tick();
+  const resource = f.db.get<any>("SELECT state,code FROM reconciliation_resources WHERE resource_key=?", f.instance(a.id).id);
+  assert.equal(resource.state, "pending", "read-only verification is dispatched despite the unknown managed task");
+  assert.notEqual(resource.code, "reconciliation_failed");
+  const verifyJob = f.db.get<any>("SELECT id FROM agent_jobs WHERE agent_id='a' AND state='queued' AND id<>?", apply.id);
+  assert.ok(verifyJob, "the read-only inspect job enqueues through the admission fence");
+
+  // Writes stay fenced until the unknown task is resolved by review. The
+  // executor completes the read-only inspect through its own lease lane.
+  const leaseID = "lease-verify-1";
+  const leased = f.jobs.leasePrivileged!(verifyJob.id, leaseID, new Date(Date.now() + 45000).toISOString());
+  const payload = f.platform.resolvePayload(leased);
+  for (const [n, phase] of ["accepted", "staging", "activating", "verifying"].entries())
+    f.jobs.event("a", verifyJob.id, { lease_id: leaseID, sequence: n + 1, phase, summary: "test" });
+  f.jobs.result("a", verifyJob.id, {
+    lease_id: leaseID, state: "succeeded", summary: "test",
+    snapshot: { health: { healthy: true }, operations: { operation_id: payload.operation_id, resource_id: payload.resource.id, data: { healthy: true, running: true, containers: [{ running: true }], configuration_matches: true } } },
+  });
+  assert.equal(f.instance(a.id).state, "running");
+  const redeploy = await f.action(a, "deploy");
+  assert.equal(redeploy.status, 409);
+  assert.match(String(redeploy.body.error), /privileged_execution_pending/);
+});
+
+test("verify dispatch refusals defer reconciliation instead of crash-looping", async t => {
+  const f = await fixture(t, true);
+  f.db.run("UPDATE agents SET heartbeat=? WHERE id='a'", JSON.stringify({ operations_capabilities: ["operations.platform.reconciliation.v1"] }));
+  const c = f.createCluster(), a = f.app(c);
+  await f.action(a, "deploy");
+  f.finish("a");
+
+  await f.action(a, "deploy");
+  const apply = f.jobs.claim("a", CAPABILITIES)!;
+  assert.ok(apply);
+  f.advance(46000);
+  f.jobs.expireLeases?.();
+  assert.equal(f.instance(a.id).state, "unknown");
+
+  // A pending agent update refuses every enqueue, including read-only ones.
+  if (!f.db.get("SELECT 1 FROM sqlite_master WHERE name='machine_agent_updates'"))
+    f.db.exec("CREATE TABLE machine_agent_updates(id TEXT PRIMARY KEY, agent_id TEXT, machine_id TEXT, status TEXT)");
+  f.db.run("INSERT INTO machine_agent_updates VALUES('upd-1','a','ma','running')");
+
+  f.advance(31000);
+  f.heartbeat();
+  await f.reconciliation.tick();
+  const resource = f.db.get<any>("SELECT state,code FROM reconciliation_resources WHERE resource_key=?", f.instance(a.id).id);
+  assert.equal(resource.state, "pending");
+  assert.equal(resource.code, "verify_dispatch_deferred");
+});
