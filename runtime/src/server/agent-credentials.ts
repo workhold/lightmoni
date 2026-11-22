@@ -212,7 +212,7 @@ export function registerAgentCredentials(
     const allowed = input.allowed_arch == null ? ["amd64", "arm64"] : input.allowed_arch;
     if (!Array.isArray(allowed) || !allowed.length || allowed.some((a) => !ARCHES.has(a)))
       fail(400, "allowed_arch must contain amd64 or arm64");
-    const version = asString(input.version ?? "0.1.22", 64, "version");
+    const version = asString(input.version ?? "0.1.23", 64, "version");
     if (!VERSION.test(version)) fail(400, "invalid version");
     const requested = Number(input.expires_in_seconds ?? DEFAULT_ENROLLMENT_SECONDS);
     if (!Number.isSafeInteger(requested) || requested < 60)

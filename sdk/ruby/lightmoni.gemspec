@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name = 'lightmoni-sdk'
-  s.version = '0.1.22'
+  s.version = '0.1.23'
   s.summary = 'Bounded OTLP/HTTP telemetry for LightMoni'
   s.authors = ['LightMoni']
   s.required_ruby_version = '>= 2.7'
