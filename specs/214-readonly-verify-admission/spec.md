@@ -25,6 +25,7 @@ SDD213（PR #305，0.1.23）部署生产后验证发现：自动只读核实仍�
 - **FR-002**：写任务的准入行为与错误码不变。
 - **FR-003**：registry provider 的 verify 派发失败返回 `pending`/`verify_dispatch_deferred` 并 `logger.warn` 记录原因；成功路径与既有 proof 消费不变。
 - **FR-004**：回归测试覆盖验收 1–3，且在未修复代码上失败。
+- **FR-005**（0.1.26 生产验证后追加）：受管链路的另外两层同样只豁免只读观测——桥接 `enqueueManaged → idle()` 对只读任务跳过 unknown 占道判定（queued/running 占道仍阻塞）；签名 claim 入口不再因执行器存在未解决 unknown 而整体拒绝，仅跳过写任务（`state='running'` 仍整体让道），claim 循环的 `idle()` 按载荷任务分类。`prepare()` 在候选被 unknown 围栏拒绝时继续扫描后续候选，避免旧写任务永久遮蔽只读巡检。
 
 ## 架构影响
 
