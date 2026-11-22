@@ -2474,7 +2474,7 @@ unknown 的 GET 返回 recovery_revision，绑定原操作、审批计划及平�
 
 旧普通应用至少排空 30 秒，且全部相关已发布网关确认新 bundle 后才停止。OpenResty 入口等待 DNS 提供商写入及回读确认后至少一个 600 秒 TTL 再清理；DNS 失败保留旧进程。排空期限持久保存，中心重启不提前清理；不保证外部客户端无限缓存或数据复制。
 
-手动与托管应用均支持 `health`：HTTP/TCP、声明 TCP 端口名、路径、`interval_seconds`（5–3600，默认 30）、`timeout_seconds`（1–30，默认 3）、`expected_statuses`（默认 `[200]`）。Agent apply/inspect 共用检查；HTTP GET 仅访问本机已授权端口派生的地址，不跟随重定向，仅白名单状态码成功，拒绝协议相对路径、反斜线、控制字符。配置检查时要求常驻容器运行和初始化成功，再以应用检查决定 ready；无配置沿用容器运行及 Docker 健康状态。中心按配置间隔持续 inspect，检查配置进入既有签名快照，不扩大凭据边界。发布启动就绪最多等待 300 秒，每秒重试且支持取消；未通过前不发布替换。健康检查作业要求 `operations.platform.readiness.v1` 能力，旧 Agent 不能领取；中心与 Agent 需一起升级，防止旧 Agent 忽略状态码/超时却报告 ready。
+手动与托管应用均支持 `health`：HTTP/TCP、声明 TCP 端口名、路径、`interval_seconds`（5–3600，默认 30）、`timeout_seconds`（1–30，默认 3）、`expected_statuses`（未配置时默认接受全部 2xx/3xx；显式配置仍为精确白名单，SDD213）。Agent apply/inspect 共用检查；HTTP GET 仅访问本机已授权端口派生的地址，不跟随重定向；显式白名单仅匹配所列状态码，默认判定接受 2xx/3xx（重定向应答同样证明服务存活），拒绝协议相对路径、反斜线、控制字符。配置检查时要求常驻容器运行和初始化成功，再以应用检查决定 ready；无配置沿用容器运行及 Docker 健康状态。中心按配置间隔持续 inspect，检查配置进入既有签名快照，不扩大凭据边界。发布启动就绪最多等待 300 秒，每秒重试且支持取消；未通过前不发布替换。健康检查作业要求 `operations.platform.readiness.v1` 能力，旧 Agent 不能领取；中心与 Agent 需一起升级，防止旧 Agent 忽略状态码/超时却报告 ready。
 
 ```mermaid
 flowchart LR
@@ -3003,3 +3003,14 @@ AI 助手确认 turn 的服务器执行信号只由内部取消控制器和模�
 ## 203. 已恢复 Agent 的残留生命周期锁闭环（SDD203）
 
 当恢复流程返回 `rollback_failed/recovery_original_unhealthy`、但远端 Agent 已回到审批原发行时，只读核对可在确认更新 worker 停止后清理残留 lifecycle lock。中心先固定只读核验 Agent 身份、原发行指纹、运行模式、权限代次、helper、服务状态和原发行一致性，再核验更新单元 inactive/not-found、cgroup 为空且无 worker 进程；仅当唯一阻碍是 lifecycle lock 时才执行固定清理，并立即重新 probe。成功后记录清理前后证据并把原记录闭环为 `rolled_back`；worker 运行、任务锁存在、身份或发行漂移都会拒绝，不清理锁、不重放维护。
+
+## 213. 应用状态只由已验证观测决定（SDD213）
+
+应用卡片状态的原则收紧为：实例状态只能被已验证的观测改写；任务投递层的瞬时故障（租约超时、执行环境抖动）最多把卡片降级为「待核实」，链路恢复后自动回到真实状态；只有链路真断或观测证实应用真坏才保持异常。该原则落地为四条中心侧行为：
+
+1. **unknown 自动只读核实**。实例 `state='unknown'` 或 Agent 存在 unknown 阻塞任务时，deployment.instance 调和器不再直接返回 blocked，而是在冷却窗口（30 秒，按实例 `updated_at`）后自动派发带 reconciliation 哈希的只读 `workload.inspect`；写操作围栏语义不变——unknown 写结果仍不得盲目重试，观测证实漂移仍走人工审核。旧版 Agent（无 `operations.platform.reconciliation.v1` 能力）维持既有 tick 巡检自愈，两条路径按能力分工，不重复派发。巡检证实 `configuration_matches && healthy` 后实例回到 `running`、`unresolved_run_id` 消失，无需人工「修复 Agent」。
+2. **迟到只读回执**。租约清扫把任务置为 unknown 时保留原 `lease_id`；`.inspect`/`.logs` 只读任务在 10 分钟窗口内收到携带原 lease 的终态回执时，中心接受其作为已验证事实，把任务从 unknown 转为 succeeded/failed 并写审计事件（与第 116 章受管执行器的签名核对同一原则的普通任务通道版本）。写任务的迟到回执仍被拒收，人工恢复闭环不变；事件通道对 unknown 依旧封闭。
+3. **执行环境失败不打 failed**。非 inspect 任务以命令层基础设施错误码（`operation_command_timeout`、`operation_dependency_unavailable`、`docker_permission_denied`、`docker_daemon_unavailable`，与 Agent 命令映射一致）失败时，实例回落到最后一次成功回执的观测状态（`observed_json` 仅在成功时前进；从未验证过则保留原状态，不伪造 running），`healthy=0`、`health_failures` 递增，可用性层降级为 grace/待核实，由既有 repair 重试恢复。业务性失败码与观测证据 `running===false` 仍按原语义落 `failed`/`stopped`。
+4. **HTTP 探针默认 2xx/3xx**。未显式配置 `expected_statuses` 时默认接受全部 2xx/3xx（重定向应答证明服务存活），显式白名单语义不变，仍不跟随重定向（见第 93 章健康检查段落）。
+
+以上均为中心侧行为，无数据库迁移、新接口或 Agent 协议变化；unknown 写围栏、人工核对流程与审计路径全部保留。规格与验收见 [SDD213](../specs/213-application-status-truth/spec.md)。

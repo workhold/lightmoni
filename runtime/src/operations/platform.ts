@@ -543,9 +543,9 @@ export async function checkReadiness(
   context.signal.throwIfAborted();
   if (config.health.type === "http") {
     const path = config.health.path ?? '/';
-    const statuses = config.health.expected_statuses ?? [200];
+    const statuses = config.health.expected_statuses ?? undefined;
     if (typeof path !== 'string' || !path.startsWith('/') || /^\/\/|[\x00-\x20\x7f\\#]/.test(path) || path.length > 2048) reject('INVALID_HEALTH_PATH');
-    if (!Array.isArray(statuses) || !statuses.length || statuses.length > 20 || new Set(statuses).size !== statuses.length || statuses.some(n => !Number.isInteger(n) || n < 200 || n > 599)) reject('INVALID_HEALTH_STATUSES');
+    if (statuses !== undefined && (!Array.isArray(statuses) || !statuses.length || statuses.length > 20 || new Set(statuses).size !== statuses.length || statuses.some(n => !Number.isInteger(n) || n < 200 || n > 599))) reject('INVALID_HEALTH_STATUSES');
     try {
       const response = await fetch(
         "http://" + (isIP(host) === 6 ? "[" + host + "]" : host) + ":" + p + path,
@@ -555,7 +555,11 @@ export async function checkReadiness(
         },
       );
       await response.body?.cancel();
-      return statuses.includes(response.status);
+      // Without explicit expected statuses any 2xx/3xx proves the service
+      // lives: gateways legitimately answer a redirect (HTTP→HTTPS, login).
+      return statuses !== undefined
+        ? statuses.includes(response.status)
+        : response.status >= 200 && response.status < 400;
     } catch {
       return false;
     }

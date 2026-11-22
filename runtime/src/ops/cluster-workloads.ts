@@ -43,6 +43,15 @@ import type {
 } from "./types.js";
 
 type Row = Record<string, any>;
+// Receipt codes produced by the agent's command layer (runtime/src/agent/operations.ts)
+// when the execution environment itself failed: the docker CLI/daemon being
+// unavailable or a command timeout proves nothing about the workload.
+const EXECUTION_ENVIRONMENT_FAILURES = new Set([
+  "operation_command_timeout",
+  "operation_dependency_unavailable",
+  "docker_permission_denied",
+  "docker_daemon_unavailable",
+]);
 const ACTIVE = new Set([
   "queued",
   "leased",
@@ -2524,7 +2533,8 @@ export function createClusterWorkloads(
     if (!["succeeded", "failed", "unknown", "cancelled"].includes(run.state))
       return;
     const inspection = /\.(inspect|logs)$/.test(config.task),
-      logs = config.task.endsWith(".logs");
+      logs = config.task.endsWith(".logs"),
+      code = String(update.code ?? run.result.code ?? "");
     let state = i.state,
       healthy = i.healthy,
       observed = i.observed_generation,
@@ -2589,7 +2599,20 @@ export function createClusterWorkloads(
     } else if (run.state === "cancelled" && i.observed_generation) {
       state = "running";
     } else if (!logs) {
-      if (!inspection) state = run.state === "unknown" ? "unknown" : "failed";
+      // Execution-environment failures (docker CLI/daemon/timeout, from the
+      // agent's command mapping) say nothing about the workload itself: fall
+      // back to the last verified observation (observed_json only advances on
+      // successful receipts), let availability degrade the card to
+      // "unverified" and let the regular repair retry observe real fact.
+      if (!inspection && run.state === "failed" && EXECUTION_ENVIRONMENT_FAILURES.has(code)) {
+        let observation: Row = {};
+        try { observation = JSON.parse(i.observed_json || "{}"); } catch {}
+        if (observation.running === true || Array.isArray(observation.containers) && observation.containers.some((c: Row) => c.running === true))
+          state = "running";
+        else if (observation.running === false || Array.isArray(observation.containers) && observation.containers.length && observation.containers.every((c: Row) => c.running === false))
+          state = "stopped";
+      } else if (!inspection)
+        state = run.state === "unknown" ? "unknown" : "failed";
       healthy = 0;
     }
     const failed = !logs && (run.state !== "succeeded" || i.desired_state === 'running' && !healthy);
@@ -2611,8 +2634,7 @@ export function createClusterWorkloads(
       i.id,
     );
     const app = store.get(i.owner_id, "application"),
-      a = desired(app, i.cluster_id),
-      code = String(update.code ?? run.result.code ?? "");
+      a = desired(app, i.cluster_id);
     if (
       run.state === "failed" &&
       code === "HOST_PORT_OCCUPIED" &&
@@ -3285,7 +3307,6 @@ export function createClusterWorkloads(
       const i=row(r.key);
       if(!i||r.deleted)return {state:'blocked',code:'cleanup_ownership_required'};
       if(machine(r.machine_id).agent_id!==r.agent_id||i.agent_id!==r.agent_id)return {state:'blocked',code:'agent_binding_changed'};
-      if(i.state==='unknown')return {state:'blocked',code:'unknown_execution_result'};
       if(!online(r.agent_id))return {state:'pending',code:'agent_offline'};
       if(!operationExecutionCapabilities(deps,r.agent_id).includes('operations.platform.reconciliation.v1'))return {state:'blocked',code:'reconciliation_agent_upgrade_required'};
       if(busy(i))return {state:'pending',code:'deployment_busy',job_id:i.current_run_id};
@@ -3308,16 +3329,29 @@ export function createClusterWorkloads(
       const result=proof?JSON.parse(proof.result_json):{};
       const inspecting=config.reconciliation_hash===r.desired_hash&&config.task?.endsWith('.inspect');
       const verify=()=>{const run=inspect(a,i,r.actor,{hash:r.desired_hash,config:{...(r.desired.state==='running'?r.desired.config:{}),reconciliation_resource_id:r.id,reconciliation_generation:r.generation}});return {state:'pending' as const,code:'verifying_deployment',job_id:run?.id};};
+      // An unknown execution result is a delivery fact, not a workload fact.
+      // Read-only verification replaces the manual agent-recovery round trip;
+      // writes stay fenced until the unknown job itself is resolved. The
+      // cooldown bounds re-inspection when receipts keep going missing.
+      const verifyUnknown=()=>{
+        if(deps.now().getTime()-Date.parse(i.updated_at)<30000)
+          return {state:'pending' as const,code:'unknown_verification_cooldown',job_id:r.job_id};
+        return verify();
+      };
+      if(i.state==='unknown')return verifyUnknown();
       const verified=inspecting && r.state!=='in_sync' && proof?.state==='succeeded' && deps.now().getTime()-Date.parse(proof.updated_at)<60000;
+      // Consuming a completed observation needs no machine execution slot.
       if(verified) {
         const stopped=result.running===false || Array.isArray(result.containers)&&result.containers.every((c:Row)=>!c.running);
         const removed=result.present===false || Array.isArray(result.containers)&&result.containers.length===0;
         if(r.desired.state==='running'?result.configuration_matches===true&&result.healthy===true&&!stopped:r.desired.state==='removed'?removed:stopped)
           return {state:'in_sync',job_id:proof.id};
       }
-      // Consuming a completed observation needs no machine execution slot.
       const locked=db.get<Row>(`SELECT id,state FROM agent_jobs j WHERE agent_id=? AND ${blockingAgentJobSQL(db,'j')} LIMIT 1`,r.agent_id);
-      if(locked)return {state:locked.state==='unknown'?'blocked':'pending',code:locked.state==='unknown'?'unknown_execution_result':'machine_busy',job_id:r.job_id};
+      if(locked&&locked.state!=='unknown')return {state:'pending',code:'machine_busy',job_id:r.job_id};
+      // An unknown job fences writes, not reads: keep verifying read-only so
+      // the published status reflects observation instead of the lost receipt.
+      if(locked)return verifyUnknown();
       if(verified) {
         if(r.failures>=recoveryFailureLimit)return {state:'blocked',code:'deployment_recovery_exhausted',job_id:proof!.id};
         return repair();
