@@ -53,6 +53,9 @@ test("host-scoped create/update require static before/after targets and revoke p
 test("internal create/update use the same dispatcher and proposal service",async()=>{
  const f=fixture();try{
   const tool=f.dispatcher.assistantTools().find(t=>t.name==="propose_task_action")!;
+  const normalized=await tool.execute({operation:"task.create",task:{...definition("Normalized targets"),host_ids:[]},host_ids:["one"],reason:"create"},new AbortController().signal,admin,{session_id:"session-normalized"});
+  f.dispatcher.proposals.apply(admin,normalized.proposal.id);
+  assert.deepEqual(f.runs.nodes.getTask(normalized.proposal.task_id).host_ids,["one"]);
   const created=await tool.execute({operation:"task.create",task:definition("Internal script"),reason:"create"},new AbortController().signal,admin,{session_id:"session-one"});
   assert.equal(f.dispatcher.proposals.source(admin,created.proposal.id)?.source,"assistant");assert.throws(()=>f.runs.nodes.getTask(created.proposal.task_id));
   f.dispatcher.proposals.apply(admin,created.proposal.id);
