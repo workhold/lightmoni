@@ -1,6 +1,6 @@
 {
   "name": "@lightmoni/sdk",
-  "version": "0.1.27",
+  "version": "0.1.28",
   "type": "module",
   "description": "Bounded OTLP/HTTP telemetry for LightMoni",
   "license": "Apache-2.0",
