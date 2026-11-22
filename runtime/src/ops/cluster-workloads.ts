@@ -3328,7 +3328,17 @@ export function createClusterWorkloads(
       const config=proof?JSON.parse(deps.decrypt(proof.payload_cipher)).resource.config:{};
       const result=proof?JSON.parse(proof.result_json):{};
       const inspecting=config.reconciliation_hash===r.desired_hash&&config.task?.endsWith('.inspect');
-      const verify=()=>{const run=inspect(a,i,r.actor,{hash:r.desired_hash,config:{...(r.desired.state==='running'?r.desired.config:{}),reconciliation_resource_id:r.id,reconciliation_generation:r.generation}});return {state:'pending' as const,code:'verifying_deployment',job_id:run?.id};};
+      const verify=()=>{
+        try {
+          const run=inspect(a,i,r.actor,{hash:r.desired_hash,config:{...(r.desired.state==='running'?r.desired.config:{}),reconciliation_resource_id:r.id,reconciliation_generation:r.generation}});
+          return {state:'pending' as const,code:'verifying_deployment',job_id:run?.id};
+        } catch(error) {
+          // An admission refusal (fence, upgrade, lane) must defer verification
+          // instead of surfacing as a reconciliation crash loop.
+          deps.logger.warn('deployment verify dispatch deferred',r.key,error instanceof Error?error.message:String(error));
+          return {state:'pending' as const,code:'verify_dispatch_deferred',job_id:r.job_id};
+        }
+      };
       // An unknown execution result is a delivery fact, not a workload fact.
       // Read-only verification replaces the manual agent-recovery round trip;
       // writes stay fenced until the unknown job itself is resolved. The
