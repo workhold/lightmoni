@@ -347,8 +347,11 @@
 
 .lm-assistant-category-manage{display:flex;align-items:center;gap:6px;border:0;background:none;color:var(--lm-muted);font:inherit;font-size:11px;padding:3px 5px;border-radius:6px;cursor:pointer;text-align:left}.lm-assistant-category-manage:hover{background:color-mix(in srgb,var(--lm-muted) 10%,transparent);color:var(--lm-text)}
 .lm-assistant-category-manager{display:grid;gap:4px;max-height:min(48vh,420px);overflow:auto}
-.lm-assistant-category-manager-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:8px;padding:5px 6px;border-radius:8px}
+.lm-assistant-category-manager-row{display:grid;grid-template-columns:minmax(0,1fr) auto auto auto;align-items:center;gap:4px;padding:5px 6px;border-radius:8px}
 .lm-assistant-category-manager-row:hover{background:color-mix(in srgb,var(--lm-muted) 10%,transparent)}
 .lm-assistant-category-manager-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .lm-assistant-category-manager-row small{color:var(--lm-muted)}
 .lm-assistant-category-delete-confirm p{margin:0 0 10px}
+
+.lm-assistant-category-rename{display:grid;gap:10px}
+.lm-assistant-category-rename p{margin:0}

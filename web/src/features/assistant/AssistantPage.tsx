@@ -4,7 +4,7 @@ import {chinese} from '../alerts/translation';
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {useNavigate} from 'react-router-dom';
 import {MessageScroller} from '@shadcn/react/message-scroller';
-import { ArrowUpOutlined, CheckOutlined, CloseOutlined, CodeOutlined, CopyOutlined, DeleteOutlined, FolderOutlined, FilePdfOutlined, HistoryOutlined, LoadingOutlined, MessageOutlined, PaperClipOutlined, PictureOutlined, PlusOutlined, PicRightOutlined, ReloadOutlined, SettingOutlined, SlidersOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { ArrowUpOutlined, CheckOutlined, CloseOutlined, CodeOutlined, CopyOutlined, DeleteOutlined, EditOutlined, FolderOutlined, FilePdfOutlined, HistoryOutlined, LoadingOutlined, MessageOutlined, PaperClipOutlined, PictureOutlined, PlusOutlined, PicRightOutlined, ReloadOutlined, SettingOutlined, SlidersOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import XMarkdown, { type ComponentProps } from '@ant-design/x-markdown';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
@@ -245,21 +245,20 @@ function CategoryField({value,options,className,onCommit,ariaLabel,placeholder,d
   />;
 }
 
-function CategoryManager({baseCategories,sessions,onRequestDelete}:{baseCategories:{key:string;value:string}[];sessions:{category?:string}[];onRequestDelete:(value:string)=>void}) {
+function CategoryManager({categories,onRequestDelete,onRequestRename}:{categories:{value:string;count:number;baseKey?:string}[];onRequestDelete:(value:string)=>void;onRequestRename:(value:string)=>void}) {
   const {t}=useI18n(),[open,setOpen]=useState(false);
-  const values=[...new Set([...baseCategories.map(item=>item.value),...sessions.map(session=>session.category?.trim()||"").filter(Boolean)])];
   return <>
     <button type="button" className="lm-assistant-category-manage" onClick={()=>setOpen(true)}><SlidersOutlined aria-hidden="true"/><span>{t("管理分类","Manage categories")}</span></button>
     <Modal open={open} title={t("管理分类","Manage categories")} footer={null} onCancel={()=>setOpen(false)} destroyOnHidden>
       <div className="lm-assistant-category-manager">
-        {values.map(value=>{
-          const count=sessions.filter(session=>(session.category?.trim()||"")===value).length;
-          return <div className="lm-assistant-category-manager-row" key={value}>
-            <span className="lm-assistant-category-manager-name">{value}</span>
-            <small>{t(`${count} 个对话`,`${count} conversations`)}</small>
-            <Button type="text" size="small" danger icon={<DeleteOutlined/>} aria-label={t(`删除分类 ${value}`,`Delete category ${value}`)} onClick={()=>onRequestDelete(value)}/>
-          </div>;
-        })}
+        {categories.map(item=>(
+          <div className="lm-assistant-category-manager-row" key={item.value}>
+            <span className="lm-assistant-category-manager-name">{item.value}</span>
+            <small>{t(`${item.count} 个对话`,`${item.count} conversations`)}</small>
+            <Button type="text" size="small" icon={<EditOutlined/>} aria-label={t(`重命名分类 ${item.value}`,`Rename category ${item.value}`)} onClick={()=>onRequestRename(item.value)}/>
+            <Button type="text" size="small" danger icon={<DeleteOutlined/>} aria-label={t(`删除分类 ${item.value}`,`Delete category ${item.value}`)} onClick={()=>onRequestDelete(item.value)}/>
+          </div>
+        ))}
       </div>
     </Modal>
   </>;
@@ -304,8 +303,11 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const [newCategory, setNewCategory] = useState("");
   const [deletingIds, setDeletingIds] = useState<string[]>([]);
   const [hiddenBaseCategories,setHiddenBaseCategories]=useState<string[]>([]);
+  const [customCategories,setCustomCategories]=useState<string[]>([]);
   const [categoryDelete,setCategoryDelete]=useState<{value:string;count:number;baseKey?:string}>();
   const [deletingCategory,setDeletingCategory]=useState(false);
+  const [categoryRename,setCategoryRename]=useState<{value:string;next:string;count:number;baseKey?:string}>();
+  const [renamingCategory,setRenamingCategory]=useState(false);
   const [inspectorTab,setInspectorTab]=useState<WorkbenchTab>('context');
   const [selectedArtifact,setSelectedArtifact]=useState<string>();
   const [inspectorOpen,setInspectorOpen]=useState(!compact);
@@ -468,14 +470,23 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     {key:'research',value:t("研究","Research")},
   ],[t]);
   const hiddenCategoryStorageKey=user?`lightmoni.assistant.hiddenCategories.${user.id}`:'';
-  useEffect(()=>{if(!user)return;try{const raw=localStorage.getItem(`lightmoni.assistant.hiddenCategories.${user.id}`);setHiddenBaseCategories(raw?JSON.parse(raw):[]);}catch{setHiddenBaseCategories([]);}},[user]);
+  useEffect(()=>{if(!user)return;try{const hidden=localStorage.getItem(`lightmoni.assistant.hiddenCategories.${user.id}`);const custom=localStorage.getItem(`lightmoni.assistant.customCategories.${user.id}`);setHiddenBaseCategories(hidden?JSON.parse(hidden):[]);setCustomCategories(custom?JSON.parse(custom):[]);}catch{setHiddenBaseCategories([]);setCustomCategories([]);}},[user]);
   const categoryOptions=useMemo(()=>{
     const suggested=baseCategories.filter(item=>!hiddenBaseCategories.includes(item.key)).map(item=>item.value);
     const used=sessions.map(session=>session.category?.trim()||"").filter(Boolean);
-    const values=[...new Set([t("未分类","Uncategorized"),...suggested,...used])];
+    const values=[...new Set([t("未分类","Uncategorized"),...suggested,...customCategories,...used])];
     return values.map(value=>({value:value===t("未分类","Uncategorized")?"":value,label:categoryLabel(value)}));
-  },[baseCategories,hiddenBaseCategories,sessions,t]);
+  },[baseCategories,customCategories,hiddenBaseCategories,sessions,t]);
   const categoryOptionsFor=(value?:string)=>categoryOptions.some(option=>option.value===(value||""))?categoryOptions:[...categoryOptions,{value:value||"",label:categoryLabel(value)}];
+  const managedCategories=useMemo(()=>{
+    const values=[...new Set([
+      ...baseCategories.filter(item=>!hiddenBaseCategories.includes(item.key)).map(item=>item.value),
+      ...customCategories,
+      ...sessions.map(session=>session.category?.trim()||"").filter(Boolean),
+    ])];
+    return values.map(value=>({value,count:sessions.filter(session=>(session.category?.trim()||"")===value).length,baseKey:baseCategories.find(item=>item.value===value)?.key}));
+  },[baseCategories,customCategories,hiddenBaseCategories,sessions]);
+
   function requestDeleteCategory(value:string){
     const normalized=value.trim();
     if(!normalized)return;
@@ -501,6 +512,57 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     }
     catch(problem){setError(errorText(problem,t));void message.error(errorText(problem,t));}
     finally{setDeletingCategory(false);}
+  }
+  function updateCustomCategories(update:(values:string[])=>string[]){
+    setCustomCategories(previous=>{
+      const next=update(previous);
+      try{localStorage.setItem(`lightmoni.assistant.customCategories.${user?.id}`,JSON.stringify(next));}catch{}
+      return next;
+    });
+  }
+  function requestRenameCategory(value:string){
+    const normalized=value.trim();
+    if(!normalized)return;
+    setCategoryRename({value:normalized,next:normalized,count:sessions.filter(session=>(session.category?.trim()||"")===normalized).length,baseKey:baseCategories.find(item=>item.value===normalized)?.key});
+  }
+  async function renameCategory(){
+    const target=categoryRename;
+    if(!target)return;
+    const next=target.next.trim();
+    if(!next||next===target.value||new TextEncoder().encode(next).length>32)return;
+    setRenamingCategory(true);
+    try {
+      if(target.count>0){
+        const result=await api<{updated_count:number;skipped_count:number;skipped_session_ids:string[]}>(`/assistant/categories/${encodeURIComponent(target.value)}`,{method:'PATCH',body:JSON.stringify({category:next})});
+        setSessions(previous=>previous.map(session=>(session.category?.trim()||"")===target.value&&!result.skipped_session_ids.includes(session.id)?{...session,category:next}:session));
+        if(result.updated_count>0||result.skipped_count===0){
+          updateCustomCategories(previous=>[...new Set([...(target.baseKey&&result.skipped_count===0&&target.baseKey?[...previous]:previous.filter(value=>value!==target.value)),next])]);
+          if(target.baseKey&&result.skipped_count===0){
+            setHiddenBaseCategories(previous=>{
+              const nextHidden=[...new Set([...previous,target.baseKey!])];
+              try{localStorage.setItem(`lightmoni.assistant.hiddenCategories.${user?.id}`,JSON.stringify(nextHidden));}catch{}
+              return nextHidden;
+            });
+          }
+        }
+        setCategoryRename(undefined);
+        if(result.skipped_count)void message.warning(t(`分类已部分重命名；${result.skipped_count} 个正在响应的对话保持原分类`, `Category partially renamed; ${result.skipped_count} responding conversations kept their category`));
+        else void message.success(t('分类已重命名','Category renamed'));
+      } else {
+        if(target.baseKey){
+          setHiddenBaseCategories(previous=>{
+            const nextHidden=[...new Set([...previous,target.baseKey!])];
+            try{localStorage.setItem(`lightmoni.assistant.hiddenCategories.${user?.id}`,JSON.stringify(nextHidden));}catch{}
+            return nextHidden;
+          });
+        }
+        updateCustomCategories(previous=>[...new Set([...previous.filter(value=>value!==target.value),next])]);
+        setCategoryRename(undefined);
+        void message.success(t('分类建议已重命名','Category suggestion renamed'));
+      }
+    }
+    catch(problem){setError(errorText(problem,t));void message.error(errorText(problem,t));}
+    finally{setRenamingCategory(false);}
   }
   async function updateSessionCategory(id:string,category:string){
     try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"PATCH",body:JSON.stringify({category})}); setSessions(previous=>previous.map(session=>session.id===id?{...session,category}:session)); if(selectedSession.current===id)void loadSession(id); }
@@ -530,7 +592,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
           placeholder={t("输入新分类，回车确认","Type a category, then press Enter")}
         />
       </label>
-      <CategoryManager baseCategories={baseCategories} sessions={sessions} onRequestDelete={requestDeleteCategory}/>
+      <CategoryManager categories={managedCategories} onRequestDelete={requestDeleteCategory} onRequestRename={requestRenameCategory}/>
       {groups.map(category=>{
         const items=visible.filter(session=>(session.category?.trim()||"")===category);
         return <section className="lm-assistant-history-group" key={category||"uncategorized"}>
@@ -618,6 +680,23 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     {!compact&&!narrow&&inspectorOpen&&<WorkbenchInspector tab={inspectorTab} onTabChange={setInspectorTab} context={context} session={selectedSessionData} categoryLabel={categoryLabel(selectedSessionData?.category)} running={sessionRunning} model={config?.model} turns={turns} selectedArtifact={selectedArtifact} onSelectArtifact={id=>{setSelectedArtifact(id);setInspectorTab('artifacts');}} onOpenDashboard={openDraft} onUseSql={sql=>{onSQL?.(sql);void message.success(t('SQL 已填入查询编辑器','SQL moved to the query editor'));}} onNavigate={url=>navigate(url)}/>}
     <Drawer title={t('助手检查器','Assistant inspector')} className="lm-inspector-drawer" open={inspectorOpen&&(compact||narrow)} onClose={()=>setInspectorOpen(false)} size="default" destroyOnHidden>{(compact||narrow)&&<WorkbenchInspector tab={inspectorTab} onTabChange={setInspectorTab} context={context} session={selectedSessionData} categoryLabel={categoryLabel(selectedSessionData?.category)} running={sessionRunning} model={config?.model} turns={turns} selectedArtifact={selectedArtifact} onSelectArtifact={id=>{setSelectedArtifact(id);setInspectorTab('artifacts');}} onOpenDashboard={value=>{openDraft(value);setInspectorOpen(false);}} onUseSql={sql=>{onSQL?.(sql);setInspectorOpen(false);}} onNavigate={url=>{navigate(url);setInspectorOpen(false);}}/>}</Drawer>
     <Drawer title={t("对话历史","Conversation history")} open={historyOpen} onClose={() => setHistoryOpen(false)} size="default" destroyOnHidden>{historyContent()}</Drawer>
+    <Modal
+      open={!!categoryRename}
+      title={t("重命名分类","Rename category")}
+      onCancel={()=>{if(!renamingCategory)setCategoryRename(undefined);}}
+      confirmLoading={renamingCategory}
+      okText={t("重命名","Rename")}
+      cancelText={t("取消","Cancel")}
+      destroyOnHidden
+      onOk={()=>void renameCategory()}
+      okButtonProps={{disabled:!categoryRename?.next.trim()||categoryRename.next.trim()===categoryRename.value||(new TextEncoder().encode(categoryRename.next.trim())).length>32}}
+    >
+      {categoryRename&&<div className="lm-assistant-category-rename">
+        <p><strong>{categoryRename.value}</strong></p>
+        <Input aria-label={t('新分类名','New category name')} value={categoryRename.next} onChange={event=>setCategoryRename({...categoryRename,next:event.target.value})} placeholder={t('输入新分类名','Enter a new category name')} />
+        <Alert showIcon type="info" title={categoryRename.count?t(`有 ${categoryRename.count} 个对话将使用新分类`,`${categoryRename.count} conversations will use the new category`):t('该分类当前没有对话','No conversations currently use this category')} description={t('目标分类已存在时会合并。对话、消息和附件都会保留。','Existing target categories are merged. Conversations, messages and attachments are preserved.')} />
+      </div>}
+    </Modal>
     <Modal
       open={!!categoryDelete}
       title={t("删除分类","Delete category")}
