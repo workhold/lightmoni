@@ -66,7 +66,7 @@ test('platform restart retains the durable Docker installation fence and status 
  db.run('INSERT INTO machine_docker_installations(id,machine_id,agent_id,request_id,credential_id,state,phase,code,created_by,created_at,updated_at,ssh_account_json,credential_revision,target_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)','a'.repeat(32),'machine','agent','request-0001','credential','running','installing_packages','','admin',new Date().toISOString(),new Date().toISOString(),JSON.stringify({id:'fixture-account',username:'root',revision:1}),'revision','target');
  await service.close();db.close();db=new DB(path);service=make();
  const pending=pendingDockerInstallation(db,'machine');assert.equal(pending.state,'unknown');assert.equal(pending.code,'docker_install_result_unavailable');await service.close();
- const command=dockerInstallStatusCommand('a'.repeat(32));assert.doesNotMatch(command,/mkdir|systemd-run|install\.sh/);assert.match(command,/state.*unknown/);assert.match(command,/docker_install_not_started/);
+ const command=dockerInstallStatusCommand('a'.repeat(32));assert.doesNotMatch(command,/mkdir|systemd-run|install\.sh/);assert.match(command,/state.*unknown/);assert.match(command,/docker_install_not_started/);assert.match(command,/docker_install_status_missing/);
  }finally{db.close();rmSync(root,{recursive:true,force:true});}
 });
 
