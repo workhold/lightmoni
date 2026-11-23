@@ -47,6 +47,12 @@ const statusMeta=(status:TurnView['status'],t:Translator)=>({
 }[status]);
 
 function frameRows(result?:QueryResponse){return result?.results?.flatMap(item=>item.frames||[]).flatMap(frame=>frame.rows)||[];}
+// The run_query tool receipt wraps the response: {query: QueryResponse, range, ...}.
+function queryResponse(result:unknown):QueryResponse|undefined{
+ const value=result as {query?:QueryResponse;results?:QueryResponse['results']}|undefined;
+ const response=value?.query??value;
+ return Array.isArray(response?.results)?response as QueryResponse:undefined;
+}
 function artifactSummary(tool:import('./types').ToolTrace):string{
   const value=tool.result as Record<string,unknown>|undefined, input=tool.input as Record<string,unknown>|undefined;
   if(value&&typeof value==='object'){
@@ -151,7 +157,7 @@ export default function WorkbenchInspector({tab,onTabChange,context,session,cate
     <div className="lm-inspector-detail-head"><strong>{active.title}</strong><Tag color={statusMeta(active.status,t).color}>{statusMeta(active.status,t).label}</Tag></div>
     <p>{active.summary||t('暂无摘要。','No summary.')}</p>
     {active.sql&&<pre>{active.sql}</pre>}
-    {active.result&&<div className="lm-inspector-card"><strong>{t('查询结果','Query result')}</strong><p>{t(`${frameRows(active.result).length} 行 · ${active.result.results?.length||0} 个查询`,`${frameRows(active.result).length} rows · ${active.result.results?.length||0} queries`)}</p></div>}
+    {queryResponse(active.result)&&<div className="lm-inspector-card"><strong>{t('查询结果','Query result')}</strong><p>{t(`${frameRows(queryResponse(active.result)).length} 行 · ${queryResponse(active.result)?.results?.length||0} 个查询`,`${frameRows(queryResponse(active.result)).length} rows · ${queryResponse(active.result)?.results?.length||0} queries`)}</p></div>}
     {active.dashboard&&<div className="lm-inspector-card"><strong>{active.dashboard.title}</strong><p>{t(`${active.dashboard.panels.length} 个面板待审阅`,`${active.dashboard.panels.length} panels await review`)}</p><Button size="small" type="primary" onClick={()=>onOpenDashboard(active.dashboard!)}>{t('审阅大盘草稿','Review dashboard draft')}</Button></div>}
     {active.code&&<div className="lm-inspector-card"><strong>{t('代码任务','Code task')}</strong><p>{active.code.summary}</p><p>{active.code.changed_files.length} {t('个变更文件','changed files')}</p></div>}
     {active.reviewUrl&&<Button size="small" type="primary" onClick={()=>onNavigate(active.reviewUrl!)}>{t('打开原始记录','Open original record')}</Button>}

@@ -5,11 +5,18 @@ import { toolSummary, formatElapsed } from './tool-summary.ts';
 const en = (zh, enText) => enText ?? zh;
 
 test('run_query badges summarize rows, queries, elapsed and truncation', () => {
-  const result = { results: [
+  const results = [
     { refId: 'A', status: 'success', elapsed_ms: 12, truncated: false, frames: [{ columns: [{ name: 'n' }], rows: [[1], [2]] }] },
     { refId: 'B', status: 'success', elapsed_ms: 8, truncated: true, frames: [{ columns: [{ name: 'n' }], rows: [[3]] }] },
-  ] };
-  assert.deepEqual(toolSummary('run_query', result, en), [
+  ];
+  assert.deepEqual(toolSummary('run_query', { results }, en), [
+    { text: '2 queries' },
+    { text: '3 rows' },
+    { text: '20 ms' },
+    { kind: 'warn', text: 'Results truncated' },
+  ]);
+  // The real tool receipt wraps the response under `query` with range metadata.
+  assert.deepEqual(toolSummary('run_query', { query: { results }, range: {}, sample_limit: 1000 }, en), [
     { text: '2 queries' },
     { text: '3 rows' },
     { text: '20 ms' },

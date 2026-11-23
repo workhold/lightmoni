@@ -121,8 +121,29 @@ export async function createApp(cfg: Config) {
         readerPassword +
         "'",
     );
+    // Re-assert the derived password on every startup: CREATE IF NOT EXISTS
+    // alone leaves a stale password behind after ClickHouse state drifts (for
+    // example a restored data directory with a fresh master key), and queries
+    // would then fail with 403 even though ingestion still works.
+    await ch.exec(
+      "ALTER USER lightmoni_reader IDENTIFIED WITH sha256_password BY '" +
+        readerPassword +
+        "'",
+    );
     await ch.exec("ALTER USER lightmoni_reader SETTINGS readonly=2");
     const cat = new Catalog(db, ch, reader);
+    // Table grants were only issued while each table was registered; re-issue
+    // them for known tables so a drifted or restored ClickHouse user heals too.
+    for (const table of await cat.list()) {
+      try {
+        await ch.exec(
+          "GRANT SELECT ON lightmoni." + table.name + " TO lightmoni_reader",
+        );
+      } catch {
+        // The ClickHouse table may be gone while its catalog row remains;
+        // re-registration grants again when the table returns.
+      }
+    }
     const executor = new Executor(reader, cat),
       deps: Dependencies = {
         db,

@@ -12,7 +12,9 @@ export function toolSummary(name: string, result: unknown, t: Translator): ToolB
   const error = result && typeof result === 'object' ? (result as {error?: unknown}).error : undefined;
   if (typeof error === 'string' && error.trim()) return [{kind: 'error', text: error.length > 180 ? error.slice(0, 180) + '…' : error}];
   if (name === 'run_query') {
-    const results = (result as QueryResponse | undefined)?.results ?? [];
+    // The tool receipt wraps the response: {query: QueryResponse, range, ...}.
+    const payload = result as {query?: QueryResponse; results?: QueryResponse['results']} | undefined;
+    const results = payload?.query?.results ?? payload?.results ?? [];
     if (!Array.isArray(results) || !results.length) return [];
     const rows = results.reduce((total, item) => total + (item.frames ?? []).reduce((sum, frame) => sum + count(frame.rows), 0), 0);
     const elapsed = results.reduce((total, item) => total + (item.elapsed_ms ?? 0), 0);

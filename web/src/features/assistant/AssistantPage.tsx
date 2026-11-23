@@ -54,7 +54,10 @@ function formatUsage(usage: NonNullable<TurnView['usage']>,t:Translator=chinese)
   return counts.length ? counts.join(' · ') + ' tokens' : t("未报告 Token 数量","Token usage not reported");
 }
 function rangeFor(hours: number): TimeRange { const to = new Date(); return { from: new Date(to.getTime() - hours * 3_600_000).toISOString(), to: to.toISOString() }; }
-function errorText(error: unknown,t:Translator=chinese): string { return error instanceof Error ? error.message : t("操作失败，请重试","Operation failed. Please retry."); }
+function errorText(error: unknown,t:Translator=chinese): string {
+  if (error instanceof Error && /invalid request origin/i.test(error.message)) return t("请求来源校验失败：请通过平台配置的访问地址打开工作台后重试。","Request origin validation failed. Open the workbench through the configured platform address and retry.");
+  return error instanceof Error ? error.message : t("操作失败，请重试","Operation failed. Please retry.");
+}
 
 // Adapted from Doca ai-markdown.tsx (MIT; see NOTICE.md). Raw HTML and
 // auto-loading external media remain disabled when rendering telemetry text.
@@ -408,6 +411,9 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
           if(selectedSession.current===id)setEvents(merged);
           const last=merged.at(-1);
           if(last&&TERMINAL_EVENT_TYPES.includes(last.type))return true;
+          // A restart or crash leaves no terminal event; the derived session
+          // status leaving "running" means nothing is left to wait for.
+          if(session.status&&session.status!=='running')return true;
         } catch (problem) {
           if(signal.aborted)return false;
           if(++failures>=RECOVERY_FAILURES)return false;
