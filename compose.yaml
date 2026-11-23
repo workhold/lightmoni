@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:v0.1.31-20261123-020215-amd64
+    image: docker.heyphp.com/lightmoni/lightmoni:v0.1.32-20261123-024709-amd64
     pull_policy: missing
     build:
       context: .
