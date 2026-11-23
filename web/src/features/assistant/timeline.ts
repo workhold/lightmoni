@@ -30,6 +30,7 @@ export function assistantTimeline(events: AssistantEvent[],language:Language='zh
       stepAnswers.set(event.turn_id, new Map());
     }
     const data = event.data;
+    turn.startedAt ??= event.timestamp;
     if (event.type === 'user.message') {
       turn.text = String(data.text ?? '');
       turn.attachments = Array.isArray(data.attachments) ? data.attachments.filter((item): item is Attachment => !!item && typeof item === 'object' && typeof item.name === 'string' && (item.kind === 'image' || item.kind === 'pdf')).map(({kind,name,mime_type,pages}) => ({kind,name,mime_type,pages})) : [];
@@ -40,10 +41,10 @@ export function assistantTimeline(events: AssistantEvent[],language:Language='zh
       answers.set(step, event.type === 'assistant.message' ? String(data.text ?? '') : (answers.get(step) ?? '') + String(data.text ?? ''));
       turn.answer = [...answers.values()].filter(Boolean).join('\n\n');
     }
-    if (event.type === 'tool.call') turn.tools.push({ callId: String(data.call_id), name: String(data.tool), input: data.input, status: 'running' });
+    if (event.type === 'tool.call') turn.tools.push({ callId: String(data.call_id), name: String(data.tool), input: data.input, status: 'running', startedAt: event.timestamp });
     if (event.type === 'tool.result') {
       const trace = turn.tools.find(tool => tool.callId === data.call_id);
-      if (trace) { trace.result = data.value; trace.status = data.status === 'success' ? 'success' : data.status === 'cancelled' ? 'cancelled' : 'error'; }
+      if (trace) { trace.result = data.value; trace.status = data.status === 'success' ? 'success' : data.status === 'cancelled' ? 'cancelled' : 'error'; trace.endedAt = event.timestamp; }
     }
     if (event.type === 'context.compacting') turn.compacting = true;
     if (event.type === 'context.compacted') { turn.compacting = false; turn.compacted = true; turn.degraded = data.degraded === true; }
@@ -56,10 +57,11 @@ export function assistantTimeline(events: AssistantEvent[],language:Language='zh
       }
       turn[key] = usage;
     }
-    if (event.type === 'turn.completed') turn.status = 'completed';
+    if (event.type === 'turn.completed') { turn.status = 'completed'; turn.endedAt = event.timestamp; }
     if (event.type === 'turn.cancelled' || event.type === 'turn.failed') {
       turn.status = event.type === 'turn.cancelled' ? 'cancelled' : 'failed';
       turn.compacting = false;
+      turn.endedAt = event.timestamp;
       turn.error = String(data.error ?? t('请求失败','Request failed'));
       for (const tool of turn.tools) {
         if (event.type === 'turn.cancelled') {

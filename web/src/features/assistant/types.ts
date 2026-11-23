@@ -53,5 +53,5 @@ export interface AlertChangeProposal {
   applied_at?: string;
   result?: unknown;
 }
-export interface ToolTrace { callId: string; name: string; input: unknown; result?: unknown; status: 'running' | 'success' | 'error' | 'cancelled' }
-export interface TurnView { id: string; text: string; attachments: Attachment[]; answer: string; tools: ToolTrace[]; timestamp: string; status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string; compacting?: boolean; compacted?: boolean; degraded?: boolean; usage?: {input_tokens?: number; output_tokens?: number; total_tokens?: number}; compactionUsage?: {input_tokens?: number; output_tokens?: number; total_tokens?: number} }
+export interface ToolTrace { callId: string; name: string; input: unknown; result?: unknown; status: 'running' | 'success' | 'error' | 'cancelled'; startedAt?: string; endedAt?: string }
+export interface TurnView { id: string; text: string; attachments: Attachment[]; answer: string; tools: ToolTrace[]; timestamp: string; startedAt?: string; endedAt?: string; status: 'running' | 'completed' | 'failed' | 'cancelled'; error?: string; compacting?: boolean; compacted?: boolean; degraded?: boolean; usage?: {input_tokens?: number; output_tokens?: number; total_tokens?: number}; compactionUsage?: {input_tokens?: number; output_tokens?: number; total_tokens?: number} }

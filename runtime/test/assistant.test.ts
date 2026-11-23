@@ -1123,3 +1123,73 @@ test("assistant turn stores encrypted attachments and publishes metadata-only se
   assert.equal((await f.request("/sessions")).data.items[0].status, "needs_action");
   assert.equal((await f.request(`/sessions/${sid}/turns`, "POST", {text:"x",attachments:[{kind:"pdf",name:"scan.pdf",mime_type:"application/pdf",pages:1,text:" "}]})).status, 400);
 });
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+const slowTool = {
+  name: "slow_tool",
+  description: "fixture tool that stays silent",
+  schema: { type: "object" },
+  effect: "read" as const,
+  execute: async () => {
+    await sleep(4000);
+    return { ok: true };
+  },
+};
+
+test("a silent long tool survives the idle deadline and keeps the stream pinged", async (t) => {
+  const runtime: Runtime = async (_input, _signal, tool, emit) => {
+    await emit({ type: "event", name: "tool.call", data: { call_id: "c1", tool: "slow_tool", input: {} } });
+    const value = await tool?.("slow_tool", {});
+    await emit({ type: "event", name: "tool.result", data: { call_id: "c1", tool: "slow_tool", status: "success", value } });
+    await emit({ type: "event", name: "assistant.message", data: { step: 1, text: "done" } });
+  };
+  const f = await fixture(t, { runtime, tools: [slowTool], turnTimeout: 1500, maxTurnDuration: 30000, heartbeatMs: 1000 });
+  await configure(f);
+  const sid = await session(f),
+    r = await f.request("/sessions/" + sid + "/turns", "POST", { text: "long tool" });
+  assert.equal(r.status, 200, r.raw);
+  assert.match(r.raw, /turn\.completed/);
+  assert.ok(!r.raw.includes("idle timeout"), r.raw);
+  const pings = r.raw.match(/: ping/g) ?? [];
+  assert.ok(pings.length >= 2, `expected heartbeat frames, got ${pings.length}`);
+});
+
+test("an idle turn is aborted with the idle copy", async (t) => {
+  const runtime: Runtime = async (_input, signal, _tool, emit) => {
+    await emit({ type: "event", name: "assistant.delta", data: { step: 1, text: "a" } });
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, 8000);
+      signal.addEventListener("abort", () => { clearTimeout(timer); reject(new Error("aborted")); }, { once: true });
+    });
+  };
+  const f = await fixture(t, { runtime, turnTimeout: 1500, maxTurnDuration: 30000, heartbeatMs: 1000 });
+  await configure(f);
+  const sid = await session(f),
+    r = await f.request("/sessions/" + sid + "/turns", "POST", { text: "stalled model" });
+  assert.match(r.raw, /turn\.failed/);
+  assert.match(r.raw, /assistant turn idle timeout/);
+  assert.ok(!r.raw.includes("maximum duration"));
+});
+
+test("steady progress past the duration cap is aborted with the cap copy", async (t) => {
+  const runtime: Runtime = async (_input, signal, _tool, emit) => {
+    while (!signal.aborted) {
+      await emit({ type: "event", name: "assistant.delta", data: { step: 1, text: "a" } });
+      await sleep(200);
+    }
+    throw new Error("aborted");
+  };
+  const f = await fixture(t, { runtime, turnTimeout: 30000, maxTurnDuration: 1500, heartbeatMs: 1000 });
+  await configure(f);
+  const sid = await session(f),
+    r = await f.request("/sessions/" + sid + "/turns", "POST", { text: "endless stream" });
+  assert.match(r.raw, /turn\.failed/);
+  assert.match(r.raw, /assistant turn reached its maximum duration/);
+  assert.ok(!r.raw.includes("idle timeout"));
+});
+
+test("assistant timing options are validated at registration", async (t) => {
+  await assert.rejects(fixture(t, { heartbeatMs: 100 }), /heartbeat interval/);
+  await assert.rejects(fixture(t, { maxTurnDuration: 500 }), /turn duration cap/);
+  await assert.rejects(fixture(t, { turnTimeout: 0 }), /turn idle timeout/);
+});

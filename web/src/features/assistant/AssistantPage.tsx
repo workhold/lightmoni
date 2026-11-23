@@ -13,7 +13,8 @@ import { App, Alert, AutoComplete, Button, Checkbox, Collapse, Drawer, Input, Mo
 import { api } from '../../shared/api';
 import {boundedMonitoringContext} from '../../shared/assistant-context';
 import type { CatalogTable, QueryResponse, TimeRange, User } from '../../shared/types';
-import { streamTurn } from './client';
+import { streamTurn, fetchSession, TurnStreamError } from './client';
+import { toolSummary, formatElapsed } from './tool-summary';
 import { readAttachment } from './attachments';
 import { assistantTimeline, queryRangeFromTurn } from './timeline';
 import SSHCheckSummary,{type SSHCheckResult} from '../../shared/SSHCheckSummary';
@@ -33,6 +34,10 @@ export interface AssistantPanelProps {
 }
 
 interface QueuedTurn { id: string; text: string; attachments: Attachment[]; context: AssistantContext }
+// A dropped stream does not mean a dead turn: the server keeps running and
+// persisting events, so the UI polls the session until a terminal event lands.
+const RECOVERY_POLL_MS = 2000, RECOVERY_FAILURES = 3, RECOVERY_LIMIT_MS = 30 * 60_000;
+const TERMINAL_EVENT_TYPES = ['turn.completed', 'turn.failed', 'turn.cancelled'];
 function mergeEvents(previous: AssistantEvent[], incoming: AssistantEvent[]): AssistantEvent[] {
   return [...new Map([...previous, ...incoming].map(event => [event.sequence, event])).values()].sort((a,b) => a.sequence - b.sequence);
 }
@@ -49,7 +54,10 @@ function formatUsage(usage: NonNullable<TurnView['usage']>,t:Translator=chinese)
   return counts.length ? counts.join(' · ') + ' tokens' : t("未报告 Token 数量","Token usage not reported");
 }
 function rangeFor(hours: number): TimeRange { const to = new Date(); return { from: new Date(to.getTime() - hours * 3_600_000).toISOString(), to: to.toISOString() }; }
-function errorText(error: unknown,t:Translator=chinese): string { return error instanceof Error ? error.message : t("操作失败，请重试","Operation failed. Please retry."); }
+function errorText(error: unknown,t:Translator=chinese): string {
+  if (error instanceof Error && /invalid request origin/i.test(error.message)) return t("请求来源校验失败：请通过平台配置的访问地址打开工作台后重试。","Request origin validation failed. Open the workbench through the configured platform address and retry.");
+  return error instanceof Error ? error.message : t("操作失败，请重试","Operation failed. Please retry.");
+}
 
 // Adapted from Doca ai-markdown.tsx (MIT; see NOTICE.md). Raw HTML and
 // auto-loading external media remain disabled when rendering telemetry text.
@@ -90,6 +98,18 @@ function codeStepLabel(action: string,t:Translator=chinese): string {
   if (action === 'model turn') return t("模型分析","Model analysis");
   return ({ 'tool:read': t("读取文件","Read file"), 'tool:edit': t("修改文件","Edit file"), 'tool:write': t("写入文件","Write file"), 'tool:bash': t("运行检查","Run check"), 'tool:grep': t("搜索内容","Search content"), 'tool:find': t("查找文件","Find files"), 'tool:ls': t("查看目录","List directory") } as Record<string, string>)[action] ?? action;
 }
+function toolLabelMap(t:Translator=chinese): Record<string,string> {
+  return {
+    list_managed_machines:t("查询主机","Find managed hosts"),get_managed_machine:t("读取主机信息","Read managed host"),check_managed_machine_ssh:t("SSH 安装检查","SSH installation preflight"),propose_agent_install:t("准备 Agent 部署计划","Prepare Agent deployment plan"),get_agent_installation:t("核验 Agent 部署","Verify Agent deployment"),propose_agent_update:t("准备 Agent 更新计划","Prepare Agent update plan"),
+    list_tables: t("读取数据表目录","Read table catalog"), describe_table: t("检查表结构","Inspect table schema"), run_query: t("执行 SQL 查询","Run SQL query"), draft_dashboard: t("生成大盘草稿","Generate dashboard draft"), code_task: t("执行代码任务","Run code task"),
+    list_alert_rules: t("查询告警规则","Find alert rules"), get_alert_rule: t("读取告警规则","Read alert rule"), list_alert_silences: t("查询静默窗口","Find silence windows"), get_alert_silence: t("读取静默窗口","Read silence window"), list_alert_groups: t("查询告警组","Find alert groups"), get_alert_proposal: t("核验告警提案","Verify alert proposal"), propose_alert_change: t("准备告警变更","Prepare alert change"),
+    list_services:t('查询服务目录','Find services'),get_service_deployment:t('读取服务部署','Read service deployment'),get_service_deployment_events:t('读取部署事件','Read deployment events'),propose_service_deployment:t('准备服务部署计划','Prepare service deployment plan'),
+    list_agent_releases:t('查询 Agent 版本','Find Agent releases'),get_agent_update:t('读取 Agent 更新','Read Agent update'),scan_sdk_instrumentation:t('扫描 SDK 插桩','Scan SDK instrumentation'),propose_sdk_instrumentation:t('准备 SDK 插桩方案','Prepare SDK instrumentation plan'),
+    list_operations_resources:t('查询运维资源','Find operations resources'),get_operations_run:t('读取运维执行','Read operations run'),propose_operations_action:t('准备运维操作','Prepare operations action'),
+    list_tasks:t('查询任务','Find tasks'),get_task:t('读取任务','Read task'),list_task_runs:t('查询任务执行','Find task runs'),get_task_run:t('读取任务执行','Read task run'),get_task_proposal:t('读取任务提案','Read task proposal'),propose_task_action:t('准备任务操作','Prepare task action'),
+  };
+}
+function toolLabel(name:string,t:Translator=chinese): string { return toolLabelMap(t)[name] ?? name.replaceAll('_',' '); }
 
 function CodeTaskProgress({ tool }: { tool: ToolTrace }) {
  const {language,t}=useI18n();
@@ -179,13 +199,6 @@ function CodeTaskProgress({ tool }: { tool: ToolTrace }) {
 function ToolProgress({ turn, onDraft, canUseCodeTasks, canApproveAgentUpdate }: { turn: TurnView; onDraft: (draft: DashboardDraft, range?: TimeRange) => void; canUseCodeTasks: boolean; canApproveAgentUpdate: boolean }) {
  const {language,t}=useI18n();
  const navigate=useNavigate();
-  const toolLabels: Record<string, string> = { list_managed_machines:t("查询主机","Find managed hosts"),get_managed_machine:t("读取主机信息","Read managed host"),check_managed_machine_ssh:t("SSH 安装检查","SSH installation preflight"),propose_agent_install:t("准备 Agent 部署计划","Prepare Agent deployment plan"),get_agent_installation:t("核验 Agent 部署","Verify Agent deployment"),propose_agent_update:t("准备 Agent 更新计划","Prepare Agent update plan"), list_tables: t("读取数据表目录","Read table catalog"), describe_table: t("检查表结构","Inspect table schema"), run_query: t("执行 SQL 查询","Run SQL query"), draft_dashboard: t("生成大盘草稿","Generate dashboard draft"), code_task: t("执行代码任务","Run code task"), list_alert_rules: t("查询告警规则","Find alert rules"), get_alert_rule: t("读取告警规则","Read alert rule"), list_alert_silences: t("查询静默窗口","Find silence windows"), get_alert_silence: t("读取静默窗口","Read silence window"), list_alert_groups: t("查询告警组","Find alert groups"), get_alert_proposal: t("核验告警提案","Verify alert proposal"), propose_alert_change: t("准备告警变更","Prepare alert change") };
-  Object.assign(toolLabels,{
-    list_services:t('查询服务目录','Find services'),get_service_deployment:t('读取服务部署','Read service deployment'),get_service_deployment_events:t('读取部署事件','Read deployment events'),propose_service_deployment:t('准备服务部署计划','Prepare service deployment plan'),
-    list_agent_releases:t('查询 Agent 版本','Find Agent releases'),get_agent_update:t('读取 Agent 更新','Read Agent update'),scan_sdk_instrumentation:t('扫描 SDK 插桩','Scan SDK instrumentation'),propose_sdk_instrumentation:t('准备 SDK 插桩方案','Prepare SDK instrumentation plan'),
-    list_operations_resources:t('查询运维资源','Find operations resources'),get_operations_run:t('读取运维执行','Read operations run'),propose_operations_action:t('准备运维操作','Prepare operations action'),
-    list_tasks:t('查询任务','Find tasks'),get_task:t('读取任务','Read task'),list_task_runs:t('查询任务执行','Find task runs'),get_task_run:t('读取任务执行','Read task run'),get_task_proposal:t('读取任务提案','Read task proposal'),propose_task_action:t('准备任务操作','Prepare task action'),
-  });
 
   const tools = turn.tools.filter(tool => tool.name !== 'code_task' || canUseCodeTasks);
   if (!tools.length) return null;
@@ -196,7 +209,8 @@ function ToolProgress({ turn, onDraft, canUseCodeTasks, canApproveAgentUpdate }:
     if (agentUpdate) return <AgentUpdateProgress key={tool.callId} value={agentUpdate} canApprove={canApproveAgentUpdate} />;
     const result = tool.result as { draft?: DashboardDraft; error?: string;id?:string;machine_id?:string;status?:string;review_url?:string } | undefined;
     const input=tool.input as {machine_id?:string;sql?:string} | undefined;
-    return <Collapse key={tool.callId} size="small" ghost items={[{ key: tool.callId, label: <Space><span className={`lm-assistant-tool-dot ${tool.status}`} /><span>{toolLabels[tool.name] ?? tool.name.replaceAll('_',' ')}</span><Tag bordered={false} color={tool.status === 'error' ? 'error' : tool.status === 'success' ? 'success' : tool.status === 'cancelled' ? 'default' : 'processing'}>{tool.status === 'running' ? t("执行中","Running") : tool.status === 'error' ? t("失败","Failed") : tool.status === 'cancelled' ? t("已取消","Cancelled") : t("完成","Completed")}</Tag></Space>, children: <div>{tool.name==='check_managed_machine_ssh'&&<div className="lm-assistant-terminal"><div className="lm-assistant-terminal-label">SSH · {t('固定只读安装检查','Fixed read-only installation check')}</div><pre><span>$</span> ssh {input?.machine_id??t('已登记主机','registered host')} <em>{t('由中心执行受限预检','restricted preflight via center')}</em></pre></div>}{tool.name==='run_query'&&input?.sql&&<div className="lm-assistant-terminal"><div className="lm-assistant-terminal-label">SQL</div><pre>{input.sql}</pre></div>}<div className="lm-assistant-tool-heading">{t("调用参数","Call arguments")}</div><pre className="lm-assistant-tool-json">{readable(tool.input)}</pre>{tool.result !== undefined && <><div className="lm-assistant-tool-heading">{t("执行结果","Execution result")}</div><pre className="lm-assistant-tool-json">{readable(tool.result)}</pre></>}{tool.status==='success'&&tool.name==='check_managed_machine_ssh'&&result?.id&&<SSHCheckSummary result={tool.result as SSHCheckResult}/>} {tool.status==='success'&&tool.name==='propose_agent_install'&&result?.id&&result.machine_id&&<Button type="primary" onClick={()=>navigate(`/machines?machine=${encodeURIComponent(result.machine_id!)}&deployment=${encodeURIComponent(result.id!)}`)}>{t('审阅部署计划','Review deployment plan')}</Button>}{tool.status==='success'&&tool.name!=='propose_agent_install'&&typeof result?.review_url==='string'&&/^\/(?!\/)/.test(result.review_url)&&<Button type="primary" onClick={()=>navigate(result.review_url!)}>{t('审阅此计划','Review this plan')}</Button>}{tool.status === 'success' && result?.draft && <Button type="primary" onClick={() => onDraft(result.draft!, queryRangeFromTurn(turn, tool.callId))}>{t("审阅大盘草稿","Review dashboard draft")}</Button>}</div> }]} />;
+    const badges=toolSummary(tool.name,tool.result,t);
+    return <Collapse key={tool.callId} size="small" ghost items={[{ key: tool.callId, label: <Space wrap><span className={`lm-assistant-tool-dot ${tool.status}`} /><span>{toolLabel(tool.name,t)}</span><span className="lm-assistant-tool-badges">{badges.map((badge,index)=><span key={index} className={`lm-assistant-tool-badge ${badge.kind??''}`}>{badge.text}</span>)}</span><Tag bordered={false} color={tool.status === 'error' ? 'error' : tool.status === 'success' ? 'success' : tool.status === 'cancelled' ? 'default' : 'processing'}>{tool.status === 'running' ? t("执行中","Running") : tool.status === 'error' ? t("失败","Failed") : tool.status === 'cancelled' ? t("已取消","Cancelled") : t("完成","Completed")}</Tag></Space>, children: <div>{tool.name==='check_managed_machine_ssh'&&<div className="lm-assistant-terminal"><div className="lm-assistant-terminal-label">SSH · {t('固定只读安装检查','Fixed read-only installation check')}</div><pre><span>$</span> ssh {input?.machine_id??t('已登记主机','registered host')} <em>{t('由中心执行受限预检','restricted preflight via center')}</em></pre></div>}{tool.name==='run_query'&&input?.sql&&<div className="lm-assistant-terminal"><div className="lm-assistant-terminal-label">SQL</div><pre>{input.sql}</pre></div>}{(tool.input!==undefined||tool.result!==undefined)&&<details className="lm-assistant-tool-raw"><summary>{t('原始参数与结果','Raw arguments and result')}</summary><div className="lm-assistant-tool-heading">{t("调用参数","Call arguments")}</div><pre className="lm-assistant-tool-json">{readable(tool.input)}</pre>{tool.result !== undefined && <><div className="lm-assistant-tool-heading">{t("执行结果","Execution result")}</div><pre className="lm-assistant-tool-json">{readable(tool.result)}</pre></>}</details>}{tool.status==='success'&&tool.name==='check_managed_machine_ssh'&&result?.id&&<SSHCheckSummary result={tool.result as SSHCheckResult}/>} {tool.status==='success'&&tool.name==='propose_agent_install'&&result?.id&&result.machine_id&&<Button type="primary" onClick={()=>navigate(`/machines?machine=${encodeURIComponent(result.machine_id!)}&deployment=${encodeURIComponent(result.id!)}`)}>{t('审阅部署计划','Review deployment plan')}</Button>}{tool.status==='success'&&tool.name!=='propose_agent_install'&&typeof result?.review_url==='string'&&/^\/(?!\/)/.test(result.review_url)&&<Button type="primary" onClick={()=>navigate(result.review_url!)}>{t('审阅此计划','Review this plan')}</Button>}{tool.status === 'success' && result?.draft && <Button type="primary" onClick={() => onDraft(result.draft!, queryRangeFromTurn(turn, tool.callId))}>{t("审阅大盘草稿","Review dashboard draft")}</Button>}</div> }]} />;
   })}</div>;
 }
 
@@ -210,12 +224,20 @@ function reviewRequired(value:unknown,depth=0):boolean{
 function ToolActivity({turn,onDraft,canUseCodeTasks,canApproveAgentUpdate}:{turn:TurnView;onDraft:(draft:DashboardDraft,range?:TimeRange)=>void;canUseCodeTasks:boolean;canApproveAgentUpdate:boolean}){
   const {t}=useI18n();
   const [manual,setManual]=useState<boolean>();
+  const [now,setNow]=useState(()=>Date.now());
+  const running=turn.status==='running';
+  useEffect(()=>{
+    if(!running)return;
+    const timer=window.setInterval(()=>setNow(Date.now()),1000);
+    return()=>window.clearInterval(timer);
+  },[running]);
   if(!turn.tools.length)return null;
   const attention=turn.tools.some(tool=>(tool.name==='draft_dashboard'&&!!(tool.result as {draft?:unknown}|undefined)?.draft)||reviewRequired(tool.result));
   const failedStep=turn.tools.some(tool=>tool.status==='error');
   const open=manual??(turn.status==='running'||turn.status==='failed'||attention);
-  const label=turn.status==='running'?t(`正在执行 ${turn.tools.length} 项操作`,`Working on ${turn.tools.length} steps`):attention?t(`${turn.tools.length} 项操作需要查看`,`${turn.tools.length} steps need review`):failedStep||turn.status==='failed'?t(`${turn.tools.length} 项操作 · 含失败`,`${turn.tools.length} steps · includes a failure`):t(`已完成 ${turn.tools.length} 项操作`,`Completed ${turn.tools.length} steps`);
-  return <div className="lm-assistant-activity"><button type="button" className="lm-assistant-activity-trigger" aria-expanded={open} onClick={()=>setManual(!open)}><span className={`lm-assistant-activity-indicator ${failedStep?'failed':turn.status}`} aria-hidden="true"/><span>{label}</span><span className="lm-assistant-activity-chevron" aria-hidden="true">⌄</span></button>{open&&<div className="lm-assistant-activity-content"><ToolProgress turn={turn} onDraft={onDraft} canUseCodeTasks={canUseCodeTasks} canApproveAgentUpdate={canApproveAgentUpdate}/></div>}</div>;
+  const elapsed=formatElapsed(turn.startedAt,turn.endedAt,now);
+  const label=running?t(`正在执行 ${turn.tools.length} 项操作`,`Working on ${turn.tools.length} steps`):attention?t(`${turn.tools.length} 项操作需要查看`,`${turn.tools.length} steps need review`):failedStep||turn.status==='failed'?t(`${turn.tools.length} 项操作 · 含失败`,`${turn.tools.length} steps · includes a failure`):t(`已完成 ${turn.tools.length} 项操作`,`Completed ${turn.tools.length} steps`);
+  return <div className="lm-assistant-activity"><button type="button" className="lm-assistant-activity-trigger" aria-expanded={open} onClick={()=>setManual(!open)}><span className={`lm-assistant-activity-indicator ${failedStep?'failed':turn.status}`} aria-hidden="true"/><span>{label}</span>{elapsed&&<span className="lm-assistant-activity-elapsed">{elapsed}</span>}<span className="lm-assistant-activity-chevron" aria-hidden="true">⌄</span></button>{open&&<div className="lm-assistant-activity-content">{running&&<ol className="lm-assistant-tool-rows" aria-label={t('工具执行进度','Tool progress')}>{turn.tools.map(tool=><li key={tool.callId} className={`lm-assistant-tool-row ${tool.status}`}><span className={`lm-assistant-tool-dot ${tool.status}`} aria-hidden="true"/><span className="lm-assistant-tool-row-name">{toolLabel(tool.name,t)}</span><span className="lm-assistant-tool-row-elapsed">{formatElapsed(tool.startedAt,tool.endedAt,now)}</span></li>)}</ol>}<ToolProgress turn={turn} onDraft={onDraft} canUseCodeTasks={canUseCodeTasks} canApproveAgentUpdate={canApproveAgentUpdate}/></div>}</div>;
 }
 
 type CategoryOption={value:string;label:ReactNode;create?:boolean};
@@ -324,6 +346,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const [lookback, setLookback] = useState(1);
   const [creating, setCreating] = useState(false);
   const [runningIds, setRunningIds] = useState<string[]>([]);
+  const [recoveringIds, setRecoveringIds] = useState<string[]>([]);
   const [queueVersion, setQueueVersion] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -400,6 +423,34 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
 
   function updateQueue(id:string, items:QueuedTurn[]) { queuedTurns.current.set(id,items); setQueueVersion(value=>value+1); }
   function takeNext(id:string) { const items=queuedTurns.current.get(id)??[]; const [next,...remaining]=items; if(next)updateQueue(id,remaining); return next; }
+  /** Follow a turn whose stream dropped: poll until a terminal event lands. */
+  async function recoverTurn(id:string, signal:AbortSignal): Promise<boolean> {
+    setRecoveringIds(previous=>previous.includes(id)?previous:[...previous,id]);
+    const started=Date.now();
+    let failures=0;
+    try {
+      while(Date.now()-started<RECOVERY_LIMIT_MS) {
+        if(signal.aborted)return false;
+        await new Promise(resolve=>setTimeout(resolve,RECOVERY_POLL_MS));
+        try {
+          const session=await fetchSession(id,signal);
+          failures=0;
+          const merged=mergeEvents(eventCache.current.get(id)??[],session.events??[]);
+          eventCache.current.set(id,merged);
+          if(selectedSession.current===id)setEvents(merged);
+          const last=merged.at(-1);
+          if(last&&TERMINAL_EVENT_TYPES.includes(last.type))return true;
+          // A restart or crash leaves no terminal event; the derived session
+          // status leaving "running" means nothing is left to wait for.
+          if(session.status&&session.status!=='running')return true;
+        } catch (problem) {
+          if(signal.aborted)return false;
+          if(++failures>=RECOVERY_FAILURES)return false;
+        }
+      }
+      return false;
+    } finally { setRecoveringIds(previous=>previous.filter(value=>value!==id)); }
+  }
   async function runTurn(id:string, item:QueuedTurn) {
     if (activeTurns.current.has(id)) return;
     const abort = new AbortController(); activeTurns.current.set(id,abort); setRunningIds(previous=>[...new Set([...previous,id])]);
@@ -412,8 +463,12 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
       },abort.signal,language,item.attachments);
       settled=true;
     } catch (problem) {
-      if (!abort.signal.aborted) setError(errorText(problem,t));
-      if (!accepted && !abort.signal.aborted) updateQueue(id,[item,...(queuedTurns.current.get(id)??[])]);
+      const dropped=problem instanceof TurnStreamError&&problem.code==='disconnected';
+      if(dropped&&!abort.signal.aborted&&await recoverTurn(id,abort.signal))settled=true;
+      else {
+        if (!abort.signal.aborted) setError(errorText(problem,t));
+        if (!accepted && !abort.signal.aborted) updateQueue(id,[item,...(queuedTurns.current.get(id)??[])]);
+      }
     } finally {
       try { const session = await api<AssistantSession>(`/assistant/sessions/${encodeURIComponent(id)}`); const merged=mergeEvents(session.events??[],eventCache.current.get(id)??[]); eventCache.current.set(id,merged); if(selectedSession.current===id)setEvents(merged); } catch { /* Keep received progress. */ }
       void refreshSessions().catch(problem => setError(errorText(problem,t)));
@@ -473,6 +528,15 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
 
   const selectedSessionData=sessions.find(session=>session.id===sessionId);
   const sessionRunning=!!sessionId&&(activeTurns.current.has(sessionId)||runningIds.includes(sessionId));
+  const recoveringNow=!!sessionId&&recoveringIds.includes(sessionId);
+  const runningTurn=sessionRunning?turns.filter(turn=>turn.status==='running').at(-1):undefined;
+  const runningTool=runningTurn?.tools.filter(tool=>tool.status==='running').at(-1);
+  const [nowTick,setNowTick]=useState(0);
+  useEffect(()=>{
+    if(!sessionRunning)return;
+    const timer=window.setInterval(()=>setNowTick(Date.now()),1000);
+    return()=>window.clearInterval(timer);
+  },[sessionRunning]);
   function openDraft(value: DashboardDraft, analysisRange?: TimeRange) {
     setInspectorTab('artifacts');setInspectorOpen(true); const copy = JSON.parse(JSON.stringify(value)) as DashboardDraft; setDraft({ ...copy, range: copy.range ?? analysisRange ?? context.range ?? rangeFor(context.query?.lookback_hours ?? lookback) }); setDraftError(''); setPreview({});  }
   function updatePanel(index: number, update: Partial<DraftPanel>) { setDraft(previous => previous ? { ...previous, panels: previous.panels.map((panel, panelIndex) => panelIndex === index ? { ...panel, ...update } : panel) } : previous); setPreview({}); }
@@ -677,6 +741,14 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
       </header>
       {context.page&&<div className="lm-assistant-page-context"><span>{t("当前页面","Current page")}</span><strong>{context.dashboard_title??pageTitles[context.page.title]??context.page.title}</strong>{context.panels&&<Tag>{context.panels.length} {t("个面板"," panels")}</Tag>}{context.log_query?.keyword&&<Tag>{t("关键词：","Keyword: ")}{context.log_query.keyword}</Tag>}{!!context.selected_logs?.length&&<Tag>{t("已选日志","Selected log")}</Tag>}{context.query&&<Tag>{t("当前 SQL","Current SQL")}</Tag>}{context.context_truncated&&<Tag>{t("上下文已精简","Context trimmed")}</Tag>}</div>}
       {!loading && !config?.enabled && <Alert type="info" showIcon title={t("连接 AI 模型后开始使用","Connect an AI model to get started")} description={user?.role === 'admin' ? t("填写模型服务地址和 API Key，自动获取模型并选择调用协议。密钥由后端保管。","Enter a model service URL and API key, fetch available models and choose the API protocol. Keys are stored by the backend.") : t("请联系管理员配置并启用 AI 模型。","Ask an administrator to configure and enable an AI model.")} action={user?.role === 'admin' ? <Button onClick={openSettings}>{t("配置模型","Configure model")}</Button> : undefined} />}
+      {sessionRunning&&<div className="lm-assistant-runbar" role="status">
+        <span className="lm-assistant-activity-indicator running" aria-hidden="true"/>
+        {recoveringNow&&<span className="lm-assistant-runbar-recovery">{t('连接中断，正在恢复…','Connection lost, recovering…')}</span>}
+        <strong>{runningTool?toolLabel(runningTool.name,t):t('正在分析','Analyzing')}</strong>
+        <span className="lm-assistant-runbar-elapsed">{formatElapsed(runningTurn?.startedAt??runningTurn?.timestamp,undefined,nowTick)||'00:00'}</span>
+        {!!runningTurn?.tools.length&&<span className="lm-assistant-runbar-steps">{t(`已执行 ${runningTurn.tools.length} 步`,`${runningTurn.tools.length} steps`)}</span>}
+        <button type="button" className="lm-assistant-runbar-stop" aria-label={t('停止当前响应','Stop current response')} onClick={()=>void cancel()}><span className="lm-assistant-stop-square"/></button>
+      </div>}
       <MessageScroller.Provider key={sessionId??'new'} autoScroll defaultScrollPosition="end" scrollPreviousItemPeek={56}>
         <MessageScroller.Root className="lm-assistant-scroll-root">
           <MessageScroller.Viewport className="lm-assistant-feed" aria-label={t('对话消息','Conversation messages')}>

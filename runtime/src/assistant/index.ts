@@ -70,6 +70,8 @@ export interface AssistantOptions {
   tools?: Tool[];
   turnTimeout?: number;
   connectionTimeout?: number;
+  maxTurnDuration?: number;
+  heartbeatMs?: number;
   maxConcurrentTurns?: number;
   system?: string;
   codeWorkspaceRoot?: string;
@@ -141,6 +143,18 @@ export function registerAssistant(
   const concurrency = options.maxConcurrentTurns ?? 4;
   if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 32)
     throw Error("assistant concurrency limit must be between 1 and 32");
+  // turnTimeout is the idle deadline (no model output or tool activity);
+  // maxTurnDuration is the absolute cap that always terminates the turn.
+  const idleTurnTimeout = options.turnTimeout ?? 120000,
+    maxTurnDuration = options.maxTurnDuration ?? 1_800_000,
+    heartbeatMs = options.heartbeatMs ?? 15000;
+  for (const [label, value] of [
+    ["turn idle timeout", idleTurnTimeout],
+    ["turn duration cap", maxTurnDuration],
+    ["heartbeat interval", heartbeatMs],
+  ] as const)
+    if (!Number.isSafeInteger(value) || value < 1000)
+      throw Error(`assistant ${label} must be a safe integer of at least 1000ms`);
   const active = new Map<
     string,
     { controller: AbortController; done: Promise<void> }
@@ -1066,9 +1080,22 @@ export function registerAssistant(
           "assistant is busy; retry after another turn completes",
         );
       const controller = new AbortController(),
-        timeout = AbortSignal.timeout(options.turnTimeout ?? 120000),
-        signal = AbortSignal.any([controller.signal, timeout]),
+        signal = controller.signal,
         turn = id();
+      // Idle deadline is reset by every emitted event and by running tools;
+      // the duration cap never resets and always terminates long turns.
+      let deadline: "idle" | "duration" | undefined,
+        idleTimer = setTimeout(() => { deadline = "idle"; controller.abort(); }, idleTurnTimeout),
+        lastFlow = performance.now();
+      idleTimer.unref();
+      const durationTimer = setTimeout(() => { deadline = "duration"; controller.abort(); }, maxTurnDuration);
+      durationTimer.unref();
+      const resetIdle = (): void => {
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(() => { deadline = "idle"; controller.abort(); }, idleTurnTimeout);
+        idleTimer.unref();
+      };
+      let heartbeat: NodeJS.Timeout | undefined;
       let release!: () => void;
       const done = new Promise<void>((resolve) => {
         release = resolve;
@@ -1086,6 +1113,15 @@ export function registerAssistant(
         });
         ctx.res.write(": connected\n\n");
         ctx.res.flushHeaders();
+        // Keep proxies and browsers from reaping quiet streams; `: ping` is an
+        // SSE comment, so existing parsers that only read `data:` lines ignore it.
+        heartbeat = setInterval(() => {
+          if (!ctx.res.headersSent || ctx.res.destroyed || ctx.res.writableEnded) return;
+          if (performance.now() - lastFlow < heartbeatMs) return;
+          try { ctx.res.write(": ping\n\n"); } catch { /* Client gone; emit guards the rest. */ }
+          lastFlow = performance.now();
+        }, Math.min(5000, heartbeatMs));
+        heartbeat.unref();
         let sequence = value.events.length
             ? value.events.at(-1)!.sequence + 1
             : 0,
@@ -1099,6 +1135,8 @@ export function registerAssistant(
           billing,
         );
         const emit = (type: string, data: Record<string, any>): void => {
+          resetIdle();
+          lastFlow = performance.now();
           const event: Event = {
             sequence: sequence++,
             session_id: value.id,
@@ -1222,14 +1260,21 @@ export function registerAssistant(
             async (name, args) => {
               const tool = tools.find((t) => t.name === name);
               if (!tool) throw Error("this tool is not registered");
-              if (tool.effect === "code") {
-                admin(ctx);
-                // A model may narrow allowed paths/checks, but cannot switch the user's workspace.
-                const scoped = { ...args, workspace: codeWorkspace ?? "." };
-                validateCodeTaskInput(scoped);
-                return tool.execute(scoped, signal, ctx.user, { session_id: value.id });
-              }
-              return tool.execute(args, signal, ctx.user, { session_id: value.id });
+              // A running tool counts as activity even when it stays silent,
+              // so the idle deadline keeps being deferred until it returns.
+              const toolWatchdog = setInterval(resetIdle, heartbeatMs);
+              toolWatchdog.unref();
+              try {
+                resetIdle();
+                if (tool.effect === "code") {
+                  admin(ctx);
+                  // A model may narrow allowed paths/checks, but cannot switch the user's workspace.
+                  const scoped = { ...args, workspace: codeWorkspace ?? "." };
+                  validateCodeTaskInput(scoped);
+                  return await tool.execute(scoped, signal, ctx.user, { session_id: value.id });
+                }
+                return await tool.execute(args, signal, ctx.user, { session_id: value.id });
+              } finally { clearInterval(toolWatchdog); }
             },
             async (frame) => {
               if (frame.type === "compacted") {
@@ -1267,19 +1312,23 @@ export function registerAssistant(
           error = e;
         }
         try {
-          recorder.finish(signal.aborted ? "cancelled" : "failed");
+          recorder.finish(signal.aborted && !deadline ? "cancelled" : "failed");
         } catch {
           error ??= Error("cannot persist assistant usage");
         }
         if (error) {
-          const cancelled = signal.aborted,
+          // Deadline aborts are failures; only a user- or shutdown-initiated
+          // abort (no deadline set) counts as a cancellation.
+          const cancelled = signal.aborted && !deadline,
             description = cancelled
-              ? timeout.aborted
-                ? "assistant turn reached its time limit"
-                : "request cancelled"
-              : error instanceof Error
-                ? error.message
-                : "assistant turn failed";
+              ? "request cancelled"
+              : deadline === "idle"
+                ? "assistant turn idle timeout"
+                : deadline === "duration"
+                  ? "assistant turn reached its maximum duration"
+                  : error instanceof Error
+                    ? error.message
+                    : "assistant turn failed";
           for (const call of pendingTools(value.messages)) {
             value.messages.push({
               role: "tool",
@@ -1303,6 +1352,9 @@ export function registerAssistant(
         } else emit("turn.completed", {});
         if (!ctx.res.writableEnded) ctx.res.end();
       } finally {
+        if (heartbeat) clearInterval(heartbeat);
+        clearTimeout(idleTimer);
+        clearTimeout(durationTimer);
         active.delete(sessionKey);
         controller.abort();
         release();
