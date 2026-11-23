@@ -1,6 +1,6 @@
 import {blockingAgentJobSQL} from './agent-job-fence.js';
 import { id } from '../shared/crypto.js';
-import { fail } from '../shared/http.js';
+import { fail, HTTPError } from '../shared/http.js';
 import type { Context, Dependencies, Handler } from '../shared/types.js';
 import type { MachineSummary, SSHMachineTarget } from './managed-machines.js';
 import { SSHError, assertSSHAccount, sshAccountSnapshot, sshCredentialRevision, type SSHRunner } from './machine-ssh.js';
@@ -19,7 +19,7 @@ interface Access {
 }
 const quote=(s:string)=>"'"+s.replaceAll("'","'\\''")+"'";
 const privileged=(s:string,start=false)=>`if test "$(id -u)" = 0; then /bin/sh -c ${quote(s)}; elif sudo -n true >/dev/null 2>&1; then sudo -n /bin/sh -c ${quote(s)}; else printf '%s' '{"state":"${start?'failed':'unknown'}","phase":"${start?'checking_system':'unknown'}","code":"docker_install_privilege_required"}'; fi`;
-export const DOCKER_INSTALL_CODES=['','docker_install_failed','docker_install_interrupted','docker_install_privilege_required','docker_install_unsupported','docker_install_busy','docker_install_package_conflict','docker_install_package_failed','docker_install_service_failed','docker_install_verification_failed','docker_install_result_unavailable','docker_install_not_started','docker_install_status_missing','docker_install_evidence_untrusted','host_key_mismatch','ssh_failed','timed_out','cancelled'];
+export const DOCKER_INSTALL_CODES=['','docker_install_failed','docker_install_interrupted','docker_install_privilege_required','docker_install_unsupported','docker_install_busy','docker_install_package_conflict','docker_install_package_failed','docker_install_service_failed','docker_install_verification_failed','docker_install_result_unavailable','docker_install_not_started','docker_install_status_missing','docker_install_evidence_untrusted','docker_install_target_changed','host_key_mismatch','ssh_failed','timed_out','cancelled'];
 const phases=['checking_system','installing_packages','starting_docker','verifying_docker','verified','connecting','unknown'];
 export function parseDockerInstallStatus(output:string) {
  let v:any;try{if(Buffer.byteLength(output)>2048)throw Error();v=JSON.parse(output);}catch{throw Error('docker_install_result_unavailable');}
@@ -51,6 +51,12 @@ export function registerMachineDocker(deps:Dependencies,access:Access) {
  UNIQUE(machine_id,request_id));
  CREATE UNIQUE INDEX IF NOT EXISTS machine_docker_install_lane ON machine_docker_installations(machine_id) WHERE state IN ('running','unknown');`);
  db.run("UPDATE machine_docker_installations SET state='unknown',phase='unknown',code='docker_install_result_unavailable' WHERE state='running'");
+ // A replacement Agent invalidates the exact execution identity approved by the
+ // old installation. Close its fence as failed; never replay it on a new Agent.
+ if(db.get("SELECT 1 FROM pragma_table_info('managed_machines') WHERE name='agent_id'")) {
+  for(const stale of db.all<any>(`SELECT i.id FROM machine_docker_installations i JOIN managed_machines m ON m.id=i.machine_id WHERE i.state IN ('running','unknown') AND i.agent_id<>'' AND m.agent_id<>i.agent_id`))
+   db.run("UPDATE machine_docker_installations SET state='failed',phase='unknown',code='docker_install_target_changed',updated_at=? WHERE id=?",now(),stale.id);
+ }
  const view=(r:any)=>r?{id:r.id,machine_id:r.machine_id,ssh_account:JSON.parse(r.ssh_account_json),credential_id:r.credential_id,verification:JSON.parse(r.verification_json),state:r.state,phase:r.phase,code:r.code,created_by:r.created_by,created_at:r.created_at,updated_at:r.updated_at}:undefined;
  const human=(ctx:Context)=>{
   deps.auth.requireAdmin(ctx);
@@ -59,6 +65,8 @@ export function registerMachineDocker(deps:Dependencies,access:Access) {
  };
  const row=(mid:string,op:string)=>{const r=db.get<any>('SELECT * FROM machine_docker_installations WHERE machine_id=? AND id=?',mid,op);if(!r)fail(404,'docker_installation_not_found');return r;};
  const update=(op:string,v:{state:string;phase:string;code:string})=>db.run('UPDATE machine_docker_installations SET state=?,phase=?,code=?,updated_at=? WHERE id=?',v.state,v.phase,v.code,now(),op);
+ const targetChanged=(error:unknown)=>error instanceof HTTPError&&error.message==='docker_install_target_changed';
+ const failureFor=(error:unknown)=>targetChanged(error)?{state:'failed',phase:'unknown',code:'docker_install_target_changed'}:{state:'unknown',phase:'unknown',code:error instanceof SSHError?error.code:'docker_install_result_unavailable'};
  const read=async(r:any,start=false,verificationCredentialID?:string)=>{
    const {machine,credential}=access.credential(r.machine_id,verificationCredentialID??r.credential_id);
    if(!verificationCredentialID){assertSSHAccount(machine,JSON.parse(r.ssh_account_json));if(sshCredentialRevision(credential)!==r.credential_revision)fail(409,"ssh_credential_changed");}
@@ -76,7 +84,7 @@ export function registerMachineDocker(deps:Dependencies,access:Access) {
       controller.signal.throwIfAborted();result=await read(r);
     }
     if(result.state==='running')throw Error('docker_install_result_unavailable');
-  }catch(error){update(r.id,{state:'unknown',phase:'unknown',code:error instanceof SSHError?error.code:'docker_install_result_unavailable'});}
+  }catch(error){update(r.id,failureFor(error));}
   finally{access.busy.delete(r.machine_id);workers.delete(r.id);}})();workers.set(r.id,work);
  };
  const path='/api/v1/machines/:id';
@@ -109,7 +117,9 @@ export function registerMachineDocker(deps:Dependencies,access:Access) {
   const body=await ctx.body<any>();if(!body||Array.isArray(body)||Object.keys(body).some(k=>k!=='credential_id')||body.credential_id!==undefined&&typeof body.credential_id!=='string')fail(400,'invalid_docker_verification');
   const verificationCredentialID=body.credential_id??r.credential_id;access.credential(r.machine_id,verificationCredentialID);
   if(access.busy.has(r.machine_id))fail(409,'docker_install_host_busy');holdBusy(access.busy,r.machine_id,"docker",deps.now().getTime());
-  try{await read(r,false,body.credential_id);}catch(error){update(r.id,{state:'unknown',phase:'unknown',code:error instanceof SSHError?error.code:'docker_install_result_unavailable'});}finally{access.busy.delete(r.machine_id);}
+  const machine=access.get(r.machine_id);
+  if(machine.agent_id!==r.agent_id||access.revision(machine)!==r.target_revision)update(r.id,{state:'failed',phase:'unknown',code:'docker_install_target_changed'});
+  else try{await read(r,false,body.credential_id);}catch(error){update(r.id,failureFor(error));}finally{access.busy.delete(r.machine_id);}
   const latest=row(r.machine_id,r.id);
   ctx.json(view(latest));
  }));

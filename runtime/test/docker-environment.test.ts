@@ -72,6 +72,26 @@ test('platform restart retains the durable Docker installation fence and status 
  }finally{db.close();rmSync(root,{recursive:true,force:true});}
 });
 
+test('a replaced Agent closes stale Docker fences without closing the active Agent fence',async()=>{
+ const {registerMachineDocker}=await import('../src/server/machine-docker.js');
+ const {pendingDockerInstallation}=await import('../src/server/machine-docker-guard.js');
+ const {mkdtempSync,rmSync}=await import('node:fs'),{join}=await import('node:path'),{tmpdir}=await import('node:os');
+ const root=mkdtempSync(join(tmpdir(),'lm226-stale-docker-')),path=join(root,'db.sqlite');const db=new DB(path);
+ try{
+  db.exec("CREATE TABLE managed_machines(id TEXT PRIMARY KEY,agent_id TEXT NOT NULL);INSERT INTO managed_machines VALUES('machine','current-agent')");
+  const first=registerMachineDocker({db,router:{get(){},post(){}},now:()=>new Date()} as any,{safe:(f:any)=>f} as any);
+  const insert=(id:string,agent:string,state:string)=>db.run("INSERT INTO machine_docker_installations(id,machine_id,agent_id,request_id,credential_id,state,phase,code,created_by,created_at,updated_at,ssh_account_json,credential_revision,target_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",id,'machine',agent,'request-'+id,'credential',state,'checking_system','','admin',new Date().toISOString(),new Date().toISOString(),JSON.stringify({id:'fixture-account',username:'root',revision:1}),'revision','target');
+  insert('a'.repeat(32),'old-agent','unknown');
+  await first.close?.();
+  const service=registerMachineDocker({db,router:{get(){},post(){}},now:()=>new Date()} as any,{safe:(f:any)=>f} as any);
+  const stale=db.get<any>("SELECT * FROM machine_docker_installations WHERE id=?", 'a'.repeat(32));
+  assert.deepEqual({state:stale.state,phase:stale.phase,code:stale.code},{state:'failed',phase:'unknown',code:'docker_install_target_changed'});
+  insert('b'.repeat(32),'current-agent','unknown');
+  assert.equal(pendingDockerInstallation(db,'machine','current-agent')?.id,'b'.repeat(32));
+  await service.close?.();
+ }finally{db.close();rmSync(root,{recursive:true,force:true});}
+});
+
 /** Real Router + HTTP + SQLite admission, with a fake SSH runner that can never
  * execute host commands. The access shim intentionally has no root-job guard:
  * this verifies registerMachineDocker's own durable-fence check. */
