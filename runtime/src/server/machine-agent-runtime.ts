@@ -532,12 +532,13 @@ export function registerMachineAgentRuntime(
     path + "/plans",
     access.safe((c) => {
       human(c);
-      access.get(c.params.id);
+      const machine=access.get(c.params.id);
       c.json(
         db
           .all<Row>(
-            "SELECT * FROM machine_agent_runtime_plans WHERE machine_id=? ORDER BY created_at DESC,id DESC LIMIT 50",
+            "SELECT * FROM machine_agent_runtime_plans WHERE machine_id=? AND agent_id=? ORDER BY created_at DESC,id DESC LIMIT 50",
             c.params.id,
+            machine.agent_id,
           )
           .map((r) => view(refresh(r))),
       );
