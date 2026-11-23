@@ -32,7 +32,7 @@ function fixture() {
 test("detailed hosts and Agent receipts use safe domain views without changing legacy hosts",async()=>{
  const f=fixture();try{
   const inventory=await f.invoke("lightmoni_hosts_inventory",{});assert.equal(inventory.data.machines.length,2);
-  const detail=await f.invoke("lightmoni_hosts_details_get",{id:"one"});assert.equal(detail.data.machine.ssh_credentials[0].username,"deploy");
+  const detail=await f.invoke("lightmoni_hosts_details_get",{id:"one"});assert.equal(detail.data.machine.id,"one");assert.equal(Object.hasOwn(detail.data.machine,"accounts"),false);assert.equal(Object.hasOwn(detail.data.machine,"network"),false);
   const legacy=await f.invoke("lightmoni_hosts_get",{id:"one"});assert.equal(Object.hasOwn(legacy.data.host,"ssh_credentials"),false);
   assert.equal((await f.invoke("lightmoni_agent_releases_list",{})).data.releases[0].version,"1.2.3");
   assert.equal((await f.invoke("lightmoni_agent_installations_get",{deployment_id:"install-one"})).data.installation.status,"unknown");
