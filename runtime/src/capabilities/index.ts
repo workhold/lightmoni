@@ -278,12 +278,13 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     if(options.machines) {
       const machines=options.machines;
       definitions.push(
-        {name:"lightmoni_hosts_inventory",description:"Read the detailed assistant-safe host inventory without Host Keys or secrets.",scope:"hosts.read",effect:"read",inputSchema:schema({host_id:string,...page}),execute:async(p,i)=>{
+        {name:"lightmoni_hosts_inventory",description:"Read a compact assistant-safe host inventory without accounts, network candidates, Host Keys or secrets.",scope:"hosts.read",effect:"read",inputSchema:schema({host_id:string,...page}),execute:async(p,i)=>{
           if(i.host_id)this.host(p,i.host_id);
           const rows=machines.assistantList().filter(h=>this.allowedHost(p,h.id)&&(!i.host_id||h.id===i.host_id)),offset=i.offset??0,limit=i.limit??50;
-          return{machines:rows.slice(offset,offset+limit),total:rows.length,truncated:offset+limit<rows.length,next_offset:offset+limit<rows.length?offset+limit:null};
+          const compact=rows.map(h=>this.compactHost(h));
+          return{machines:compact.slice(offset,offset+limit),total:compact.length,truncated:offset+limit<compact.length,next_offset:offset+limit<compact.length?offset+limit:null};
         }},
-        {name:"lightmoni_hosts_details_get",description:"Read one assistant-safe host detail without Host Keys, passwords or private keys.",scope:"hosts.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:async(p,i)=>({machine:(this.host(p,i.id),machines.assistantGet(i.id))})},
+        {name:"lightmoni_hosts_details_get",description:"Read one compact assistant-safe host summary without accounts, network candidates, Host Keys, passwords or private keys.",scope:"hosts.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:async(p,i)=>{this.host(p,i.id);const row=machines.assistantGet(i.id);return {machine:this.compactHost(row)};}},
         {name:"lightmoni_agent_installations_get",description:"Read one sanitized Agent installation plan or receipt. Unknown is not success.",scope:"agents.read",effect:"read",inputSchema:schema({deployment_id:string},["deployment_id"]),execute:async(p,i)=>{
           const installation=machines.assistantDeployment(i.deployment_id);this.host(p,installation.machine_id);return{installation};
         }},
@@ -346,6 +347,19 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     const removed=h.agent_id&&this.deps.db.get("SELECT 1 FROM agent_lifecycle WHERE agent_id=? AND state='removed'",h.agent_id);
     const seen=this.deps.db.get<{last_seen:string}>("SELECT last_seen FROM agents WHERE id=?",h.agent_id)?.last_seen||h.agent_last_seen;
     return {...h,observed_hostname:currentAgentHostname(this.deps.db,h.id,h.agent_id),agent_last_seen:seen,agent_state:!h.agent_id?"not_installed":removed?"removed":seen&&this.deps.now().getTime()-Date.parse(seen)<=90000?"online":"offline"};
+  }
+  private compactHost(h:any) {
+    return {
+      id:h.id,name:h.name,address:h.address,port:h.port,connection_method:h.connection_method,
+      platform:h.platform,arch:h.arch,observed_hostname:h.observed_hostname,
+      agent_id:h.agent_id,agent_status:h.agent_status,agent_observed_at:h.agent_observed_at,
+      agent_release:h.agent_release,agent_update:h.agent_update,agent_runtime_mode:h.agent_runtime_mode,
+      capacity:h.capacity,docker_environment:h.docker_environment,
+      cluster_id:h.cluster_id||'',cluster_name:h.cluster_name||'',
+      label_ids:h.label_ids||[],labels:h.labels||[],
+      capabilities:h.capabilities,busy:h.busy,maintenance_blockers:h.maintenance_blockers,
+      ssh_recovery_available:h.ssh_recovery_available,
+    };
   }
   private taskView(task:Task,allHosts:boolean):any {
     const v=taskMetadata(task);return allHosts?v:Object.fromEntries(Object.entries(v).filter(([k])=>!["host_ids","label_ids","target_all"].includes(k)));
