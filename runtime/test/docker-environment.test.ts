@@ -36,6 +36,7 @@ test('fixed installer has valid shell syntax and bounded, sanitized receipts',()
  assert.throws(()=>dockerInstallCommand('id;touch /tmp/unsafe'));assert.throws(()=>parseDockerInstallStatus('{"state":"succeeded","phase":"verified","code":"private-secret"}'));
  assert.throws(()=>parseDockerInstallStatus('{"state":"succeeded","phase":"installing_packages","code":""}'));
  assert.deepEqual(parseDockerInstallStatus('{"state":"failed","phase":"installing_packages","code":"docker_install_package_failed","stderr":"secret"}'),{state:'failed',phase:'installing_packages',code:'docker_install_package_failed'});
+ assert.deepEqual(parseDockerInstallStatus('{"state":"failed","phase":"unknown","code":"docker_install_evidence_untrusted"}'),{state:'failed',phase:'unknown',code:'docker_install_evidence_untrusted'});
 });
 
 test('Docker ENOENT records a specific safe installation cause',async()=>{
@@ -66,7 +67,8 @@ test('platform restart retains the durable Docker installation fence and status 
  db.run('INSERT INTO machine_docker_installations(id,machine_id,agent_id,request_id,credential_id,state,phase,code,created_by,created_at,updated_at,ssh_account_json,credential_revision,target_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)','a'.repeat(32),'machine','agent','request-0001','credential','running','installing_packages','','admin',new Date().toISOString(),new Date().toISOString(),JSON.stringify({id:'fixture-account',username:'root',revision:1}),'revision','target');
  await service.close();db.close();db=new DB(path);service=make();
  const pending=pendingDockerInstallation(db,'machine');assert.equal(pending.state,'unknown');assert.equal(pending.code,'docker_install_result_unavailable');await service.close();
- const command=dockerInstallStatusCommand('a'.repeat(32));assert.doesNotMatch(command,/mkdir|systemd-run|install\.sh/);assert.match(command,/state.*unknown/);assert.doesNotMatch(command,/state.*failed/);
+ const command=dockerInstallStatusCommand('a'.repeat(32));assert.doesNotMatch(command,/mkdir|systemd-run|install\.sh/);assert.match(command,/state.*unknown/);assert.match(command,/docker_install_not_started/);assert.match(command,/docker_install_status_missing/);
+ assert.match(command,/if \[ ! -e \/var\/lib\/lightmoni-docker-installations \][\s\S]*stat -c[\s\S]*docker_install_evidence_untrusted/);assert.equal(command.indexOf('[ ! -L /var/lib/lightmoni-docker-installations ]'),-1,'readonly check must not repeat start-time parent assertions before existence');assert.match(command,/docker_install_evidence_untrusted/);
  }finally{db.close();rmSync(root,{recursive:true,force:true});}
 });
 

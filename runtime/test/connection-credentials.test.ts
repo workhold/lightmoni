@@ -39,6 +39,12 @@ test("vault deduplicates actual SSH public keys, stores them permanently, and ne
   assert.equal((await f.request("/connection-credentials","POST",{name:"Invalid",method:"ssh_key",secret:"-----BEGIN PRIVATE KEY----- junk"})).status,400);
   const encrypted=ssh2.utils.generateKeyPairSync("ed25519",{passphrase:"fixture-passphrase",cipher:"aes256-cbc"});
   const rejected=await f.request("/connection-credentials","POST",{name:"Encrypted",method:"ssh_key",secret:encrypted.private});assert.equal(rejected.status,400);assert.ok(!rejected.raw.includes("fixture-passphrase"));
+  const methodConflict=await f.request(`/connection-credentials/${first.id}`,"PUT",{name:"Bad method",method:"password",secret:"fixture-password"});assert.equal(methodConflict.status,409);
+  const replacement=ssh2.utils.generateKeyPairSync("ed25519").private.trim();
+  const rotated=await f.request(`/connection-credentials/${first.id}`,"PUT",{name:"Rotated deploy",secret:replacement});assert.equal(rotated.status,200,rotated.raw);assert.equal(rotated.data.name,"Rotated deploy");assert.notEqual(rotated.data.secret_fingerprint,first.secret_fingerprint);assert.ok(!rotated.raw.includes(replacement));
+  const otherSecret=ssh2.utils.generateKeyPairSync("ed25519").private.trim();
+  const other=await f.request("/connection-credentials","POST",{name:"Other active key",method:"ssh_key",secret:otherSecret});assert.equal(other.status,201);
+  const conflict=await f.request(`/connection-credentials/${first.id}`,"PUT",{name:"Duplicate rotation",secret:otherSecret});assert.equal(conflict.status,409);
 });
 
 test("one vault secret binds multiple hosts with automatic default selection; detaching and deleting a host preserve the shared source",async t=>{

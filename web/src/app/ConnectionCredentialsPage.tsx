@@ -23,7 +23,7 @@ export default function ConnectionCredentialsPage(){
  const save=async(values:any)=>{
   if(pending.current||createUnknown)return;pending.current=true;setBusy(true);setActionError('');
   try{
-   if(editing){await api(`/connection-credentials/${encodeURIComponent(editing.id)}`,{method:'PUT',body:JSON.stringify({name:values.name.trim()})});void message.success(t('凭据名称已更新','Credential name updated'))}
+   if(editing){await api(`/connection-credentials/${encodeURIComponent(editing.id)}`,{method:'PUT',body:JSON.stringify({name:values.name.trim(),...(values.secret?{secret:values.secret}:{})})});void message.success(t('连接凭据已更新','Connection credential updated'))}
    else{const saved=await api<ConnectionCredential>('/connection-credentials',{method:'POST',body:JSON.stringify(credentialPayload(values))});void message.success(saved.reused?t('已复用已有私钥','Existing private key reused'):t('连接凭据已保存','Connection credential saved'))}
    form.resetFields();setCreating(false);setEditing(undefined);await load();
   }catch(e){setActionError(text(e));if(!editing&&!(e instanceof ApiError&&e.status<500)){setCreateUnknown(true);form.resetFields()}}finally{pending.current=false;setBusy(false)}
@@ -42,11 +42,15 @@ export default function ConnectionCredentialsPage(){
    {title:t('保存期限','Storage'),width:160,render:(_,c)=>c.retention==='permanent'?t('永久','Permanent'):time(c.expires_at)},
    {title:t('关联主机','Associated hosts'),width:140,render:(_,c)=><Space wrap>{c.hosts.length?c.hosts.map(host=><Link key={host.id} to={`/machines?machine=${encodeURIComponent(host.id)}`}><Tag>{host.name}</Tag></Link>):<Typography.Text type="secondary">{t('尚未关联','Not associated')}</Typography.Text>}</Space>},
    {title:t('最近使用','Last used'),dataIndex:'last_used_at',width:160,render:time},
-   {title:t('操作','Actions'),width:100,render:(_,c)=><Space size={4}><IconAction label={t('重命名','Rename')} icon={<EditOutlined aria-hidden/>} size="small" onClick={()=>{form.resetFields();form.setFieldsValue({name:c.name});setActionError('');setEditing(c)}}/><IconAction label={t('撤销','Revoke')} icon={<StopOutlined aria-hidden/>} aria-label={t('撤销','Revoke')} size="small" danger disabled={c.status==='revoked'||!!c.revoked_at} onClick={()=>{setActionError('');setRevoking(c)}}/></Space>},
+   {title:t('操作','Actions'),width:100,render:(_,c)=><Space size={4}><IconAction label={t('重命名','Rename')} icon={<EditOutlined aria-hidden/>} size="small" onClick={()=>{form.resetFields();form.setFieldsValue({name:c.name,method:c.method});setActionError('');setEditing(c)}}/><IconAction label={t('撤销','Revoke')} icon={<StopOutlined aria-hidden/>} aria-label={t('撤销','Revoke')} size="small" danger disabled={c.status==='revoked'||!!c.revoked_at} onClick={()=>{setActionError('');setRevoking(c)}}/></Space>},
   ]}/></div>
   <Modal open={creating||!!editing} title={editing?t('重命名连接凭据','Rename connection credential'):t('新增连接凭据','Add connection credential')} onCancel={close} footer={null} width={600} className="lm-machine-credential-dialog" style={{top:24}} closable={!busy} maskClosable={false} destroyOnHidden>
    {createUnknown?<><Alert type="warning" showIcon title={t('凭据保存结果未知','Credential save outcome unknown')} description={t('服务器可能已经保存。请返回凭据列表刷新核查，避免重复创建。','The server may have saved the credential. Return to the credential list and refresh to verify it before creating another.')}/><Button style={{marginTop:16}} onClick={()=>{close();void load()}}>{t('返回凭据列表并刷新','Back to credentials and refresh')}</Button></>:<Form form={form} layout="vertical" disabled={busy} initialValues={credentialInitialValues} onValuesChange={changed=>clearCredentialSecrets(form,changed)} onFinish={values=>void save(values)}>
-    {editing?<Form.Item name="name" label={t('凭据名称','Credential name')} rules={[{required:true,message:t('请输入凭据名称','Enter a credential name')},{max:128}]}><Input aria-label={t('凭据名称','Credential name')} autoComplete="off"/></Form.Item>:<MachineCredentialFields nameRequired/>}
+    {editing?<>
+    <Form.Item name="name" label={t('凭据名称','Credential name')} rules={[{required:true,message:t('请输入凭据名称','Enter a credential name')},{max:128}]}><Input aria-label={t('凭据名称','Credential name')} autoComplete="off"/></Form.Item>
+    <Form.Item label={t('登录方式','Login method')} name="method"><Input disabled/></Form.Item>
+    <Form.Item noStyle shouldUpdate={(a,b)=>a.method!==b.method}>{({getFieldValue})=><Form.Item label={getFieldValue('method')==='ssh_key'?t('替换 SSH 私钥','Replace SSH private key'):t('替换 SSH 密码','Replace SSH password')} name="secret" extra={t('留空保留现有秘密；新秘密加密保存且不会回显。','Leave blank to retain the existing secret. The new secret is encrypted and never displayed.')}>{getFieldValue('method')==='ssh_key'?<Input.TextArea autoComplete="off" rows={4} placeholder={t('SSH 私钥内容','SSH private key content')}/>:<Input.Password autoComplete="new-password" visibilityToggle={false} placeholder={t('输入新 SSH 密码','Enter a new SSH password')}/>}</Form.Item>}</Form.Item>
+   </>:<MachineCredentialFields nameRequired/>}
     {actionError&&<Alert type="error" showIcon title={t('凭据保存失败','Could not save credential')} description={actionError} style={{marginBottom:16}}/>}<Button aria-label={t('保存凭据','Save credential')} type="primary" htmlType="submit" block loading={busy}>{t('保存凭据','Save credential')}</Button>
    </Form>}
   </Modal>

@@ -136,6 +136,37 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
   const cleanup = () => {
     for (const value of db.all<Row>("SELECT * FROM connection_credentials WHERE secret_encrypted!='' OR secret_cleared_at=''")) if (!current(value)) clear(value.id,value.revoked_at?"revoked":"expired");
   };
+  const update = (credentialID: string, input: Row, actorID: string) => {
+    const value = row(credentialID);
+    if (value.revoked_at) fail(409, "已撤销连接凭据不能更新");
+    const name = text(input.name, "name", 128);
+    if (input.method !== undefined && input.method !== value.method) fail(409, "credential_method_immutable");
+    const rotate = input.secret !== undefined || input.retention !== undefined || input.expires_in_seconds !== undefined;
+    if (!rotate) {
+      db.run("UPDATE connection_credentials SET name=? WHERE id=?",name,credentialID);
+      db.run("INSERT INTO connection_credential_events(id,credential_id,event,actor_id,created_at) VALUES(?,?,?,?,?)",id(),credentialID,"renamed",actorID,at());
+      return publicRow(row(credentialID));
+    }
+    if (value.secret_cleared_at && input.secret === undefined) fail(400, "invalid secret");
+    const method = value.method;
+    const validated = validate({ ...input, name, method, confirm_permanent: input.retention === "permanent" || value.retention === "permanent" ? true : input.confirm_permanent });
+    if (validated.fingerprint) {
+      const duplicate = db.all<Row>("SELECT * FROM connection_credentials WHERE method='ssh_key' AND secret_fingerprint=? AND id!=?", validated.fingerprint, credentialID).find(current);
+      if (duplicate) fail(409, "ssh_key_fingerprint_already_active");
+    }
+    const restore = !!value.secret_cleared_at;
+    db.transaction(() => {
+      db.run(`UPDATE connection_credentials SET name=?,secret_encrypted=?,secret_fingerprint=?,retention=?,expires_at=?,
+        secret_cleared_at=CASE WHEN ? THEN '' ELSE secret_cleared_at END,
+        clear_reason=CASE WHEN ? THEN '' ELSE clear_reason END WHERE id=?`,
+        name,deps.encrypt(JSON.stringify({ connection_credential_id: credentialID, secret: validated.secret })),
+        validated.fingerprint,validated.retention,validated.expiresAt,restore,restore,credentialID);
+      if (restore) db.run(`UPDATE machine_credentials SET method=?,retention=CASE WHEN ?='permanent' THEN 'permanent' ELSE retention END,expires_at=CASE WHEN ?='permanent' THEN '' ELSE expires_at END
+        WHERE connection_credential_id=? AND revoked_at IS NULL`,method,validated.retention,validated.retention,credentialID);
+      db.run("INSERT INTO connection_credential_events(id,credential_id,event,actor_id,created_at) VALUES(?,?,?,?,?)",id(),credentialID,"secret_rotated",actorID,at());
+    });
+    return publicRow(row(credentialID));
+  };
   const lifetime = (input: Row) => { const value=validate(input); return {retention:value.retention,expiresAt:value.expiresAt}; };
   const bind = (machineID: string, accountID:string, credentialID: string, actorID: string, makeDefault = true, requested?: {retention:string;expiresAt:string}) => {
     if(!db.get("SELECT id FROM machine_ssh_accounts WHERE id=? AND machine_id=? AND deleted_at=''",accountID,machineID))fail(404,'SSH 登录账户不存在');
@@ -175,7 +206,7 @@ export function connectionCredentials(deps: Dependencies, invalidated: (bindingI
     const base = "/api/v1/connection-credentials", admin = deps.auth.requireAdmin.bind(deps.auth);
     deps.router.get(base,safe(ctx=>{admin(ctx);cleanup();ctx.json(db.all<Row>("SELECT * FROM connection_credentials ORDER BY created_at DESC,id").map(publicRow));}));
     deps.router.post(base,safe(async ctx=>{admin(ctx);cleanup();const input=fields(await ctx.body(),["name","method","secret","retention","expires_in_seconds","confirm_managed","confirm_permanent"]);ctx.json(create(input,ctx.user.id),201);}));
-    deps.router.put(base+"/:id",safe(async ctx=>{admin(ctx);const input=fields(await ctx.body(),["name"]);row(ctx.params.id);db.run("UPDATE connection_credentials SET name=? WHERE id=?",text(input.name,"name",128),ctx.params.id);ctx.json(publicRow(row(ctx.params.id)));}));
+    deps.router.put(base+"/:id",safe(async ctx=>{admin(ctx);const input=fields(await ctx.body(),["name","method","secret","retention","expires_in_seconds","confirm_managed","confirm_permanent"]);ctx.json(update(ctx.params.id,input,ctx.user.id));}));
     deps.router.post(base+"/:id/revoke",safe(async ctx=>{admin(ctx);const input=fields(await ctx.body(),["confirm"]);if(input.confirm!==true)fail(400,"必须明确确认撤销此凭据及全部关联主机的使用权限");ctx.json(clear(ctx.params.id,"revoked",ctx.user.id));}));
   };
   return {create,ensure,bind,lifetime,cleanup,used,consumed,register};

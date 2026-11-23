@@ -473,6 +473,17 @@ test("a non-root login without noninteractive sudo cannot plan or dispatch an ac
           );
       });
 });
+test("runtime plan history hides plans from a replaced Agent identity", async t => {
+  const f=await fixture(t),p=await f.plan();
+  f.db.run(
+    "INSERT INTO machine_agent_runtime_plans(id,machine_id,agent_id,credential_id,status,revision,plan_json,created_by,created_at,expires_at) VALUES('legacy','host','legacy-agent','credential','succeeded',?,?, 'admin','2026-11-01T00:00:00Z','2026-11-01T00:05:00Z')",
+    sha256(canonicalJSON({legacy:true})),
+    canonicalJSON({machine:{id:'host',name:'Reviewed host',agent_id:'legacy-agent'},from_mode:'user',runtime_mode:'root',previous_generation:98,permission_generation:99,credential_id:'credential'}),
+  );
+  const plans=await f.request("/plans");
+  assert.equal(plans.status,200,plans.raw);
+  assert.deepEqual(plans.data.map((v:any)=>v.id),[p.id]);
+});
 test("reviewed root/user transitions keep one Agent identity and bind permission generations", async (t) => {
   for (const mode of ["user", "root"] as const)
     await t.test(mode, async (sub) => {

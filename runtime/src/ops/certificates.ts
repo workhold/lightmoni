@@ -1431,6 +1431,7 @@ export function createCertificateController(
             const summary = publishDNSRecords(options, resource, records);
             store.patchStatus(resource.id, {
               state: verified ? "synced" : "verifying",
+              last_error: null,
             });
             return {
               ...summary,
@@ -1560,7 +1561,9 @@ export function createCertificateController(
           {},
           zone.authorized_by,
         );
-        if (run.state !== "succeeded")
+        if (run.state === "succeeded")
+          store.patchStatus(zone.id, { state: "synced", last_error: null });
+        else
           store.patchStatus(zone.id, {
             state: run.state,
             last_error: run.result.code ?? "dns_sync_failed",

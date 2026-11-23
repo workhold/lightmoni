@@ -286,6 +286,35 @@ function CategoryManager({categories,onRequestDelete,onRequestRename}:{categorie
   </>;
 }
 
+function SessionHeaderEditor({title,category,options,disabled,onTitleCommit,onCategoryCommit}:{title:string;category:string;options:{value:string;label:ReactNode}[];disabled:boolean;onTitleCommit:(title:string)=>void;onCategoryCommit:(category:string)=>void}) {
+  const {t}=useI18n(),[draft,setDraft]=useState(title),committed=useRef(title);
+  useEffect(()=>{committed.current=title;setDraft(title)},[title]);
+  const commit=()=>{const next=draft.trim();if(!next||next===committed.current)return;committed.current=next;onTitleCommit(next);};
+  return <div className="lm-session-header-editor">
+    <Input
+      className="lm-session-title-input"
+      value={draft}
+      disabled={disabled}
+      onChange={event=>setDraft(event.target.value)}
+      onBlur={commit}
+      onPressEnter={commit}
+      aria-label={t('对话标题','Conversation title')}
+      placeholder={t('输入对话标题','Enter conversation title')}
+      maxLength={240}
+      size="small"
+    />
+    <CategoryField
+      className="lm-session-category-input"
+      value={category}
+      options={options}
+      disabled={disabled}
+      onCommit={onCategoryCommit}
+      ariaLabel={t('对话分类','Conversation category')}
+      placeholder={t('未分类','Uncategorized')}
+    />
+  </div>;
+}
+
 export function AssistantPanel({ compact = false, initialContext, initialPrompt, onDashboardDraft, onSQL }: AssistantPanelProps) {
  const {language,t}=useI18n();
  const pageTitles:Record<string,string>={
@@ -632,6 +661,12 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"PATCH",body:JSON.stringify({category})}); setSessions(previous=>previous.map(session=>session.id===id?{...session,category}:session)); if(selectedSession.current===id)void loadSession(id); }
     catch(problem){ setError(errorText(problem,t)); void message.error(errorText(problem,t)); }
   }
+  async function updateSessionTitle(id:string,title:string){
+    const normalized=title.trim();
+    if(!normalized)return;
+    try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"PATCH",body:JSON.stringify({title:normalized})}); setSessions(previous=>previous.map(session=>session.id===id?{...session,title:normalized}:session)); }
+    catch(problem){ setError(errorText(problem,t)); void message.error(errorText(problem,t)); }
+  }
   async function deleteSession(id:string){
     setDeletingIds(previous=>[...new Set([...previous,id])]);
     try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"DELETE"}); setSessions(previous=>previous.filter(session=>session.id!==id)); eventCache.current.delete(id);drafts.current.delete(id); if(sessionId===id)newConversation(); void message.success(t("对话已删除","Conversation deleted")); }
@@ -668,20 +703,11 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
               <button className={`lm-assistant-session ${sessionId===session.id?'active':''}`} disabled={creating||deleting} onClick={()=>void loadSession(session.id)}>
                 <MessageOutlined aria-hidden="true"/>
                 <span className="lm-assistant-session-name">
-                  <span>{session.title}</span>
-                  <small>{categoryLabel(session.category)} · {new Date(session.updated_at).toLocaleString(language)}</small>
+                  <span className="lm-assistant-session-title" title={session.title}>{session.title}</span>
+                  <small>{new Date(session.updated_at).toLocaleString(language)}</small>
                 </span>
                 {status&&status!=='idle'&&<span className={`lm-assistant-session-status ${status}`} aria-label={status==='running'?t('响应中','Responding'):status==='failed'?t('失败','Failed'):t('待确认','Needs review')}>{status==='running'?<LoadingOutlined spin/>:status==='failed'?t('失败','Failed'):t('待确认','Review')}</span>}
               </button>
-              <CategoryField
-                className="lm-assistant-category-select"
-                value={session.category||''}
-                options={categoryOptionsFor(session.category)}
-                disabled={deleting||running}
-                onCommit={category=>void updateSessionCategory(session.id,category)}
-                      ariaLabel={t('对话分类','Conversation category')}
-                placeholder={t('未分类','Uncategorized')}
-              />
               <Button className="lm-assistant-session-delete" type="text" size="small" danger icon={<DeleteOutlined/>} loading={deleting} disabled={deleting||running} aria-label={t("删除对话","Delete conversation")} onClick={()=>void deleteSession(session.id)}/>
             </div>;
           })}
@@ -699,10 +725,17 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
       <header className="lm-workbench-head">
         <div className="lm-workbench-title">
           <span className="lm-workbench-mark"><ThunderboltOutlined/></span>
-          <div>
-            <strong>{sessionId?(selectedSessionData?.title||t('当前任务','Current task')):t('新任务','New task')}</strong>
-            <small>{config?.model||t('模型未配置','Model not configured')} · {sessionRunning?t('运行中','Running'):selectedSessionData?.status==='needs_action'?t('待确认','Needs review'):selectedSessionData?.status==='failed'?t('失败','Failed'):t('空闲','Idle')}</small>
-          </div>
+          {sessionId&&selectedSessionData?<SessionHeaderEditor
+            title={selectedSessionData.title}
+            category={selectedSessionData.category||''}
+            options={categoryOptionsFor(selectedSessionData.category)}
+            disabled={sessionRunning}
+            onTitleCommit={title=>void updateSessionTitle(selectedSessionData.id,title)}
+            onCategoryCommit={category=>void updateSessionCategory(selectedSessionData.id,category)}
+          />:<div>
+            <strong>{t('新任务','New task')}</strong>
+            <small>{config?.model||t('模型未配置','Model not configured')} · {sessionRunning?t('运行中','Running'):t('空闲','Idle')}</small>
+          </div>}
         </div>
         <Button className="lm-workbench-inspector-toggle" type={inspectorOpen?'primary':'default'} size="small" icon={<PicRightOutlined/>} aria-pressed={inspectorOpen} onClick={()=>setInspectorOpen(value=>!value)}>{t('检查器','Inspector')}</Button>
       </header>

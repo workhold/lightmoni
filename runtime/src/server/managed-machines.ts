@@ -172,6 +172,9 @@ export interface MachineSummary {
   updated_at: string;
   created_at: string;
 }
+export type AssistantMachineSummary = Omit<MachineSummary,
+  'network' | 'host_key_fingerprint' | 'ssh_target_generation' | 'host_key_public_key' | 'host_key_observed_at' | 'host_key_status' |
+  'default_account_id' | 'accounts' | 'credential_count' | 'active_credential_count' | 'active_ssh_key_count'>;
 export type SSHMachineTarget = MachineSummary & {account_id:string;username:string;account_revision:number};
 
 export interface SSHCheckResult {
@@ -195,8 +198,8 @@ export interface ManagedMachineStore {
   registerExecutorBootstrap(store: PrivilegedExecutorStore): Module;
   list(): MachineSummary[];
   get(machineID: string): MachineSummary;
-  assistantList(): MachineSummary[];
-  assistantGet(machineID: string): MachineSummary & { ssh_credentials: { id: string; method: string; expires_at: string }[] };
+  assistantList(): AssistantMachineSummary[];
+  assistantGet(machineID: string): AssistantMachineSummary & { ssh_credentials: { id: string; method: string; expires_at: string }[] };
   checkSSH(machineID: string, input: { credential_id?: string }, actorID: string, signal: AbortSignal): Promise<SSHCheckResult>;
   installationPreflight(machineID:string,input:{selection:'auto'|'manual';credential_id?:string},actorID:string,signal?:AbortSignal):Promise<SSHCheckResult>;
   assistantPlan(machineID: string, input: InstallPlanInput, actorID: string): Record<string, any>;
@@ -908,7 +911,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const current = get(machineID), check = checked(current, input.check_id, input.credential_id);
     const { machine, credential } = sshCredential(machineID, check.credential_id);
     if (!replaceableAgentBinding(db, machine.agent_id, iso(now())) || check.agent_installation?.state !== "absent") fail(409, "已发现或无法排除已有 Agent 安装，请先核对现有节点，不可覆盖安装");
-    const version = text(input.version ?? "0.1.29", "version", 64), arch = text(input.arch ?? check.arch, "arch", 16);
+    const version = text(input.version ?? "0.1.32", "version", 64), arch = text(input.arch ?? check.arch, "arch", 16);
     if (!VERSION.test(version) || !ARCHES.has(arch)) fail(400, "invalid version or arch");
     if (arch !== check.arch) fail(409, "所选架构与 SSH 检查结果不一致");
     const at = now(), deploymentID = id();
@@ -1163,7 +1166,39 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
   registerInstallationRecovery(deps,{get,idle,revision:targetRevision,credential:sshCredential,authentication,markCredentialUsed,busy,runner:runSSH,safe,deployment:deploymentRecord,runtimeHealthy(operation,heartbeat){const plan=parseJSON<any>(operation.plan_json,{}),runtime=db.get<any>('SELECT * FROM machine_agent_runtime WHERE machine_id=?',operation.machine_id);if(!runtime)return true;const r=heartbeat.runtime;if(!validAgentRuntimeObservation(r)||r.mode!==runtime.runtime_mode||r.permission_generation!==runtime.permission_generation)return false;return runtime.runtime_mode!=='root'||!!executorStore?.getStatus(operation.machine_id).executor?.online;},
     resolveRuntime(operation,actor){return executorStore?.resolveUnifiedInstallation(operation.machine_id,actor,operation.id)??null;},
     activated(machineID,actorID){for(const temporary of db.all<{id:string}>("SELECT id FROM machine_credentials WHERE machine_id=? AND retention IN ('temporary','one_time')",machineID))clearCredential(temporary.id,"agent_activated",actorID,true);}},options.agentCredentials);
-  const assistantSafe = (machine: MachineSummary) => ({ ...machine, host_key_fingerprint: "", host_key_public_key: "", host_key_observed_at: "" });
+  // Assistant tools need enough state to explain and plan host operations, but
+  // not every UI account, SSH check receipt, address and raw network snapshot.
+  const assistantSafe = (machine: MachineSummary) => ({
+    id: machine.id,
+    name: machine.name,
+    observed_hostname: machine.observed_hostname,
+    address: machine.address,
+    port: machine.port,
+    connection_method: machine.connection_method,
+    platform: machine.platform,
+    arch: machine.arch,
+    agent_id: machine.agent_id,
+    agent_status: machine.agent_status,
+    agent_observed_at: machine.agent_observed_at,
+    capacity: machine.capacity,
+    docker_environment: machine.docker_environment,
+    label_ids: machine.label_ids,
+    labels: machine.labels,
+    cluster_id: machine.cluster_id,
+    cluster_name: machine.cluster_name,
+    active_ssh_credential_count: machine.active_ssh_credential_count,
+    active_reusable_ssh_credential_count: machine.active_reusable_ssh_credential_count,
+    ssh_recovery_available: machine.ssh_recovery_available,
+    capabilities: machine.capabilities,
+    agent_release: machine.agent_release,
+    agent_update: machine.agent_update,
+    agent_runtime_mode: machine.agent_runtime_mode,
+    agent_operation: machine.agent_operation,
+    last_deployment_status: machine.last_deployment_status,
+    last_uninstallation_status: machine.last_uninstallation_status,
+    updated_at: machine.updated_at,
+    created_at: machine.created_at,
+  });
   const assistantList = () => list().map(assistantSafe);
   const assistantGet = (machineID: string) => ({ ...assistantSafe(get(machineID)), ssh_credentials: credentialRows(machineID)
     .filter(c => (c.method === "ssh_key" || c.method === "password" && ["temporary", "managed", "permanent"].includes(c.retention)) && !c.revoked_at && !c.secret_cleared_at && machineCredentialCurrent(c, now()))

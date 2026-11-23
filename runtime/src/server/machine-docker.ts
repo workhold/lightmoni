@@ -19,7 +19,7 @@ interface Access {
 }
 const quote=(s:string)=>"'"+s.replaceAll("'","'\\''")+"'";
 const privileged=(s:string,start=false)=>`if test "$(id -u)" = 0; then /bin/sh -c ${quote(s)}; elif sudo -n true >/dev/null 2>&1; then sudo -n /bin/sh -c ${quote(s)}; else printf '%s' '{"state":"${start?'failed':'unknown'}","phase":"${start?'checking_system':'unknown'}","code":"docker_install_privilege_required"}'; fi`;
-export const DOCKER_INSTALL_CODES=['','docker_install_failed','docker_install_interrupted','docker_install_privilege_required','docker_install_unsupported','docker_install_busy','docker_install_package_conflict','docker_install_package_failed','docker_install_service_failed','docker_install_verification_failed','docker_install_result_unavailable','host_key_mismatch','ssh_failed','timed_out','cancelled'];
+export const DOCKER_INSTALL_CODES=['','docker_install_failed','docker_install_interrupted','docker_install_privilege_required','docker_install_unsupported','docker_install_busy','docker_install_package_conflict','docker_install_package_failed','docker_install_service_failed','docker_install_verification_failed','docker_install_result_unavailable','docker_install_not_started','docker_install_status_missing','docker_install_evidence_untrusted','host_key_mismatch','ssh_failed','timed_out','cancelled'];
 const phases=['checking_system','installing_packages','starting_docker','verifying_docker','verified','connecting','unknown'];
 export function parseDockerInstallStatus(output:string) {
  let v:any;try{if(Buffer.byteLength(output)>2048)throw Error();v=JSON.parse(output);}catch{throw Error('docker_install_result_unavailable');}
@@ -30,8 +30,14 @@ function remote(operationID:string,start:boolean) {
  if(!/^[a-f0-9]{32}$/.test(operationID))throw Error('invalid_docker_installation');
  const directory='/var/lib/lightmoni-docker-installations',path=directory+'/'+operationID,unit='lightmoni-docker-'+operationID;
  // Root-only directories cannot be redirected through an Agent-writable path.
- const safe=`set -eu\numask 077\n[ ! -L ${directory} ]\n${start?`if [ ! -e ${directory} ]; then mkdir -m 0700 ${directory}; fi\n`:""}[ "$(stat -c '%u:%a' ${directory})" = '0:700' ]\n[ -d ${directory} ]\n`;
- if(!start)return privileged(safe+`[ -d ${path} ] && [ ! -L ${path} ] && [ "$(stat -c '%u:%a' ${path})" = '0:700' ]\ncat ${path}/status.json`);
+ const safe=`set -eu\numask 077\n${start?`[ ! -L ${directory} ]\nif [ ! -e ${directory} ]; then mkdir -m 0700 ${directory}; fi\n[ "$(stat -c '%u:%a' ${directory})" = '0:700' ]\n[ -d ${directory} ]\n`:""}`;
+ if(!start)return privileged(safe+`if [ -L ${directory} ]; then printf '%s' '{"state":"failed","phase":"unknown","code":"docker_install_evidence_untrusted"}'; exit 0; fi
+if [ ! -e ${directory} ] || [ ! -d ${directory} ]; then printf '%s' '{"state":"failed","phase":"unknown","code":"docker_install_not_started"}'; exit 0; fi
+if [ "$(stat -c '%u:%a' ${directory})" != '0:700' ]; then printf '%s' '{"state":"failed","phase":"unknown","code":"docker_install_evidence_untrusted"}'; exit 0; fi
+if [ -L ${path} ]; then printf '%s' '{"state":"failed","phase":"unknown","code":"docker_install_evidence_untrusted"}'; exit 0; fi
+if [ ! -e ${path} ] || [ ! -d ${path} ]; then printf '%s' '{"state":"failed","phase":"unknown","code":"docker_install_not_started"}'; exit 0; fi
+if [ "$(stat -c '%u:%a' ${path})" != '0:700' ]; then printf '%s' '{"state":"failed","phase":"unknown","code":"docker_install_evidence_untrusted"}'; exit 0; fi
+if [ ! -f ${path}/status.json ]; then printf '%s' '{"state":"failed","phase":"unknown","code":"docker_install_status_missing"}'; else cat ${path}/status.json; fi`);
  return privileged(safe+`[ ! -e ${path} ] && [ ! -L ${path} ]\nmkdir -m 0700 ${path}\nprintf '%s' ${quote(Buffer.from(dockerInstallScript).toString('base64'))} | base64 -d > ${path}/install.sh\nprintf '%s' '{"state":"running","phase":"checking_system","code":""}' > ${path}/status.json\nsystemd-run --quiet --unit=${unit} --property=Type=exec --property=RuntimeMaxSec=900 /bin/sh ${path}/install.sh ${path}\ncat ${path}/status.json`,true);
 }
 export const dockerInstallCommand=(id:string)=>remote(id,true);
