@@ -240,7 +240,7 @@ export function registerSettings(
   );
   registerCenterEndpoints(d, () => reportingSettings(d), agentCredentials);
   r.get("/api/v1/settings/instance", (c) =>
-    c.json({ external_url: d.externalURL, version: "0.1.33" }),
+    c.json({ external_url: d.externalURL, version: "0.1.34" }),
   );
   r.get("/api/v1/settings/reporting", (c) => c.json(reportingSettings(d)));
   r.put("/api/v1/settings/reporting", async (c) => {
