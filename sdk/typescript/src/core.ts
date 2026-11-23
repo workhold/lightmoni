@@ -284,7 +284,7 @@ class State {
     if (!this.options.key || this.stats.reportingDisabled || this.options.selfTelemetry === false || clock - this.selfLast < 30_000) return;
     this.selfLast = clock;
     const at = new Date().toISOString(), time = nano(nowNano());
-    const attributes: Attribute[] = [{key:'lightmoni.component',value:{stringValue:'sdk'}},{key:'sdk.language',value:{stringValue:'typescript'}},{key:'sdk.version',value:{stringValue:'0.1.32'}}];
+    const attributes: Attribute[] = [{key:'lightmoni.component',value:{stringValue:'sdk'}},{key:'sdk.language',value:{stringValue:'typescript'}},{key:'sdk.version',value:{stringValue:'0.1.33'}}];
     const values = { heartbeat: 1, pending_batches: this.stats.pendingBatches, pending_bytes: this.stats.pendingBytes, retried_batches: this.stats.retriedBatches, dropped_records: this.stats.droppedRecords, rejected_records: this.stats.rejectedRecords, invalid_records: this.stats.invalidRecords, overflow_records: this.stats.overflowRecords };
     this.enqueueSelf('metrics', Object.entries(values).map(([name,value]) => ({ name: `lightmoni.sdk.${name}`, gauge: { dataPoints: [{ timeUnixNano: time, attributes, asDouble: value }] } })), at);
     const changed = this.selfPrevious && (['retriedBatches','droppedRecords','rejectedRecords','invalidRecords','overflowRecords'] as const).some(key => this.stats[key] > this.selfPrevious![key]);
