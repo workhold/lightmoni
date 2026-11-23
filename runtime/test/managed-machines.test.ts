@@ -60,7 +60,7 @@ test('managed machines validate host input and never return credential secrets',
  const credential=await f.request(`/machines/${machine.id}/accounts/${f.accountID(machine.id)}/credentials`,'POST',{method:'ssh_key',secret:key,retention:'temporary'});
  assert.equal(credential.status,201,credential.raw);assert.ok(!credential.raw.includes('PRIVATE KEY'));assert.ok(credential.data.secret_fingerprint);assert.equal(credential.data.retention,'temporary');
  const detail=await f.request(`/machines/${machine.id}`);assert.equal(detail.status,200);assert.ok(!detail.raw.includes('PRIVATE KEY'));assert.equal(detail.data.credentials.length,1);
- const assistant=f.machines.assistantGet(machine.id);assert.equal(assistant.host_key_fingerprint,'');
+ const assistant=f.machines.assistantGet(machine.id);assert.ok(!('host_key_fingerprint' in assistant));assert.ok(!JSON.stringify(assistant).includes('SHA256:'));
 });
 
 test('host reads use persisted Agent observations without SSH or duplicate network reads',async t=>{
@@ -408,12 +408,25 @@ test('Agent operation summary ordering is stable for tied timestamps and cross-t
  assert.equal(f.machines.get(h.id).agent_operation?.id,'b-active');
 });
 
+test('AI host projections are bounded and omit UI-only host evidence',async t=>{
+ const f=await fixture(t),h=await host(f);
+ const listed=f.machines.assistantList();
+ assert.equal(listed.length,1);
+ const serialized=JSON.stringify([listed,f.machines.assistantGet(h.id)]);
+ for(const key of ['accounts','network','host_key_fingerprint','host_key_public_key','last_check'])
+  assert.ok(!serialized.includes('"'+key+'"'),key+' must not enter AI host projections');
+ for(const item of [listed[0],f.machines.assistantGet(h.id)]) {
+  assert.equal(item.id,h.id);assert.equal(item.active_reusable_ssh_credential_count,1);
+  assert.ok(item.capabilities.ssh_check);assert.ok('docker_environment' in item);
+ }
+ assert.deepEqual(f.machines.assistantGet(h.id).ssh_credentials.map((c:any)=>c.id),[h.credential]);
+});
 test('AI preflight really calls SSH, saves an auditable result and creates the exact reviewable plan',async t=>{
  const f=await fixture(t),h=await host(f),tools=monitoringTools(f.deps,{machines:f.machines});
  const execute=(name:string,input:any,user=f.user)=>tools.find(tool=>tool.name===name)!.execute(input,new AbortController().signal,user);
  const metadata:any=await execute('get_managed_machine',{machine_id:h.id});
  assert.deepEqual(metadata.ssh_credentials.map((c:any)=>c.id),[h.credential]);
- assert.equal(metadata.host_key_fingerprint,'');assert.ok(!JSON.stringify(metadata).includes(h.key));
+ assert.ok(!('host_key_fingerprint' in metadata));assert.ok(!JSON.stringify(metadata).includes(h.key));assert.ok(!JSON.stringify(metadata).includes('SHA256:'));
  const checked:any=await execute('check_managed_machine_ssh',{machine_id:h.id});
  assert.equal(checked.ready,true);assert.equal(checked.connected,true);assert.equal(f.sshInput.privateKey,h.key);
  assert.equal(f.sshInput.enrollmentToken,undefined);assert.equal(f.issued,undefined);

@@ -115,7 +115,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  };
  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;requests.current.clear()}},[]);
  const [searchParams,setSearchParams]=useSearchParams();
- const linkedMachine=searchParams.get('machine'),linkedDeployment=searchParams.get('deployment'),linkedUninstallation=searchParams.get('uninstallation'),linkedUpdate=searchParams.get('agent_update')||searchParams.get('update'),linkedRollout=searchParams.get('agent_rollout')||searchParams.get('rollout');
+ const linkedMachine=searchParams.get('machine'),linkedHostTab=searchParams.get('host_tab'),linkedDeployment=searchParams.get('deployment'),linkedUninstallation=searchParams.get('uninstallation'),linkedUpdate=searchParams.get('agent_update')||searchParams.get('update'),linkedRollout=searchParams.get('agent_rollout')||searchParams.get('rollout');
  const [checkDetail,setCheckDetail]=useState<Detail>(),[checkBusy,setCheckBusy]=useState(false),[checkError,setCheckError]=useState(''),[checkResult,setCheckResult]=useState<SSHCheckResult>();
  const checkController=useRef<AbortController|null>(null);
  const [planCheck,setPlanCheck]=useState<SSHCheckResult>();
@@ -280,10 +280,10 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
   if(!admin||!linkedMachine||linkedDeployment||linkedUninstallation||linkedUpdate)return;
   const token=requests.current.begin('detail',linkedMachine);
   api<Detail>(`/machines/${encodeURIComponent(linkedMachine)}`)
-   .then(host=>{if(current(token)&&host.machine.id===linkedMachine){setDetailTab('overview');setDetail(host);setDetailError('')}})
+   .then(host=>{if(current(token)&&host.machine.id===linkedMachine){setDetailTab(linkedHostTab==='execution'?'execution':'overview');setDetail(host);setDetailError('')}})
    .catch(e=>{if(current(token))setError(errorText(e))});
   return()=>{if(requests.current.current(token))requests.current.close('detail')};
- },[admin,linkedMachine,linkedDeployment,linkedUninstallation,linkedUpdate]);
+ },[admin,linkedMachine,linkedHostTab,linkedDeployment,linkedUninstallation,linkedUpdate]);
  useEffect(()=>{
   if(!admin||!linkedMachine||!linkedUpdate)return;
   const token=requests.current.begin('update',linkedMachine);
