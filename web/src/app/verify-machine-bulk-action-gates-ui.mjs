@@ -37,7 +37,7 @@ try{
  await expect(toolbar.getByRole('button',{name:'卸载 Agent',exact:true})).toBeEnabled();
  await expect(toolbar.getByRole('button',{name:'移除节点',exact:true})).toBeEnabled();
  await expect(toolbar.getByRole('button',{name:'删除主机',exact:true})).toBeDisabled();
- await expect(toolbar.getByRole('button',{name:'升级 Agent',exact:true})).toBeDisabled();
+ await expect(toolbar.getByRole('button',{name:'一键升级 Agent',exact:true})).toBeDisabled();
  await expect(toolbar.getByText(/SSH\/安装\/卸载等批次最多 50 台，Agent 升级批次最多 20 台/)).toBeVisible();
  expect(writes).toEqual([]);
  await page.screenshot({path:join(output,'bulk-action-gates.png'),fullPage:true});await writeFile(join(output,'bulk-action-gates.json'),JSON.stringify({passed:2,checks:['current installed host shows safe Agent-management actions','current installed host with deploy capability still disables overwrite bulk install and documents separate 50/20 limits'],writes},null,2));console.log(JSON.stringify({passed:2,checks:['current installed host shows safe Agent-management actions','current installed host with deploy capability still disables overwrite bulk install and documents separate 50/20 limits']}));

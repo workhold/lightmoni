@@ -738,25 +738,38 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   }), { public: true });
   router.get("/api/v1/agent-rollouts", access.safe(ctx => ctx.json(db.all<{id:string}>("SELECT id FROM agent_update_rollouts ORDER BY created_at DESC,rowid DESC LIMIT 50").map(value => rolloutView(value.id)))));
   router.get("/api/v1/agent-rollouts/:rolloutId", access.safe(ctx => ctx.json(rolloutView(ctx.params.rolloutId))));
-  router.post("/api/v1/agent-rollouts/plan", access.safe(async ctx => {
-    deps.auth.requireAdmin(ctx); const input = fields(await ctx.body(), ["machine_ids", "target_sha256", "credential_ids"]);
+  for (const action of ["plan", "start"] as const) router.post("/api/v1/agent-rollouts/" + action, access.safe(async ctx => {
+    deps.auth.requireAdmin(ctx);
+    const automatic = action === "start";
+    const input = fields(await ctx.body(), automatic ? ["machine_ids"] : ["machine_ids", "target_sha256", "credential_ids"]);
     if (!Array.isArray(input.machine_ids) || !input.machine_ids.length || input.machine_ids.length > 20
       || input.machine_ids.some((mid: any) => typeof mid !== "string") || new Set(input.machine_ids).size !== input.machine_ids.length) fail(400, "每批请选择 1–20 台不同主机");
-    catalog.get(string(input.target_sha256, "target_sha256", 64));
+    const target = automatic ? "" : catalog.get(string(input.target_sha256, "target_sha256", 64)).sha256;
     if (input.credential_ids != null) {
       fields(input.credential_ids, input.machine_ids);
       for (const value of Object.values(input.credential_ids)) string(value, "credential_id");
     }
     const planned: AgentUpdate[] = [];
+    const rolloutID = id();
     try {
-      for (const mid of input.machine_ids) planned.push(await plan(mid, { action: "upgrade", target_sha256: input.target_sha256, credential_id: input.credential_ids?.[mid] }, ctx.user.id, ctx.signal));
-      const rolloutID = id();
+      for (const mid of input.machine_ids) {
+        planned.push(await plan(mid, { action: "upgrade", target_sha256: target || undefined, credential_id: input.credential_ids?.[mid] }, ctx.user.id, ctx.signal, automatic));
+      }
+      ctx.signal.throwIfAborted();
       db.transaction(() => {
-        db.run("INSERT INTO agent_update_rollouts(id,status,target_sha256,created_at,created_by,updated_at) VALUES(?,'awaiting_approval',?,?,?,?)", rolloutID, input.target_sha256, at(), ctx.user.id, at());
+        if (automatic) for (const operation of planned) assertPlan(row(operation.machine_id, operation.id), true);
+        db.run("INSERT INTO agent_update_rollouts(id,status,target_sha256,created_at,created_by,updated_at) VALUES(?,?,?,?,?,?)",
+          rolloutID, automatic ? "running" : "awaiting_approval", target, at(), ctx.user.id, at());
         planned.forEach((operation, position) => db.run("INSERT INTO agent_update_rollout_items(rollout_id,machine_id,update_id,position) VALUES(?,?,?,?)", rolloutID, operation.machine_id, operation.id, position));
       });
-      ctx.json(rolloutView(rolloutID), 201);
-    } catch (error) { for (const operation of planned) cancel(operation.machine_id, operation.id); throw error; }
+    } catch (error) {
+      for (const operation of planned) {
+        if (row(operation.machine_id, operation.id).status === "awaiting_approval") cancel(operation.machine_id, operation.id);
+      }
+      throw error;
+    }
+    if (automatic) runRollout(rolloutID, ctx.user.id);
+    ctx.json(rolloutView(rolloutID), automatic ? 202 : 201);
   }));
   for (const action of ["apply", "resume", "pause", "cancel"] as const) router.post("/api/v1/agent-rollouts/:rolloutId/" + action, access.safe(async ctx => {
     deps.auth.requireAdmin(ctx); const input = fields(await ctx.body(), ["apply", "resume"].includes(action) ? ["confirm"] : []);
