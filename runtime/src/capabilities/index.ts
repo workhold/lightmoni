@@ -25,7 +25,7 @@ import { capabilityDigest } from "./idempotency.js";
 import type { AccessAuthority, CapabilityAuthority, CapabilityDispatcherContract, CapabilitySummary, InvocationContext, Principal, SessionAuthority } from "./types.js";
 import { defineCapability, validateCapabilityRegistry, type CapabilityDefinition, type CapabilityDefinitionSeed } from "./descriptor.js";
 import { capabilityErrorCategory, capabilityErrorDetail, capabilityErrorStatus } from "./errors.js";
-import { compactAssistantCatalog } from "../assistant/tools.js";
+import { assistantCatalogPage, compactAssistantCatalog } from "../assistant/tools.js";
 
 const string = { type: "string", minLength: 1, maxLength: 128 };
 const schema = (properties: Record<string, any> = {}, required: string[] = []) => ({ type: "object", properties, required, additionalProperties: false });
@@ -178,11 +178,12 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         const offset=i.offset??0,limit=i.limit??50; return {hosts:rows.slice(offset,offset+limit).map(h=>this.hostView(h)),total:rows.length,truncated:offset+limit<rows.length,next_offset:offset+limit<rows.length?offset+limit:null};
       }},
       {name:"lightmoni_hosts_get",description:"Read one authorized host and observed management state.",scope:"hosts.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:(p,i)=>({host:this.hostView(this.host(p,i.id))})},
-      {name:"lightmoni_tasks_list",description:"List safe task metadata. A host-scoped grant must specify host_id; script bodies, collector settings and unrelated targets are omitted.",scope:"tasks.read",effect:"read",inputSchema:schema({host_id:string,type:{...string,enum:["host","probe","log","script"]}}),execute:(p,i)=>{
+      {name:"lightmoni_tasks_list",description:"List safe task metadata. Follow next_offset for additional pages. A host-scoped grant must specify host_id; script bodies, collector settings and unrelated targets are omitted.",scope:"tasks.read",effect:"read",inputSchema:schema({host_id:string,type:{...string,enum:["host","probe","log","script"]},...page}),execute:(p,i)=>{
         if(p.host_ids!==null&&!i.host_id)fail(403,"host_id_required");
         if(i.host_id)this.host(p,i.host_id);
         const tasks=(i.host_id?nodes.effectiveHostTasks(i.host_id):nodes.tasks()).filter(t=>!i.type||t.type===i.type);
-        return {tasks:tasks.slice(0,100).map(t=>this.taskView(t,p.host_ids===null)),total:tasks.length,truncated:tasks.length>100};
+        const offset=i.offset??0,limit=i.limit??100,next=offset+limit;
+        return {tasks:tasks.slice(offset,next).map(t=>this.taskView(t,p.host_ids===null)),total:tasks.length,truncated:next<tasks.length,next_offset:next<tasks.length?next:null};
       }},
       {name:"lightmoni_tasks_get",description:"Read safe task metadata. Source code requires tasks.source.read and include_source=true; a scoped grant also requires host_id.",scope:"tasks.read",effect:"read",inputSchema:schema({id:string,host_id:string,include_source:{type:"boolean"}},["id"]),execute:(p,i)=>{
         const task=this.task(p,i.id,i.host_id);
@@ -200,9 +201,10 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
         return {executions:options.taskCenter.list({...i,limit:i.limit??30}).map(r=>this.execution(p,r)),output_omitted:true};
       }},
       {name:"lightmoni_executions_get",description:"Read one real task execution and native state. Poll this ID after disconnect; no raw output is returned.",scope:"executions.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:(p,i)=>({execution:this.execution(p,options.taskCenter.get(i.id.startsWith("task:")?i.id.slice(5):i.id)),output_omitted:true})},
-      {name:"lightmoni_telemetry_catalog",description:"List telemetry table schema metadata. No telemetry rows or arbitrary SQL. Requires an installation-wide grant because tables are not isolated by host.",scope:"telemetry.catalog.read",allHosts:true,effect:"read",inputSchema:schema(),execute:async(p,_i,c)=>{const tables=(await telemetry.list(c.signal)).tables,selected=tables.slice(0,100),truncated=tables.length>100;
-        if(p.source==="assistant")return compactAssistantCatalog({tables:selected.map(t=>({id:t.id,name:t.name,kind:t.kind,services:t.services})),limit:100,truncated});
-        return {tables:selected.map(t=>({id:t.id,name:t.name,kind:t.kind,columns:t.columns})),limit:100,truncated};}},
+      {name:"lightmoni_telemetry_catalog",description:"List telemetry table schema metadata. No telemetry rows or arbitrary SQL. Requires an installation-wide grant because tables are not isolated by host.",scope:"telemetry.catalog.read",allHosts:true,effect:"read",inputSchema:schema(assistantCatalogPage),execute:async(p,i,c)=>{
+        const tables=await telemetry.list(c.signal),offset=i.offset??0,limit=i.limit??100,next=offset+limit;
+        if(p.source==="assistant")return compactAssistantCatalog(tables,offset,limit);
+        return {tables:tables.slice(offset,next).map(t=>({id:t.id,name:t.name,kind:t.kind,columns:t.columns})),limit,truncated:next<tables.length,next_offset:next<tables.length?next:null};}},
       {name:"lightmoni_telemetry_describe",description:"Read one telemetry table by stable ID or name. No data rows. Requires an installation-wide catalog grant.",scope:"telemetry.catalog.read",allHosts:true,effect:"read",inputSchema:schema({table:{...string,maxLength:200}},["table"]),execute:async(_p,i,c)=>({table:await telemetry.describe(i.table,c.signal)})},
       {name:"lightmoni_telemetry_query",description:"Execute one bounded read-only telemetry query through the existing checked Query service. Requires an installation-wide telemetry.query grant; host-scoped grants are not data isolation.",scope:"telemetry.query",allHosts:true,effect:"read",inputSchema:schema({
         sql:{type:"string",minLength:1,maxLength:16000},
@@ -278,11 +280,11 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     if(options.machines) {
       const machines=options.machines;
       definitions.push(
-        {name:"lightmoni_hosts_inventory",description:"Read a compact assistant-safe host inventory without accounts, network candidates, Host Keys or secrets.",scope:"hosts.read",effect:"read",inputSchema:schema({host_id:string,...page}),execute:async(p,i)=>{
+        {name:"lightmoni_hosts_inventory",description:"Read a compact host inventory without accounts, network candidates, host keys or secrets. Follow next_offset for additional pages.",scope:"hosts.read",effect:"read",inputSchema:schema({host_id:string,...page}),execute:async(p,i)=>{
           if(i.host_id)this.host(p,i.host_id);
           const rows=machines.assistantList().filter(h=>this.allowedHost(p,h.id)&&(!i.host_id||h.id===i.host_id)),offset=i.offset??0,limit=i.limit??50;
-          const compact=rows.map(h=>this.compactHost(h));
-          return{machines:compact.slice(offset,offset+limit),total:compact.length,truncated:offset+limit<compact.length,next_offset:offset+limit<compact.length?offset+limit:null};
+          const next=offset+limit;
+          return{machines:rows.slice(offset,next).map(h=>this.compactHost(h)),total:rows.length,truncated:next<rows.length,next_offset:next<rows.length?next:null};
         }},
         {name:"lightmoni_hosts_details_get",description:"Read one compact assistant-safe host summary without accounts, network candidates, Host Keys, passwords or private keys.",scope:"hosts.read",effect:"read",inputSchema:schema({id:string},["id"]),execute:async(p,i)=>{this.host(p,i.id);const row=machines.assistantGet(i.id);return {machine:this.compactHost(row)};}},
         {name:"lightmoni_agent_installations_get",description:"Read one sanitized Agent installation plan or receipt. Unknown is not success.",scope:"agents.read",effect:"read",inputSchema:schema({deployment_id:string},["deployment_id"]),execute:async(p,i)=>{
@@ -707,7 +709,7 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
     const telemetry = Object.entries(telemetryMap).map(([name,target])=>{
       const d=this.definitions.find(x=>x.name===target)!;
       const description = name === "list_tables"
-        ? "List compact telemetry table identities, kinds and services for target selection. Use describe_table for columns. If the UI context already selects a table, skip this tool and call describe_table directly."
+        ? "List compact telemetry table identities, kinds and services for target selection. Use next_offset to read more tables. Use describe_table for columns. If the UI context already selects a table, skip this tool and call describe_table directly."
         : name === "run_query"
           ? "Execute one bounded read-only ClickHouse query. Prefer one verified table per call and simple aggregates; do not UNION tables. Include $__timeFilter(column) with a verified time column and an explicit UTC half-open range. Verify selected, grouped and ordered columns. After a validation error, make one targeted correction rather than speculative rewrites. Results are row and byte bounded."
           : d.description;
@@ -781,10 +783,9 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       list_agent_releases:"lightmoni_agent_releases_list",get_agent_update:"lightmoni_agent_updates_get",get_agent_installation:"lightmoni_agent_installations_get"};
     const hostAgent = Object.entries(hostAgentMap).filter(([,target])=>this.definitions.some(x=>x.name===target)).map(([name,target])=>{
       const d=this.definitions.find(x=>x.name===target)!;
-      return {name,description:d.description,schema:d.inputSchema,effect:"read" as const,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
+      return {name,description:d.description,schema:name==="get_managed_machine"?schema({machine_id:string},["machine_id"]):d.inputSchema,effect:"read" as const,execute:async(input:any,signal:AbortSignal,user?:{id:string;role:string},scope?:{session_id:string})=>{
         if(!user)fail(401,"login_required");const p=this.authority.sessionPrincipal(user as User,"assistant");
         const v=await this.invoke(p,target,name==="get_managed_machine"?{id:input.machine_id}:input,{signal,session_id:scope?.session_id});
-        if(name==="list_managed_machines")return{machines:v.data.machines};
         if(name==="get_managed_machine")return v.data.machine;
         if(name==="get_agent_update")return v.data.update;
         if(name==="get_agent_installation")return v.data.installation;

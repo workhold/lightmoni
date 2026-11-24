@@ -19,34 +19,48 @@ const rangeSchema = obj({ from: string, to: string }, ["from", "to"]);
 export const ASSISTANT_CATALOG_BYTES = 12 << 10;
 const jsonBytes = (value: unknown) => Buffer.byteLength(JSON.stringify(value) ?? "");
 
+export const assistantCatalogPage = {
+  offset: { type: "integer", minimum: 0, maximum: 100000 },
+  limit: { type: "integer", minimum: 1, maximum: 100 },
+};
+
 /** Keep the internal model catalog small; MCP retains its full schema projection. */
-export function compactAssistantCatalog(input: {
-  tables: Array<{ id: string; name: string; kind: string; services?: string[]; columns?: unknown }>;
-  limit?: number;
-  truncated?: boolean;
-}) {
-  const summaries = input.tables.map(({ id, name, kind, services }) => ({
-    id, name, kind, ...(services ? { services } : {}),
-  }));
-  const output: {
-    tables: typeof summaries;
-    limit: number;
-    truncated: boolean;
-    byte_limit: number;
-    byte_limited: boolean;
-  } = {
-    tables: [], limit: input.limit ?? input.tables.length,
-    truncated: input.truncated ?? false,
-    byte_limit: ASSISTANT_CATALOG_BYTES, byte_limited: false,
+export function compactAssistantCatalog(
+  tables: Array<{ id: string; name: string; kind: string; services?: string[] }>,
+  offset = 0,
+  limit = 100,
+) {
+  const output = {
+    tables: [] as typeof tables,
+    limit,
+    total: tables.length,
+    truncated: false,
+    next_offset: null as number | null,
+    byte_limit: ASSISTANT_CATALOG_BYTES,
+    byte_limited: false,
   };
-  for (const summary of summaries) {
-    if (jsonBytes({ ...output, tables: [...output.tables, summary] }) > ASSISTANT_CATALOG_BYTES) {
-      output.truncated = true;
-      output.byte_limited = true;
-      break;
+  for (const { id, name, kind, services } of tables.slice(offset, offset + limit)) {
+    const next = offset + output.tables.length + 1;
+    const continuation = next < tables.length ? next : null;
+    const summary = { id, name, kind, ...(services ? { services } : {}) };
+    const fits = (entry: typeof summary) => jsonBytes({
+      ...output,
+      tables: [...output.tables, entry],
+      byte_limited: false,
+      truncated: continuation !== null,
+      next_offset: continuation,
+    }) <= ASSISTANT_CATALOG_BYTES;
+    if (fits(summary)) {
+      output.tables.push(summary);
+      continue;
     }
-    output.tables.push(summary);
+    output.byte_limited = true;
+    if (output.tables.length) break;
+    output.tables.push({ id, name, kind });
   }
+  const next = offset + output.tables.length;
+  output.next_offset = next < tables.length ? next : null;
+  output.truncated = output.next_offset !== null;
   return output;
 }
 const querySchema = obj(
@@ -92,12 +106,15 @@ export function monitoringTools(
     {
       name: "list_tables",
       description:
-        "List compact telemetry table identities, kinds and services for target selection. Use describe_table for columns. If the UI context already selects a table, skip this tool and call describe_table directly.",
+        "List compact telemetry table identities, kinds and services for target selection. Use next_offset to read more tables. Use describe_table for columns. If the UI context already selects a table, skip this tool and call describe_table directly.",
       effect: "read",
-      schema: obj({}),
+      schema: obj(assistantCatalogPage),
       execute: async (input, signal) => {
-        object(input, []);
-        return compactAssistantCatalog(await telemetry.list(signal));
+        object(input, ["offset", "limit"]);
+        const { offset = 0, limit = 100 } = input;
+        if (!Number.isInteger(offset) || offset < 0 || offset > 100000 || !Number.isInteger(limit) || limit < 1 || limit > 100)
+          throw Error("invalid catalog page");
+        return compactAssistantCatalog(await telemetry.list(signal), offset, limit);
       },
     },
     {

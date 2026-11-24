@@ -10,6 +10,14 @@ export function estimate(value: unknown): number {
     return part;
   }), "utf8") + 256;
 }
+// Tool definitions are controlled by the host and consist mostly of English
+// identifiers and descriptions. Keep full byte costs for punctuation and
+// non-ASCII text, and reserve protocol overhead as for other context.
+export function estimateToolDefinitions(value: unknown): number {
+  const serialized = JSON.stringify(value ?? []);
+  return Buffer.byteLength(serialized.replace(/[A-Za-z0-9]{2,}/g,
+    word => word.slice(0, Math.ceil(word.length / 3))), "utf8") + 256;
+}
 export function roundStarts(messages: Message[]): number[] {
   return messages.flatMap((m, i) => (m.role === "user" ? [i] : []));
 }
@@ -28,7 +36,7 @@ export function compactionPlan(
     (through > 0 && messages[through]?.role !== "user")
   )
     throw Error("invalid_history");
-  const overhead = estimate(system) + estimate(tools) + estimate(summary) + 512;
+  const overhead = estimate(system) + estimateToolDefinitions(tools) + estimate(summary) + 512;
   const available = Math.floor(budget * 0.85) - overhead;
   const starts = roundStarts(messages).filter((i) => i >= through);
   const latest = starts.at(-1) ?? through;

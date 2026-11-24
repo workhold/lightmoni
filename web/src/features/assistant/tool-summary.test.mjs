@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { toolSummary, formatElapsed } from './tool-summary.ts';
+import { toolSummary, toolReviewPath, formatElapsed } from './tool-summary.ts';
 
 const en = (zh, enText) => enText ?? zh;
 
@@ -55,4 +55,22 @@ test('formatElapsed renders mm:ss and hh:mm:ss, ticks running turns and rejects 
   assert.equal(formatElapsed(undefined, start, 0), '');
   assert.equal(formatElapsed('not-a-time', undefined, 0), '');
   assert.equal(formatElapsed(start, '2026-11-22T23:00:00Z', 0), '');
+});
+
+test('paged tool results show the page count and explicitly flag more results', () => {
+  const more = {kind: 'warn', text: 'More results available'};
+  assert.deepEqual(toolSummary('list_tables', {tables: [{name: 'a'}], next_offset: 1}, en), [{text: '1 tables'}, more]);
+  assert.deepEqual(toolSummary('list_tasks', {tasks: [1, 2], next_offset: 2}, en), [{text: '2 items'}, more]);
+  assert.deepEqual(toolSummary('list_managed_machines', {machines: [], next_offset: null}, en), [{text: '0 items'}]);
+});
+
+test('review links accept native proposal and operation receipts on the current site', () => {
+  const origin = 'https://moni.example.test';
+  const path = '/machines?tab=tasks&proposal=qa';
+  assert.equal(toolReviewPath({proposal: {review_url: origin + path}}, origin), path);
+  assert.equal(toolReviewPath({run: {review_url: '/operations?run=qa'}}, origin), '/operations?run=qa');
+  assert.equal(toolReviewPath({review_url: '/services?deployment=qa'}, origin), '/services?deployment=qa');
+  for (const review_url of ['//evil.test/run', 'https://evil.test/run', 'javascript:alert(1)', origin + '//evil.test/run', 'relative']) {
+    assert.equal(toolReviewPath({proposal: {review_url}}, origin), undefined);
+  }
 });

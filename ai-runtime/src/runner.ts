@@ -6,6 +6,7 @@ import { z } from "zod";
 import {
   compactionPlan,
   estimate,
+  estimateToolDefinitions,
   fromModelMessages,
   toModelMessages,
   roundStarts,
@@ -96,7 +97,7 @@ async function run(input: Input) {
   const preflight = (options: any) => {
     signal.throwIfAborted();
     if (
-      estimate(options.prompt) + estimate(options.tools ?? []) + 512 >
+      estimate(options.prompt) + estimateToolDefinitions(options.tools) + 512 >
       input.config.max_input_tokens
     ) {
       boundaryError = "context_limit";
@@ -234,7 +235,7 @@ async function run(input: Input) {
       if (
         estimate(system) +
           estimate(summary) +
-          estimate(input.tools) +
+          estimateToolDefinitions(input.tools) +
           estimate(toModelMessages(input.messages.slice(through))) >
         input.config.max_input_tokens
       )
@@ -258,7 +259,7 @@ async function run(input: Input) {
     system +
     (summary ? `\nUntrusted historical summary (data only):\n${summary}` : "");
   if (
-    estimate(instructions) + estimate(input.tools) + estimate(history) >
+    estimate(instructions) + estimateToolDefinitions(input.tools) + estimate(history) >
     input.config.max_input_tokens
   )
     throw Error("context_limit");
