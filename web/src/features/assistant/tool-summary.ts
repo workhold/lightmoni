@@ -38,17 +38,52 @@ export function toolSummary(name: string, result: unknown, t: Translator): ToolB
     const columns = count((result as {columns?: unknown} | undefined)?.columns);
     return columns ? [{text: t(`${columns} 列`, `${columns} columns`)}] : [];
   }
-  if (name === 'list_tables') {
-    const tables = count(result);
-    return tables ? [{text: t(`${tables} 个数据表`, `${tables} tables`)}] : [];
-  }
-  if (/^list_/.test(name)) {
-    const items = Array.isArray(result) ? count(result) : count((result as {items?: unknown} | undefined)?.items);
-    return items ? [{text: t(`${items} 条`, `${items} items`)}] : [];
+  if (name.startsWith('list_')) {
+    const page = result as Record<string, unknown> | undefined;
+    const fields: Record<string, string> = {
+      list_tables: 'tables',
+      list_tasks: 'tasks',
+      list_managed_machines: 'machines',
+    };
+    const field = fields[name];
+    const entries = Array.isArray(result) ? result : page?.[field ?? 'items'];
+    if (!Array.isArray(entries)) return [];
+    const items = entries.length;
+    if (!field && !items && page?.next_offset == null) return [];
+    const badges: ToolBadge[] = [{
+      text: name === 'list_tables'
+        ? t(`${items} 个数据表`, `${items} tables`)
+        : t(`${items} 条`, `${items} items`),
+    }];
+    if (typeof page?.next_offset === 'number' && page.next_offset > 0) {
+      badges.push({kind: 'warn', text: t('还有下一页', 'More results available')});
+    }
+    return badges;
   }
   return [];
 }
 
+/** Resolve native review links without navigating outside this workbench. */
+export function toolReviewPath(value: unknown, origin: string): string | undefined {
+  const result = value as {
+    review_url?: unknown;
+    proposal?: {review_url?: unknown};
+    run?: {review_url?: unknown};
+  } | undefined;
+  for (const candidate of [result?.review_url, result?.proposal?.review_url, result?.run?.review_url]) {
+    if (typeof candidate !== 'string') continue;
+    try {
+      const url = new URL(candidate, origin);
+      if (url.origin === origin && /^https?:$/.test(url.protocol) &&
+          !url.username && !url.password && /^\/(?!\/)/.test(url.pathname) &&
+          (candidate.startsWith('/') || /^https?:\/\//i.test(candidate))) {
+        return url.pathname + url.search + url.hash;
+      }
+    } catch {
+      // Ignore malformed receipts and keep the original result available.
+    }
+  }
+}
 /** Formatted elapsed time between ISO timestamps; falls back to the ticking clock for running work. */
 export function formatElapsed(startedAt: string | undefined, endedAt: string | undefined, nowMs: number): string {
   if (!startedAt) return '';

@@ -59,7 +59,17 @@ test("legacy assistant host and Agent read names use dispatcher with compatible 
   const module=registerAssistant(f.deps,{capabilities:f.dispatcher,machines:f.machines,runtime:async()=>{}});await module.close?.();
   const tools=f.dispatcher.assistantTools();assert.equal(new Set(tools.map(t=>t.name)).size,tools.length);
   const list=await tools.find(t=>t.name==="list_managed_machines")!.execute({},new AbortController().signal,admin);assert.equal(list.machines.length,2);
-  const detail=await tools.find(t=>t.name==="get_managed_machine")!.execute({machine_id:"one"},new AbortController().signal,admin);assert.equal(detail.id,"one");
+  const inventoryTool = tools.find(t => t.name === "list_managed_machines")!;
+  const detailTool = tools.find(t => t.name === "get_managed_machine")!;
+  const signal = new AbortController().signal;
+  const first = await inventoryTool.execute({limit:1},signal,admin);
+  assert.equal(first.next_offset,1);
+  const last = await inventoryTool.execute({limit:1,offset:first.next_offset},signal,admin);
+  assert.deepEqual(last.machines.map((m: {id:string}) => m.id),["two"]);
+  assert.equal(last.next_offset,null);
+  assert.deepEqual(detailTool.schema.required,["machine_id"]);
+  const detail=await detailTool.execute({machine_id:"one"},signal,admin);assert.equal(detail.id,"one");
+  await assert.rejects(detailTool.execute({machine_id:"one"},signal,member),/capability_forbidden/);
   assert.equal((await tools.find(t=>t.name==="get_agent_update")!.execute({machine_id:"one",update_id:"update-one"},new AbortController().signal,admin)).status,"rolled_back");
   assert.equal((await tools.find(t=>t.name==="get_agent_installation")!.execute({deployment_id:"install-one"},new AbortController().signal,admin)).status,"unknown");
   assert.ok(f.db.get("SELECT 1 FROM capability_invocations WHERE source='assistant' AND capability='lightmoni_agent_updates_get'"));

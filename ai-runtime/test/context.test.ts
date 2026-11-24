@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compactionPlan, estimate, toModelMessages } from "../src/context.js";
+import { compactionPlan, estimate, estimateToolDefinitions, toModelMessages } from "../src/context.js";
 import type { Message } from "../src/protocol.js";
 
 test("compaction cuts complete user-led rounds and retains the newest request", () => {
@@ -63,4 +63,20 @@ test("image and PDF attachments reach the model without treating base64 as text 
   assert.equal(model.content[1].image, `data:image/jpeg;base64,${data}`);
   assert.match(model.content[2].text, /observed report values/);
   assert.ok(estimate(messages) < 10000);
+});
+
+test("large tool directories leave room for the first turn at the default budget", () => {
+  const tools = Array.from({length: 52}, (_, index) => ({
+    name: `read_monitoring_resource_${index}`,
+    description: "List authorized resources and return their current status. ".repeat(6),
+    schema: {type: "object", properties: {
+      machine_id: {type: "string"}, resource_id: {type: "string"},
+      next_offset: {type: "integer", minimum: 0}, limit: {type: "integer", maximum: 100},
+    }, additionalProperties: false},
+  }));
+  const messages: Message[] = [{role: "user", content: "查看主机列表"}];
+  assert.ok(estimate(tools) > 32000 * 0.85);
+  assert.ok(estimateToolDefinitions(tools) < estimate(tools));
+  assert.deepEqual(compactionPlan(messages, 0, "", "Monitoring assistant", tools, 32000).keep, messages);
+  assert.equal(estimateToolDefinitions("主机：…"), estimate("主机：…"));
 });

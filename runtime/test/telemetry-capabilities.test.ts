@@ -146,3 +146,52 @@ test("semantic query failures occur before the checked Query service and errors 
     await assert.rejects(f.invoke("lightmoni_telemetry_query", { sql: "SELECT 1", range, interval_ms: 1000 }), /fixture query error/);
   } finally { f.close(); }
 });
+
+test("assistant catalog can enumerate beyond the old ceiling and past oversized service metadata", async () => {
+  const f = fixture();
+  try {
+    const tables = Array.from({length: 205}, (_, index) => ({
+      ...table, id: `table-${index}`, name: `log_${index}`,
+      services: index === 100 ? ["x".repeat(ASSISTANT_CATALOG_BYTES)] : table.services,
+    }));
+    f.deps.cat.list = async () => tables;
+    const list = f.dispatcher.assistantTools().find(tool => tool.name === "list_tables")!;
+    const signal = new AbortController().signal;
+    const collected: string[] = [];
+    let offset: number | null = 0;
+    for (let page = 0; offset !== null && page < 205; page++) {
+      const result = await list.execute({offset}, signal, admin);
+      assert.ok(Buffer.byteLength(JSON.stringify(result)) <= ASSISTANT_CATALOG_BYTES);
+      assert.ok(result.next_offset === null || result.next_offset > offset);
+      collected.push(...result.tables.map((item: Table) => item.id));
+      offset = result.next_offset;
+    }
+    assert.equal(offset, null);
+    assert.deepEqual(collected, tables.map(item => item.id));
+    const external = await f.invoke("lightmoni_telemetry_catalog", {offset: 200});
+    assert.equal(external.data.tables.length, 5);
+    assert.equal(external.data.tables[0].columns[0].name, "body");
+    assert.equal(external.data.next_offset, null);
+  } finally { f.close(); }
+});
+
+test("task pages traverse filtered native tasks after the previous 100-row ceiling", async () => {
+  const f = fixture();
+  try {
+    for (let index = 0; index < 102; index++) {
+      f.db.run("INSERT INTO agent_tasks(id,name,type,enabled,config,created_at) VALUES(?,?,?,1,'{}',?)",
+        `task-${String(index).padStart(3, "0")}`, "Task", index === 0 ? "log" : "host", "2026-11-14");
+    }
+    const list = f.dispatcher.assistantTools().find(tool => tool.name === "list_tasks")!;
+    const signal = new AbortController().signal;
+    const first = await list.execute({type: "host"}, signal, admin);
+    const expected = f.runs.nodes.tasks().filter(task => task.type === "host").map(task => task.id);
+    assert.equal(first.total, expected.length);
+    assert.equal(first.tasks.length, 100);
+    assert.equal(first.next_offset, 100);
+    const last = await list.execute({type: "host", offset: first.next_offset}, signal, admin);
+    assert.deepEqual([...first.tasks, ...last.tasks].map((task: {id: string}) => task.id), expected);
+    assert.ok(last.tasks.some((task: {id: string}) => task.id === "task-101"));
+    assert.equal(last.next_offset, null);
+  } finally { f.close(); }
+});

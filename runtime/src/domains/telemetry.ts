@@ -18,8 +18,8 @@ const assistantTimeMacro = /\$__timeFilter\(\s*[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-
 export class TelemetryService {
   constructor(private readonly deps: Dependencies) {}
 
-  async list(signal: AbortSignal): Promise<{tables: Table[]; limit: number}> {
-    try { return { tables: (await this.deps.cat.list(signal)).slice(0, 200), limit: 200 }; }
+  async list(signal: AbortSignal): Promise<Table[]> {
+    try { return await this.deps.cat.list(signal); }
     catch { throw Error("cannot read table catalog"); }
   }
 
