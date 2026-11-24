@@ -38,8 +38,8 @@ import {defaultAgentRuntimeMode,runtimeCapabilityText,runtimeObservation} from '
 import MachineBatchDialog,{type BatchAction,type BatchTarget} from './MachineBatchDialog';
 import {batchUnavailableReason} from './machine-batch';
 import MachineAgentUpdateDialog,{AgentUpdateHistory} from './MachineAgentUpdateDialog';
-import MachineAgentRolloutDialog,{type AgentRolloutTarget} from './MachineAgentRolloutDialog';
-import {shortIdentity,updateIsActive,type AgentInstalledRelease,type AgentUpdate} from './agent-update-model';
+import MachineAgentRolloutDialog from './MachineAgentRolloutDialog';
+import {shortIdentity,updateIsActive,type AgentInstalledRelease,type AgentRollout,type AgentUpdate} from './agent-update-model';
 import {machineClusterMatches,machineClusterOptions} from './machine-cluster';
 
 const HostContainersDialog=lazy(()=>import('./HostContainersDialog'));
@@ -159,7 +159,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  const [terminalDetail,setTerminalDetail]=useState<Detail>();
  const [uninstallDetail,setUninstallDetail]=useState<Detail>(),[uninstallRecord,setUninstallRecord]=useState<AgentUninstallation>();
  const [updateDetail,setUpdateDetail]=useState<Detail>(),[updateRecord,setUpdateRecord]=useState<AgentUpdate>(),[updateAction,setUpdateAction]=useState<'upgrade'|'rollback'>('upgrade'),[updateDirect,setUpdateDirect]=useState(false),[updateForce,setUpdateForce]=useState(false);
- const [rollout,setRollout]=useState<{targets?:AgentRolloutTarget[];existingID?:string}>();
+ const [rollout,setRollout]=useState<{startRequest?:Promise<AgentRollout>;existingID?:string}>();
  useEffect(()=>{if(!admin){setUpdateDetail(undefined);setUpdateRecord(undefined);setRollout(undefined)}},[admin]);
  const [detail,setDetail]=useState<Detail>(),[detailError,setDetailError]=useState('');
  const [detailTab,setDetailTab]=useState('overview');
@@ -460,6 +460,13 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
  };
  const eligibleBatchRows=(action:BatchAction)=>selectedRows.filter(row=>!batchUnavailableReason(action,bulkTarget(row)));
  const upgradeEligibleRows=selectedRows.filter(row=>row.agent_id&&!['removed','uninstalled'].includes(row.agent_status)&&['update_available','unknown'].includes(row.agent_update?.state||'unknown'));
+ const startRollout=()=>{
+  if(!admin||loading||batch||rollout||!upgradeEligibleRows.length||upgradeEligibleRows.length>20)return;
+  const startRequest=api<AgentRollout>('/agent-rollouts/start',{method:'POST',body:JSON.stringify({machine_ids:upgradeEligibleRows.map(row=>row.id)})});
+  // The dialog owns the result; attach a handler now in case it unmounts before the response.
+  void startRequest.catch(()=>{});
+  setRollout({startRequest});
+ };
  const openBatch=(action:BatchAction)=>{
   if(!admin||loading||batch||rollout||!selectedRows.length)return;
   setBatch({action,targets:selectedRows.map(bulkTarget)});
@@ -574,7 +581,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
     ['uninstall',t('卸载 Agent','Uninstall Agent'),t('卸载远端受管 Agent 程序；数据保留或清除写入审阅计划。','Uninstall the remote managed Agent; data retention or purge is part of the reviewed plan.')],
     ['remove_node',t('移除节点','Remove nodes'),t('仅移除平台节点身份，不卸载远端程序。','Remove only the platform node identity; this does not uninstall the remote program.')],
     ['delete_host',t('删除主机','Delete hosts'),t('删除主机登记前需先结束 Agent 状态并解绑凭据。','Finish Agent state and unbind credentials before deleting host records.')],
-   ] as [BatchAction,string,string][]).map(([action,label,help])=>{const eligible=eligibleBatchRows(action);return <Button key={action} size="small" aria-label={label} title={eligible.length?t(`可操作 ${eligible.length}/${selectedRows.length} 台；${help}`,`Eligible ${eligible.length}/${selectedRows.length}; ${help}`):t(`所选主机暂无可操作目标；${help}`,`No selected host is eligible; ${help}`)} danger={['uninstall','remove_node','delete_host'].includes(action)} disabled={loading||!!batch||!!rollout||!eligible.length} onClick={()=>openBatch(action)}>{label}</Button>})}<Button size="small" title={upgradeEligibleRows.length?t(`可升级或核对 ${upgradeEligibleRows.length}/${selectedRows.length} 台；已当前发行、更新中或未安装的主机不进入新批次。`,`Eligible ${upgradeEligibleRows.length}/${selectedRows.length}; current, updating, or uninstalled hosts do not enter a new batch.`):t('所选主机均已当前发行、更新中或未安装；请从单机记录查看更新。','Selected hosts are current, updating, or not installed; use individual records to view updates.')} disabled={loading||upgradeEligibleRows.length===0||upgradeEligibleRows.length>20||!!batch||!!rollout} onClick={()=>setRollout({targets:upgradeEligibleRows.map(row=>({id:row.id,name:row.name,arch:row.arch}))})}>{t('升级 Agent','Upgrade Agent')}</Button></Space>
+   ] as [BatchAction,string,string][]).map(([action,label,help])=>{const eligible=eligibleBatchRows(action);return <Button key={action} size="small" aria-label={label} title={eligible.length?t(`可操作 ${eligible.length}/${selectedRows.length} 台；${help}`,`Eligible ${eligible.length}/${selectedRows.length}; ${help}`):t(`所选主机暂无可操作目标；${help}`,`No selected host is eligible; ${help}`)} danger={['uninstall','remove_node','delete_host'].includes(action)} disabled={loading||!!batch||!!rollout||!eligible.length} onClick={()=>openBatch(action)}>{label}</Button>})}<Button size="small" title={upgradeEligibleRows.length?t(`可升级或核对 ${upgradeEligibleRows.length}/${selectedRows.length} 台；已当前发行、更新中或未安装的主机不进入新批次。`,`Eligible ${upgradeEligibleRows.length}/${selectedRows.length}; current, updating, or uninstalled hosts do not enter a new batch.`):t('所选主机均已当前发行、更新中或未安装；请从单机记录查看更新。','Selected hosts are current, updating, or not installed; use individual records to view updates.')} disabled={loading||upgradeEligibleRows.length===0||upgradeEligibleRows.length>20||!!batch||!!rollout} onClick={startRollout}>{t('一键升级 Agent','Upgrade Agent now')}</Button></Space>
    <Typography.Text type="secondary">{t('按钮按所选主机状态预判；服务端仍逐台复验。SSH/安装/卸载等批次最多 50 台，Agent 升级批次最多 20 台。','Buttons are pre-gated by the selected host state; the server still revalidates every host. SSH/install/uninstall batches support 50 hosts; Agent upgrade batches support 20.')}</Typography.Text>
   </div>}
   <div className="lm-surface lm-host-list"><Table<FleetRow> rowKey="id" dataSource={rows} loading={loading||hostsRole.current!==admin} rowSelection={admin?{selectedRowKeys:selectedIDs,preserveSelectedRowKeys:true,columnWidth:44,onChange:keys=>{if(keys.length>50){void message.warning(t('每批最多选择 50 项','Select up to 50 targets per batch'));return}setSelectedIDs(keys.map(String))},getCheckboxProps:row=>({'aria-label':t(`选择 ${row.name}`,`Select ${row.name}`),disabled:!!batch||!!rollout})}:undefined} scroll={{x:1024}} pagination={{pageSize:10,hideOnSinglePage:true}} locale={{emptyText:<Empty description={hostQuery||group||cluster?t('没有匹配的主机','No matching hosts'):t('尚无主机','No hosts yet')}/>}} columns={[
@@ -587,7 +594,7 @@ const statusName=(value:string)=>({unknown:t("未接入","Not enrolled"),removed
    {title:t('操作','Actions'),width:220,render:(_:unknown,m:FleetRow)=>renderActions(m)},
   ]}/></div>
   {admin&&updateDetail&&<MachineAgentUpdateDialog key={`${updateDetail.machine.id}:${updateRecord?.id||updateAction}`} machine={updateDetail.machine} credentials={updateDetail.credentials} existing={updateRecord} initialAction={updateAction} directUpgrade={updateDirect} initialForceUnknown={updateForce} onRefresh={()=>refreshUpdatedHost(updateDetail.machine.id)} onStartPendingChange={onUpdateStartPendingChange} onClose={closeUpdate}/>}
-  {admin&&rollout&&<MachineAgentRolloutDialog key={rollout.existingID||rollout.targets?.map(target=>target.id).join(',')||'history'} targets={rollout.targets} existingID={rollout.existingID} onClose={()=>{setRollout(undefined);setSelectedIDs([])}} onRefresh={()=>load(true)}/>}
+  {admin&&rollout&&<MachineAgentRolloutDialog key={rollout.existingID||(rollout.startRequest?'start':'history')} startRequest={rollout.startRequest} existingID={rollout.existingID} onClose={()=>{setRollout(undefined);setSelectedIDs([])}} onRefresh={()=>load(true)}/>}
   {admin&&batch&&<MachineBatchDialog key={batch.action+':'+batch.targets.map(target=>target.id).join(',')} action={batch.action} targets={batch.targets} onClose={()=>{setBatch(undefined);setSelectedIDs([])}} onRefresh={()=>load(true)} onSuccess={batchSuccess}/>}
   {admin&&nodeLabels&&<NodeLabelsDialog key={nodeLabels.id} host={nodeLabels} labels={labels} onClose={()=>setNodeLabels(undefined)} onSaved={()=>load(true)}/>}
   {taskHost&&<Modal open title={t(`主机任务 · ${taskHost.name}`,`Host tasks · ${taskHost.name}`)} footer={null} width={1000} onCancel={()=>setTaskHost(undefined)} destroyOnHidden><HostTasksPanel hostID={taskHost.id} admin={admin} labels={labels} onViewRuns={()=>setTaskHost(undefined)}/></Modal>}

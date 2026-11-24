@@ -751,6 +751,50 @@ test("invalid platform endpoints are rejected before SSH and never leave a runni
   assert.equal(f.calls.length, 0);
 });
 
+test("one-click rollout pins the latest compatible release for each probed architecture", async t => {
+  const f = await fixture(t), amd = await f.host("mixed-amd"), arm = await f.host("mixed-arm");
+  const publish = (version: string, arch: string, build_time: string) => {
+    const file = `lightmoni-agent_${version}_linux_${arch}.tar.gz`;
+    const bytes = Buffer.from(file);
+    writeFileSync(join(f.downloads, file), bytes);
+    return { ...f.release, version, arch, file, build_time, build_id: `${version}-${arch}`, sha256: hash(bytes), size: bytes.length };
+  };
+  const amdLatest = publish("0.1.2", "amd64", "2026-10-30T01:00:00Z");
+  const armLatest = publish("0.1.1", "arm64", "2026-10-30T00:30:00Z");
+  writeFileSync(join(f.downloads, "agent-releases.json"), JSON.stringify({ schema: 1, releases: [armLatest, f.release, amdLatest] }));
+  const observed = f.observations.get(arm.id);
+  observed.arch = observed.current.arch = "arm64";
+  f.helpers.get(arm.id).release.arch = "arm64";
+
+  const started = await f.request("/agent-rollouts/start", "POST", { machine_ids: [amd.id, arm.id] });
+  assert.equal(started.status, 202, started.raw);
+  assert.equal(started.data.target_sha256, "");
+  assert.deepEqual(started.data.items.map((item: any) => [item.machine_id, item.update.plan.target.arch, item.update.plan.target.sha256]),
+    [[amd.id, "amd64", amdLatest.sha256], [arm.id, "arm64", armLatest.sha256]]);
+  let finished;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    finished = (await f.request(`/agent-rollouts/${started.data.id}`)).data;
+    if (finished.status !== "running") break;
+    await new Promise(resolve => setTimeout(resolve, 5));
+  }
+  assert.equal(finished.status, "succeeded", JSON.stringify(finished));
+  assert.deepEqual(f.calls.filter(call => call.command.includes(".update-bootstrap")).map(call => call.machine.id), [amd.id, arm.id]);
+});
+
+test("one-click rollout cancels prepared items if any host has no compatible release", async t => {
+  const f = await fixture(t), amd = await f.host("compatible"), arm = await f.host("unavailable");
+  const observed = f.observations.get(arm.id);
+  observed.arch = observed.current.arch = "arm64";
+  const request = { machine_ids: [amd.id, arm.id] };
+  f.user.role = "member";
+  assert.equal((await f.request("/agent-rollouts/start", "POST", request)).status, 403);
+  f.user.role = "admin";
+  assert.equal((await f.request("/agent-rollouts/start", "POST", request)).status, 409);
+  assert.equal(f.db.get<any>("SELECT status FROM machine_agent_updates WHERE machine_id=?", amd.id)?.status, "cancelled");
+  assert.equal((await f.request("/agent-rollouts")).data.length, 0);
+  assert.equal(f.calls.some(call => call.command.includes(".update-bootstrap")), false);
+});
+
 test("persistent rollout serializes hosts, pauses on failure, resumes past acknowledged failures and rejects bypass", async t => {
   const f = await fixture(t), one = await f.host("first"), two = await f.host("second"); f.modes.set(one.id, "rollback");
   const proposal = await f.request("/agent-rollouts/plan", "POST", { machine_ids: [one.id, two.id], target_sha256: f.release.sha256 });
