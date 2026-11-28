@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import type { Dependencies } from "../shared/types.js";
 import { bytes, object, text, type Tool } from "./types.js";
 import type { CodeTaskInput, CodeTaskResult } from "./code.js";
@@ -8,6 +7,7 @@ import type { ServiceDeploymentStore } from "../server/service-deployments.js";
 import type { InstrumentationService } from "./instrumentation.js";
 import { agentUpdateTools } from "./agent-updates.js";
 import { TelemetryService, type TelemetryQueryInput } from "../domains/telemetry.js";
+import { normalizeDashboard, validDashboardGrid } from "../domains/dashboards.js";
 const string = { type: "string" },
   obj = (properties: Record<string, any>, required: string[] = []) => ({
     type: "object",
@@ -177,7 +177,12 @@ export function monitoringTools(
                 },
                 queries: { type: "array", items: querySchema },
                 options: { type: "object" },
-                grid: { type: "object" },
+                grid: obj({
+                  x: { type: "integer", minimum: 0, maximum: 10 },
+                  y: { type: "integer", minimum: 0 },
+                  w: { type: "integer", minimum: 2, maximum: 12, description: "The sum of x and w must be at most 12." },
+                  h: { type: "integer", minimum: 3, maximum: 40 },
+                }, ["x", "y", "w", "h"]),
               },
               ["title", "type", "queries"],
             ),
@@ -198,7 +203,7 @@ export function monitoringTools(
           input.panels.length > 12
         )
           throw Error("draft requires a title and 1 to 12 panels");
-        for (const panel of input.panels) {
+        const panels = input.panels.map((panel: any) => {
           object(panel, ["id", "title", "type", "queries", "options", "grid"]);
           if (
             ![
@@ -232,18 +237,12 @@ export function monitoringTools(
             (typeof panel.options !== "object" || Array.isArray(panel.options))
           )
             throw Error("invalid tool input");
-          if (
-            panel.grid != null &&
-            (typeof panel.grid !== "object" ||
-              Array.isArray(panel.grid) ||
-              Object.values(panel.grid).some(
-                (value) => !Number.isInteger(value),
-              ))
-          )
-            throw Error("invalid tool input");
-          if (!panel.id) panel.id = randomBytes(16).toString("hex");
-        }
-        return { draft: input, saved: false, requires_review: true };
+          const { grid, ...fields } = panel;
+          return validDashboardGrid(grid) ? { ...fields, grid } : fields;
+        });
+        const dashboard = normalizeDashboard({ title, description, panels });
+        const draft = { title: dashboard.title, description: dashboard.description, panels: dashboard.panels };
+        return { draft, saved: false, requires_review: true };
       },
     },
   ];

@@ -68,6 +68,34 @@ async function fixture(t: any, path = ":memory:", runtime?: Runtime) {
 }
 function update(id: string, patch: any = { threshold: "5" }): AlertIntent { return { operation: "rule.update", target_id: id, patch, reason: "用户要求调整告警阈值" }; }
 
+test("assistant can propose a new rule which stays absent until an administrator approves it", async t => {
+  const f = await fixture(t);
+  const { enabled: _enabled, ...definition } = rule;
+  const input = { operation: "rule.create", rule: { ...definition, name: "New QA rule" }, reason: "Test a disabled rule" };
+  const propose = alertTools(f.caps, f.service).find(tool => tool.name === "propose_alert_change")!;
+  const member = { id: "bob", role: "member" };
+  await assert.rejects(propose.execute(input, signal(), member, { session_id: "qa" }), { status: 403 });
+  const { proposal } = await propose.execute(input, signal(), f.user, { session_id: "qa" });
+  assert.equal(proposal.before, null);
+  assert.equal(proposal.after.enabled, false);
+  assert.equal(proposal.status, "awaiting_approval");
+  assert.throws(() => f.caps.getRule(f.user, proposal.target_id), { status: 404 });
+  await assert.rejects(f.service.apply({ ...f.user, role: "member" }, proposal.id, signal()), { status: 403 });
+  const [a, b] = await Promise.all([
+    f.request(`/assistant/alert-proposals/${proposal.id}/apply`, "POST", {}),
+    f.request(`/assistant/alert-proposals/${proposal.id}/apply`, "POST", {}),
+  ]);
+  assert.equal(a.status, 200, a.raw);
+  assert.equal(b.status, 200, b.raw);
+  assert.deepEqual(a.data, b.data);
+  assert.equal(a.data.result.id, proposal.target_id);
+  assert.equal(a.data.result.enabled, false);
+  assert.equal(a.data.result.revision, 1);
+  assert.equal(f.caps.getRule(f.user, proposal.target_id).name, "New QA rule");
+  assert.equal(f.caps.getRule(f.user, f.saved.id).enabled, true);
+  assert.equal(f.db.get<{ n: number }>("SELECT count(*) AS n FROM assistant_alert_audit")!.n, 1);
+});
+
 test("alert proposals persist encrypted previews and require owner confirmation; replay is idempotent", async t => {
   const dir = mkdtempSync(join(tmpdir(), "lightmoni-alert-proposals-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

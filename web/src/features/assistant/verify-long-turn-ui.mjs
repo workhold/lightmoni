@@ -4,16 +4,24 @@ import {readFile,writeFile,mkdir} from 'node:fs/promises';
 import {resolve,extname} from 'node:path';
 
 const publicDirectory=resolve(import.meta.dirname,'../../../../runtime/public');
-const output=resolve(import.meta.dirname,'../../../../specs/216-assistant-long-turn-reliability/evidence');
+const output=process.env.LIGHTMONI_ASSISTANT_EVIDENCE || resolve(import.meta.dirname,'../../../../specs/216-assistant-long-turn-reliability/evidence');
 await mkdir(output,{recursive:true});
 const user={id:'fixture-user',name:'Fixture',role:'admin'};
 const config={enabled:true,model:'fixture-model',base_url:'https://fixture.invalid/v1',has_key:false,code_tasks_enabled:false};
 const sessions=new Map([['idle',{id:'idle',user_id:user.id,title:'Long task probe',category:'',created_at:'',updated_at:'',status:'idle',messages:[],events:[]}]]);
+const scrollSession={id:'scroll',user_id:user.id,title:'Reading history',category:'',created_at:'',updated_at:'',status:'idle',messages:[],events:[]};
+sessions.set(scrollSession.id,scrollSession);
 const errors=[];let nextTurn=0;
 function json(res,value,status=200){res.writeHead(status,{'content-type':'application/json'});res.end(JSON.stringify(value));}
 function writeEvent(session,turn,res,type,data={}){
  const event={sequence:session.events.length,session_id:session.id,turn_id:turn,type,timestamp:new Date().toISOString(),data};
  session.events.push(event);res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+for(let index=0;index<12;index++){
+ const turn=`previous-${index}`,output={write(){}};
+ writeEvent(scrollSession,turn,output,'user.message',{text:`Historical question ${index}`});
+ writeEvent(scrollSession,turn,output,'assistant.message',{step:1,text:`## Historical reply ${index}\n\n${'The synthetic history leaves enough room to scroll.\n\n'.repeat(5)}`});
+ writeEvent(scrollSession,turn,output,'turn.completed');
 }
 const server=createServer(async(req,res)=>{
  const url=new URL(req.url,'http://127.0.0.1'),path=url.pathname;
@@ -71,6 +79,15 @@ const server=createServer(async(req,res)=>{
     writeEvent(session,turn,res,'assistant.message',{step:1,text:'查询完成。'});
     writeEvent(session,turn,res,'turn.completed');
     res.end();
+    return;
+   }
+   if(input.text==='scroll while running'){
+    session.status='running';
+    setTimeout(()=>{
+     writeEvent(session,turn,res,'assistant.message',{step:1,text:'最新回复完成。'});
+     writeEvent(session,turn,res,'turn.completed');
+     session.status='idle';res.end();
+    },2800);
     return;
    }
    errors.push(`unexpected turn text: ${input.text}`);return json(res,{error:'unexpected'},400);
@@ -136,6 +153,20 @@ try{
  await expect(rawDetails.locator('.lm-assistant-tool-json').first()).toBeVisible();
  result.raw_details_expanded=true;
  await screenshot('tool-badges.png');
+
+ await page.goto(origin+'/assistant?session=scroll');
+ await expect(assistant.getByRole('heading',{name:'Historical reply 11'})).toBeVisible();
+ await composer.fill('scroll while running');await composer.press('Enter');
+ await expect(runbar).toBeVisible();
+ const feed=assistant.locator('.lm-assistant-feed');
+ await feed.hover();await page.mouse.wheel(0,-1800);
+ await expect.poll(()=>feed.evaluate(el=>el.scrollHeight-el.clientHeight-el.scrollTop)).toBeGreaterThan(350);
+ const previousTop=await feed.evaluate(el=>el.scrollTop);
+ await expect(assistant.locator('.lm-assistant-answer').last()).toContainText('最新回复完成',{timeout:8000});
+ expect(Math.abs(await feed.evaluate(el=>el.scrollTop)-previousTop)).toBeLessThan(100);
+ await assistant.getByRole('button',{name:'跳转到最新消息'}).click();
+ await expect.poll(()=>feed.evaluate(el=>el.scrollHeight-el.clientHeight-el.scrollTop)).toBeLessThan(100);
+ result.scroll_position_preserved=true;
 
  if(errors.length)throw Error(JSON.stringify(errors));
  result.page_errors=errors;

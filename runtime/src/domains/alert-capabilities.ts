@@ -154,6 +154,7 @@ export type AlertOperation =
   | "incident.escalate"
   | "incident.transfer"
   | "incident.ack"
+  | "rule.create"
   | "rule.update"
   | "rule.silence"
   | "silence.create"
@@ -463,6 +464,15 @@ export class AlertCapabilities {
         : { ...before, state: "acknowledged", owner_id: actor.id, owner_name: owner.name, ack_method: "web", generation: (before.generation ?? 0) + 1 };
       expectedVersion = incidentVersion(response, rule, group);
       impact.push(operation === "incident.transfer" ? "审批后转交给指定有效组成员并等待其接手；预览不代表对方已经接手。" : operation === "incident.escalate" ? "审批后按原值班规则主动升级并重置分页；预览不代表成员已接手或通知已送达。" : operation === "incident.renew" ? "审批后按原值班策略延长处理期限；实际 handling_until 以原生回执为准。" : "审批后由原告警服务接手事件、记录处理人并取消尚未发送的升级通知；预览不代表已经接手。");
+    } else if (operation === "rule.create") {
+      if (actor.role !== "admin") fail(403, "需要管理员权限");
+      object(input, ["rule"]);
+      validateRuleShape(input.rule, true);
+      const prepared = await this.prepareRuleSave(actor, input.rule, undefined, signal);
+      target_id = prepared.target_id;
+      after = prepared.after;
+      expectedVersion = prepared.expected_version;
+      impact.push(after.enabled ? "确认后创建并启用该规则，按预览中的规则条件和通知路由求值。" : "确认后创建禁用规则，可在告警中心检查配置。");
     } else if (operation === "rule.update" || operation === "rule.silence") {
       object(input, operation === "rule.update" ? ["id", "revision", "patch"] : ["id", "revision", "until"]);
       before = withoutVersion(this.getRule(actor, input.id));
@@ -510,7 +520,7 @@ export class AlertCapabilities {
     } else fail(400, "不支持的告警操作");
     signal?.throwIfAborted();
     const change: AlertChange = { operation, target_id, expected_version: expectedVersion || alertVersion(before), before, after,
-      summary: ({ "delivery.retry": "重试通知投递", "incident.renew": "延长告警处理期限", "incident.escalate": "主动升级告警事件", "incident.transfer": "转交告警事件", "incident.ack": "接手告警事件", "rule.update": "修改告警规则", "rule.silence": "调整规则静默", "silence.create": "创建静默窗口", "silence.update": "修改静默窗口", "silence.end": "结束静默窗口" })[operation] + "：" + (after.name || after.reason || target_id), impact };
+      summary: ({ "delivery.retry": "重试通知投递", "incident.renew": "延长告警处理期限", "incident.escalate": "主动升级告警事件", "incident.transfer": "转交告警事件", "incident.ack": "接手告警事件", "rule.create": "创建告警规则", "rule.update": "修改告警规则", "rule.silence": "调整规则静默", "silence.create": "创建静默窗口", "silence.update": "修改静默窗口", "silence.end": "结束静默窗口" })[operation] + "：" + (after.name || after.reason || target_id), impact };
     this.prepared.set(change, fingerprint(change));
     return change;
   }
@@ -530,12 +540,15 @@ export class AlertCapabilities {
       if (fingerprint(checked.before) !== fingerprint(stored.before) || fingerprint(checked.after) !== fingerprint(stored.after)) fail(409, "事件预览已变化，请重新生成提案", "revision_conflict");
       const change = clone(stored); this.prepared.set(change, fingerprint(change)); return change;
     }
-    if (!["rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"].includes(stored.operation)) fail(400, "不支持的告警操作");
+    if (!["rule.create", "rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"].includes(stored.operation)) fail(400, "不支持的告警操作");
     if (!stored.target_id || typeof stored.target_id !== "string" || stored.after?.id !== stored.target_id) fail(400, "变更目标无效");
     const rule = stored.operation.startsWith("rule.");
     const current = this.alerts.body(rule ? "alert_rules" : "alert_silences", stored.target_id) ?? null;
     if (alertVersion(current) !== stored.expected_version || alertVersion(stored.before) !== stored.expected_version) fail(409, "目标已更新，请重新生成提案", "revision_conflict");
-    if (stored.operation === "silence.create") {
+    if (stored.operation === "rule.create") {
+      if (actor.role !== "admin") fail(403, "需要管理员权限");
+      if (stored.before !== null || stored.after.revision !== 1) fail(400, "规则创建元数据无效");
+    } else if (stored.operation === "silence.create") {
       if (stored.before !== null || stored.after.created_by !== actor.id || stored.after.revision !== 1) fail(400, "静默创建元数据无效");
     } else if (!current || stored.after.revision !== (current.revision ?? 0) + 1) fail(409, "目标版本无效", "revision_conflict");
     let after: any;
@@ -591,9 +604,10 @@ export class AlertCapabilities {
     const current = this.alerts.body(rule ? "alert_rules" : "alert_silences", change.target_id);
     if (alertVersion(current) !== change.expected_version) fail(409, "目标已更新，请刷新并重新生成提案", "revision_conflict");
     if (rule) {
+      if (change.operation === "rule.create" && actor.role !== "admin") fail(403, "需要管理员权限");
       validateRuleShape(change.after);
       if ((change.after.group_ids ?? []).some((k: string) => !this.alerts.group(k))) fail(409, "告警组已更新，请重新生成提案");
-      if (change.operation === "rule.update") this.writeRule(current, change.after);
+      if (change.operation === "rule.create" || change.operation === "rule.update") this.writeRule(current, change.after);
       else this.writeRuleSilence(change.after);
       return this.getRule(actor, change.target_id);
     }

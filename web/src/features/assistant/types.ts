@@ -36,7 +36,7 @@ export interface CodeTaskResult {
   created_at: string;
   expires_at: string;
 }
-export type AlertChangeOperation = 'rule.update' | 'rule.silence' | 'silence.create' | 'silence.update' | 'silence.end';
+export type AlertChangeOperation = 'rule.create' | 'rule.update' | 'rule.silence' | 'silence.create' | 'silence.update' | 'silence.end';
 export interface AlertChangeProposal {
   id: string;
   session_id: string;
