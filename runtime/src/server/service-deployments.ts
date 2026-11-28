@@ -720,6 +720,7 @@ export function registerServiceDeployments(
       default:
         return;
     }
+    if (state === next) return;
     if (!canTransitionDeployment(state, next)) {
       appendObserved(update.phase, "忽略与当前部署状态不匹配的 Agent 回执", "invalid_agent_sequence");
       return;

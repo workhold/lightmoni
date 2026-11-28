@@ -169,7 +169,7 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   const leased = jobs.claim("agent-1", ["systemd.restart", "health.systemd"]);
   assert.ok(leased);
   let sequence = 0;
-  for (const phase of ["accepted", "staging", "activating", "verifying"] as const) {
+  for (const phase of ["accepted", "staging", "activating", "activating", "verifying"] as const) {
     jobs.event("agent-1", leased!.id, {
       lease_id: leased!.lease_id, sequence: ++sequence, phase, summary: "untrusted agent detail",
     });

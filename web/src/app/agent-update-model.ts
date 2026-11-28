@@ -66,6 +66,7 @@ export const updateMessageText=(message:string,t:(zh:string,en:string)=>string)=
  '恢复结果待核对；请先只读核对，不要重复派发恢复':t('恢复结果待核对；请先只读核对，不要重复派发恢复','The recovery outcome needs verification. Verify it read-only before dispatching another recovery.'),
  '平台在 Agent 维护期间重启，请先只读核对；进程已停止时可审阅恢复，不会自动重放维护':t('平台在 Agent 维护期间重启，请先只读核对；进程已停止时可审阅恢复，不会自动重放维护','The platform restarted during Agent maintenance. Verify the outcome read-only; review recovery once its process has stopped. Maintenance is never replayed automatically.'),
  '平台观察期限已结束，维护结果待核对；请先只读核对，进程已停止时可审阅恢复':t('平台观察期限已结束，维护结果待核对；请先只读核对，进程已停止时可审阅恢复','The platform observation period ended. Verify the maintenance outcome read-only; review recovery once its process has stopped.'),
+ '维护进程已退出，结果待核对。请先只读核对，再审阅恢复。':t('维护进程已退出，结果待核对。请先只读核对，再审阅恢复。','The maintenance process has exited. Verify the outcome read-only, then review recovery.'),
  '维护结果暂不可确认；请先只读核对，进程已停止时可审阅恢复':t('维护结果暂不可确认；请先只读核对，进程已停止时可审阅恢复','The maintenance outcome cannot yet be confirmed. Verify it read-only; review recovery once its process has stopped.'),
  '维护连接中断或回执无效；远端可能仍运行，请先只读核对，进程已停止时可审阅恢复':t('维护连接中断或回执无效；远端可能仍运行，请先只读核对，进程已停止时可审阅恢复','The maintenance connection was interrupted or its receipt is invalid. Its process may still be running. Verify the outcome read-only; review recovery once the process has stopped.'),
  '已核对维护进程停止且原程序健康，本次维护在切换前中断':t('已核对维护进程停止且原程序健康，本次维护在切换前中断','The maintenance process is confirmed stopped and the original runtime is healthy. This maintenance was interrupted before switching runtimes.'),
