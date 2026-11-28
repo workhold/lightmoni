@@ -13,6 +13,7 @@ import { registerPrivilegedExecutors } from "../src/server/privileged-executors.
 import { PrivilegedExecutorStore } from "../src/server/privileged-executors.js";
 import { canonicalJSON, signExecutorRequest, signJWS, verifyJWS, sha256, planClaims, permitClaims, policyClaims } from "../src/shared/privileged-executor.js";
 import { VERIFIED_SSH_ONCE_REVISION } from '../src/shared/ssh-once-readiness.js';
+import { PRIVILEGED_JOBS_MAINTENANCE_QUERY, TASK_RUNS_MAINTENANCE_QUERY } from '../src/server/machine-maintenance.js';
 
 function fixture(options:{sshOnce?:boolean;sourceRevision?:string;commands?:string[]}={}) {
   const db = new DB(":memory:"), router = new Router(), crypt = cipher(randomBytes(32));
@@ -55,6 +56,21 @@ function fixture(options:{sshOnce?:boolean;sourceRevision?:string;commands?:stri
     advance(seconds: number) { clock = new Date(clock.getTime() + seconds * 1000); },
     close() { tasks.close?.(); db.close(); } };
 }
+
+test("maintenance lookups use partial indexes instead of scanning settled job history", () => {
+  const f = fixture();
+  try {
+    for (const [sql, index] of [
+      [PRIVILEGED_JOBS_MAINTENANCE_QUERY, "privileged_jobs_pending_maintenance"],
+      [TASK_RUNS_MAINTENANCE_QUERY, "task_runs_pending_maintenance"],
+    ]) {
+      const plan = f.db.all<{detail: string}>("EXPLAIN QUERY PLAN " + sql, "agent-host", "host", "host");
+      assert.ok(plan.some(row => row.detail.includes(index)), JSON.stringify(plan));
+    }
+  } finally {
+    f.close();
+  }
+});
 
 test("enrollment is one-use, prebound, independently keyed and default capabilities are disabled", () => {
   const f = fixture(); try {
