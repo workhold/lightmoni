@@ -125,7 +125,7 @@ final class State {
             'logs'=>['resourceLogs','scopeLogs','logRecords'],
             default=>['resourceSpans','scopeSpans','spans']
         };
-        return Protocol::json([$resource=>[['resource'=>$this->resource,$scope=>[['scope'=>['name'=>'lightmoni/sdk/php','version'=>'0.1.36'],$field=>$rows]]]]]);
+        return Protocol::json([$resource=>[['resource'=>$this->resource,$scope=>[['scope'=>['name'=>'lightmoni/sdk/php','version'=>'0.1.37'],$field=>$rows]]]]]);
     }
     public function collect(): void {
         $now=(int)Protocol::nano();
@@ -169,7 +169,7 @@ final class State {
     private function collectSelf(): void {
         $clock=hrtime(true)/1e9;if (!$this->selfEnabled || $clock-$this->selfLast<30) return;
         $this->selfLast=$clock;$at=gmdate('Y-m-d\TH:i:s').'.'.substr(Protocol::nano(),-9).'Z';$time=Protocol::nano();
-        $attributes=Protocol::attrs(['lightmoni.component'=>'sdk','sdk.language'=>'php','sdk.version'=>'0.1.36']);
+        $attributes=Protocol::attrs(['lightmoni.component'=>'sdk','sdk.language'=>'php','sdk.version'=>'0.1.37']);
         $values=['heartbeat'=>1];foreach (['pending_batches','pending_bytes','retried_batches','dropped_records','rejected_records','invalid_records','overflow_records'] as $name) $values[$name]=$this->stats[$name];
         $rows=[];foreach ($values as $name=>$value) $rows[]=['name'=>'lightmoni.sdk.'.$name,'gauge'=>['dataPoints'=>[['timeUnixNano'=>$time,'asDouble'=>$value,'attributes'=>$attributes]]]];
         $this->enqueueSelf('metrics',$rows,$at);
