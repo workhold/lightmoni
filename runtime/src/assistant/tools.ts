@@ -317,6 +317,18 @@ export function monitoringTools(
     const deployments = options.deployments;
     tools.push(
       {
+        name: "check_service_target",
+        description: "Read the registered service target's real Systemd Unit, entrypoint, release directory and current version using the native fixed host preflight. Waits up to 60 seconds for the same job. Reuses a current result by default; set refresh only for a new observation after a reported correction. A queued or running result is not ready. Only a completed, current, ready result can support deployment. Requires an administrator.",
+        effect: "read",
+        schema: obj({ service_id: string, target_id: string, refresh: { type: "boolean" } }, ["service_id", "target_id"]),
+        execute: async (input, signal, user) => {
+          if (user?.role !== "admin") throw Error("administrator required");
+          object(input, ["service_id", "target_id", "refresh"], ["service_id", "target_id"]);
+          if (input.refresh !== undefined && typeof input.refresh !== "boolean") throw Error("invalid refresh");
+          return deployments.assistantPreflight({ service_id: text(input.service_id), target_id: text(input.target_id), refresh: input.refresh }, user.id, signal);
+        },
+      },
+      {
         name: "list_services",
         description: "List registered business services and repository metadata. This is read-only and never exposes credentials.",
         effect: "read",
