@@ -210,6 +210,7 @@
 .lm-update-facts strong{display:block;margin-top:2px;color:var(--lm-text);font-size:13px;line-height:1.35;overflow-wrap:anywhere}
 .lm-update-progress{display:grid;gap:5px}
 .lm-update-progress span{color:var(--lm-muted);font-size:12px;line-height:1.4}
+.lm-update-review{display:grid;gap:8px}
 .lm-update-actions{display:flex;align-items:center;flex-wrap:wrap;gap:8px}
 .lm-update-note{color:var(--lm-muted);font-size:11px;line-height:1.4}
 .lm-update-error{padding:8px 10px;border-radius:9px;border:1px solid color-mix(in srgb,#b42318 24%,transparent);background:color-mix(in srgb,#b42318 7%,transparent);color:#b42318;font-size:12px;line-height:1.5;overflow-wrap:anywhere}

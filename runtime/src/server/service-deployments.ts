@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { setTimeout as delay } from "node:timers/promises";
 import { isAbsolute, normalize } from "node:path";
 import { readFile } from "node:fs/promises";
 import { id } from "../shared/crypto.js";
@@ -133,6 +134,10 @@ export interface ServiceDeploymentStore {
   assistantDeployments(serviceID: string): Record<string, any>[];
   /** Create an approval-ready plan without executing a host action. */
   assistantPlan(input: { service_id: string; target_id: string; release_id: string }, actorID: string): Record<string, any>;
+  /** Run the registered target's fixed read-only host probe. */
+  assistantPreflight(input: { service_id: string; target_id: string; refresh?: boolean }, actorID: string, signal: AbortSignal): Promise<{
+    service_id: string; target_id: string; review_url: string; preflight: ReturnType<typeof preflightView>;
+  }>;
 }
 
 const serviceView = (row: any) => ({
@@ -906,32 +911,35 @@ export function registerServiceDeployments(
     const latest = latestPreflight(ctx.params.id, ctx.params.targetId);
     ctx.json(latest.view ?? null);
   }));
-  router.post("/api/v1/services/:id/targets/:targetId/preflight", safe(deps, async (ctx) => {
-    admin(deps, ctx);
-    const input = await body(ctx);
-    if (Object.keys(input).some((key) => key !== "confirm") || input.confirm !== true) fail(400, "必须明确确认执行只读主机预检");
-    const latest = latestPreflight(ctx.params.id, ctx.params.targetId), { target, machine, config, revision } = latest.current;
+  const preflightPending = (status: string) => status === "queued" || status === "running";
+  const queuePreflight = (latest: ReturnType<typeof latestPreflight>, actorID: string) => {
+    const { target, machine, config, revision } = latest.current;
     if (target.status === "disabled") fail(409, "服务目标已禁用");
     if (!machine.agent_id || !machineAgentReady(String(target.machine_id))) fail(409, "agent_not_ready");
     if (!options.jobs) fail(503, "agent_jobs_unavailable");
-    if (latest.result && latest.result.target_revision === revision && ["queued", "running"].includes(latest.result.status)) {
-      ctx.json(latest.view);
-      return;
-    }
+    if (latest.view && latest.result?.target_revision === revision && preflightPending(latest.view.status))
+      return { preflight: latest.view, created: false };
     const preflightID = id(), operationID = id(), at = nowISO(deps);
-    const response = db.transaction(() => {
+    const preflight = db.transaction(() => {
       db.run("INSERT INTO service_target_preflights(id,target_id,agent_id,operation_id,target_revision,status,created_at) VALUES(?,?,?,?,?,'queued',?)", preflightID, target.id, machine.agent_id, operationID, revision, at);
       const job = options.jobs!.enqueue({
         agentID: String(machine.agent_id), deploymentID: `preflight:${preflightID}`, operationID,
         actions: [{ kind: "systemd_probe", unit: config.unit, releaseDirectory: config.release_directory, preflightID, targetRevision: revision }],
         capabilities: ["systemd.probe"],
-        target: { config: { unit: config.unit, release_directory: config.release_directory },actor:ctx.user.id,preflight_id:preflightID },
+        target: { config: { unit: config.unit, release_directory: config.release_directory }, actor: actorID, preflight_id: preflightID },
         expiresInSeconds: 10 * 60,
       });
       db.run("UPDATE service_target_preflights SET job_id=? WHERE id=?", String(job.id), preflightID);
       return preflightView(db.get<any>("SELECT * FROM service_target_preflights WHERE id=?", preflightID)!, false);
     });
-    ctx.json(response, 202);
+    return { preflight, created: true };
+  };
+  router.post("/api/v1/services/:id/targets/:targetId/preflight", safe(deps, async (ctx) => {
+    admin(deps, ctx);
+    const input = await body(ctx);
+    if (Object.keys(input).some((key) => key !== "confirm") || input.confirm !== true) fail(400, "必须明确确认执行只读主机预检");
+    const result = queuePreflight(latestPreflight(ctx.params.id, ctx.params.targetId), ctx.user.id);
+    ctx.json(result.preflight, result.created ? 202 : 200);
   }));
 
   router.get("/api/v1/services/:id/releases", safe(deps, (ctx) => { admin(deps, ctx); ctx.json(releases(ctx.params.id)); }));
@@ -1283,5 +1291,19 @@ export function registerServiceDeployments(
     createPlan(input.service_id, input.target_id, input.release_id, actorID);
   const assistantServiceDetails = (serviceID: string) => ({ service: service(serviceID), targets: targets(serviceID), releases: releases(serviceID) });
   const assistantDeployments = (serviceID: string) => deployments(serviceID);
-  return { assistantServices, assistantDeployment, assistantDeploymentEvents, assistantServiceDetails, assistantDeployments, assistantPlan };
+  const assistantPreflight: ServiceDeploymentStore["assistantPreflight"] = async ({ service_id, target_id, refresh }, actorID, signal) => {
+    signal.throwIfAborted();
+    const first = latestPreflight(service_id, target_id);
+    const deadline = performance.now() + 60_000;
+    let preflight = first.view?.current && !refresh ? first.view : queuePreflight(first, actorID).preflight;
+    while (preflightPending(preflight.status) && performance.now() < deadline) {
+      await delay(1000, undefined, { signal });
+      const next = latestPreflight(service_id, target_id);
+      if (next.current.revision !== first.current.revision || next.view?.id !== preflight.id)
+        fail(409, "deployment_preflight_changed");
+      preflight = next.view!;
+    }
+    return { service_id, target_id, review_url: `/services?service=${encodeURIComponent(service_id)}`, preflight };
+  };
+  return { assistantServices, assistantDeployment, assistantDeploymentEvents, assistantServiceDetails, assistantDeployments, assistantPlan, assistantPreflight };
 }

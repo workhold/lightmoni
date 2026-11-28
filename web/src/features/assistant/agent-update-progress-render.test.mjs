@@ -18,6 +18,8 @@ const record = {
 test('awaiting native plan renders its summary and administrator approval actions', () => {
   const html = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: record, canApprove: true }));
   assert.match(html, /host-one/); assert.match(html, /确认升级/); assert.match(html, /取消计划/); assert.match(html, /原更新记录/); assert.match(html, /目标包 SHA256/);
+  assert.match(html, /type="checkbox"/); assert.match(html, /我已审阅主机/);
+  assert.match(html, /<button[^>]*disabled[^>]*>(?:(?!<\/button>).)*确认升级/s);
   assert.match(html, /等待管理员审批/); assert.match(html, /确认后开始执行/); assert.match(html, /aria-valuenow="0"/);
 });
 
@@ -30,7 +32,7 @@ test('expired native plan stays at zero and asks for a fresh plan', () => {
 
 test('running plan only reports accepted execution, not approval or success', () => {
   const html = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: { ...record, status: 'running', events: [{ at: '2026-11-15T00:00:01Z', stage: 'accepted' }] }, canApprove: true }));
-  assert.match(html, /执行请求已接受/); assert.doesNotMatch(html, /确认升级/); assert.doesNotMatch(html, /更新成功/);
+  assert.match(html, /维护器已接收/); assert.doesNotMatch(html, /确认升级/); assert.doesNotMatch(html, /更新成功/);
   assert.match(html, /维护器已接收/); assert.match(html, /aria-valuenow="25"/);
 });
 
@@ -52,10 +54,11 @@ test('unknown native record renders read-only reconciliation and reviewed recove
   assert.match(admin, /只读核对结果/); assert.match(admin, /恢复中断维护/); assert.match(admin, /我已核对目标主机/);
   const member = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: unknown, canApprove: false }));
   assert.doesNotMatch(member, /只读核对结果/); assert.doesNotMatch(member, /恢复中断维护/);
+  assert.doesNotMatch(member, /type="checkbox"/);
 });
 
 test('failed updates show recovery guidance without presenting its steps as completed', () => {
   const html = renderToStaticMarkup(createElement(AgentUpdateProgress, { value: { ...record, status: 'failed' }, canApprove: true }));
-  assert.match(html, /需要恢复时的操作顺序/); assert.match(html, /每一步都需要单独核对和审批/);
+  assert.match(html, /请打开原更新记录核对最后阶段和主机状态/);
   assert.doesNotMatch(html, /已完成状态修正/);
 });

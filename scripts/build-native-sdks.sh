@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-version=0.1.41
+version=0.1.42
 output=runtime/downloads
 if [ "$#" -gt 0 ]; then version=$1; fi
 if [ "$#" -gt 1 ]; then output=$2; fi

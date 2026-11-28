@@ -7,6 +7,7 @@ import { Router } from "../src/shared/http.js";
 import { id } from "../src/shared/crypto.js";
 import { canTransitionDeployment, registerServiceDeployments } from "../src/server/service-deployments.js";
 import { registerAgentJobs } from "./helpers/domain-jobs.js";
+import { monitoringTools } from "../src/assistant/tools.js";
 import type { Dependencies } from "../src/shared/types.js";
 
 test("service inventory creates an approval-ready deployment plan", async (t) => {
@@ -30,7 +31,8 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   } as unknown as Dependencies;
   router.auth = deps.auth;
   const jobs = registerAgentJobs(deps, { agentCredentials: { has: () => true } as any });
-  registerServiceDeployments(deps, { jobs });
+  const store = registerServiceDeployments(deps, { jobs });
+  const checkTarget = monitoringTools(deps, { deployments: store }).find(tool => tool.name === "check_service_target")!;
   const server = createServer((req, res) => void router.handle(req,res).then(found=>{if(!found){res.writeHead(404);res.end();}}));
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -65,6 +67,11 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   db.run("INSERT INTO agents(id,last_seen,platform,arch) VALUES(?,?,?,?)", "agent-1", "2026-10-20T23:59:00Z", "linux", "amd64");
   const preflightQueued = await request(`/api/v1/services/${serviceID}/targets/${target.data.id}/preflight`, "POST", { confirm: true });
   assert.equal(preflightQueued.status, 202);
+  const scope = { service_id: serviceID, target_id: target.data.id };
+  const signal = new AbortController().signal;
+  await assert.rejects(checkTarget.execute(scope, signal, { ...user, role: "member" }), /administrator required/);
+  await assert.rejects(checkTarget.execute({ ...scope, unit: "other.service" }, signal, user), /invalid input/);
+  const assistantCheck = checkTarget.execute(scope, signal, user);
   const probeJob = jobs.claim("agent-1", ["systemd.probe"]);
   assert.ok(probeJob);
   assert.equal(probeJob!.actions[0].kind, "systemd_probe");
@@ -89,6 +96,10 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.equal(preflightView.data.ready, true);
   assert.equal(preflightView.data.current, true);
   assert.equal(JSON.stringify(preflightView.data).includes("ignored_output"), false);
+  const assistantResult = await assistantCheck;
+  assert.deepEqual(assistantResult, { ...scope, review_url: `/services?service=${serviceID}`, preflight: preflightView.data });
+  assert.deepEqual(await checkTarget.execute(scope, signal, user), assistantResult);
+  assert.equal(db.get<{ count: number }>("SELECT count(*) AS count FROM service_target_preflights WHERE target_id=?", target.data.id)?.count, 1);
   const previousRelease = await request(`/api/v1/services/${serviceID}/releases`, "POST", { version: "v1", source_type: "artifact", source_ref: "git:0123456789abcdef" });
   assert.equal(previousRelease.status, 201);
   db.run("UPDATE releases SET status='ready',artifact_digest=?,artifact_size=1,artifact_format='lightmoni-release-v1.tar.gz',manifest_json=? WHERE id=?", "b".repeat(64), JSON.stringify({ schema_version: 1, service_id: serviceID, version: "v1", architecture: "any", entrypoint: "run" }), previousRelease.data.id);
