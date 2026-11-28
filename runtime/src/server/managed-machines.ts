@@ -914,7 +914,7 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const current = get(machineID), check = checked(current, input.check_id, input.credential_id);
     const { machine, credential } = sshCredential(machineID, check.credential_id);
     if (!replaceableAgentBinding(db, machine.agent_id, iso(now())) || check.agent_installation?.state !== "absent") fail(409, "已发现或无法排除已有 Agent 安装，请先核对现有节点，不可覆盖安装");
-    const version = text(input.version ?? "0.1.45", "version", 64), arch = text(input.arch ?? check.arch, "arch", 16);
+    const version = text(input.version ?? "0.1.46", "version", 64), arch = text(input.arch ?? check.arch, "arch", 16);
     if (!VERSION.test(version) || !ARCHES.has(arch)) fail(400, "invalid version or arch");
     if (arch !== check.arch) fail(409, "所选架构与 SSH 检查结果不一致");
     const at = now(), deploymentID = id();

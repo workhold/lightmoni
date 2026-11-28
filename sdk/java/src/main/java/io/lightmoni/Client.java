@@ -131,7 +131,7 @@ public final class Client implements AutoCloseable {
                 case "logs" -> { resourceKey="resourceLogs";scopeKey="scopeLogs";field="logRecords"; }
                 default -> { resourceKey="resourceSpans";scopeKey="scopeSpans";field="spans"; }
             }
-            return encode(Map.of(resourceKey,List.of(Map.of("resource",resource,scopeKey,List.of(Map.of("scope",Map.of("name","lightmoni/sdk/java","version","0.1.45"),field,records))))));
+            return encode(Map.of(resourceKey,List.of(Map.of("resource",resource,scopeKey,List.of(Map.of("scope",Map.of("name","lightmoni/sdk/java","version","0.1.46"),field,records))))));
         }
         synchronized void collect() {
             long now=nano();
@@ -176,7 +176,7 @@ public final class Client implements AutoCloseable {
             long clock=System.nanoTime();
             if(!limits.selfTelemetry || (selfLast!=Long.MIN_VALUE && clock-selfLast<30_000_000_000L))return;
             selfLast=clock;String at=Instant.now().toString(),time=Long.toString(nano());
-            List<Object> attributes=attrs(Map.of("lightmoni.component","sdk","sdk.language","java","sdk.version","0.1.45"));
+            List<Object> attributes=attrs(Map.of("lightmoni.component","sdk","sdk.language","java","sdk.version","0.1.46"));
             List<Object> metrics=new ArrayList<>();metrics.add(Map.of("name","lightmoni.sdk.heartbeat","gauge",Map.of("dataPoints",List.of(Map.of("timeUnixNano",time,"asDouble",1,"attributes",attributes)))));
             for(String name:List.of("pending_batches","pending_bytes","retried_batches","dropped_records","rejected_records","invalid_records","overflow_records"))metrics.add(Map.of("name","lightmoni.sdk."+name,"gauge",Map.of("dataPoints",List.of(Map.of("timeUnixNano",time,"asDouble",number(name),"attributes",attributes)))));
             enqueueSelf("metrics",metrics,at);

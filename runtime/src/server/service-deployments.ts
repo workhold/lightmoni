@@ -121,6 +121,28 @@ const safe = (deps: Dependencies, handler: Handler): Handler => async (ctx) => {
   }
 };
 
+type TargetRepairInput = {
+  service_id: string;
+  target_id: string;
+  preflight_id: string;
+  unit?: string;
+  release_directory?: string;
+};
+type RepairConfig = { unit: string; release_directory: string };
+type TargetRepairRow = {
+  id: string;
+  target_id: string;
+  service_id: string;
+  created_by: string;
+  preflight_id: string;
+  target_revision: string;
+  before_json: string;
+  after_json: string;
+  expires_at: string;
+  applied_at: string;
+  verification_id: string;
+};
+
 export interface ServiceDeploymentStore {
   /** Sanitized service inventory for assistant reads. */
   assistantServices(): ReturnType<typeof serviceView>[];
@@ -138,7 +160,26 @@ export interface ServiceDeploymentStore {
   assistantPreflight(input: { service_id: string; target_id: string; refresh?: boolean }, actorID: string, signal: AbortSignal): Promise<{
     service_id: string; target_id: string; review_url: string; preflight: ReturnType<typeof preflightView>;
   }>;
+  assistantProposeTargetRepair(input: TargetRepairInput, actorID: string): ServiceTargetRepair;
+  assistantTargetRepair(repairID: string, actorID: string): ServiceTargetRepair;
 }
+
+export type ServiceTargetRepair = {
+  id: string;
+  service_id: string;
+  target_id: string;
+  machine_name: string;
+  service_name: string;
+  status: "awaiting_approval" | "expired" | "stale" | "applied";
+  before: RepairConfig;
+  after: RepairConfig;
+  preflight_id: string;
+  target_revision: string;
+  expires_at: string;
+  applied_at: string;
+  verification: ReturnType<typeof preflightView> | null;
+  review_url: string;
+};
 
 const serviceView = (row: any) => ({
   id: row.id,
@@ -281,6 +322,20 @@ export function registerServiceDeployments(
       expires_at TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS service_target_preflights_latest ON service_target_preflights(target_id,created_at);
+    CREATE TABLE IF NOT EXISTS service_target_repairs(
+      id TEXT PRIMARY KEY,
+      target_id TEXT NOT NULL REFERENCES service_targets(id) ON DELETE CASCADE,
+      service_id TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      preflight_id TEXT NOT NULL,
+      target_revision TEXT NOT NULL,
+      before_json TEXT NOT NULL,
+      after_json TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      applied_at TEXT NOT NULL DEFAULT '',
+      verification_id TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS service_target_repairs_source ON service_target_repairs(target_id,preflight_id,created_by);
     CREATE TABLE IF NOT EXISTS releases(
       id TEXT PRIMARY KEY,
       service_id TEXT NOT NULL REFERENCES services(id) ON DELETE CASCADE,
@@ -895,15 +950,17 @@ export function registerServiceDeployments(
     db.run("INSERT INTO service_targets(id,service_id,machine_id,adapter,config_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?)", targetID, serviceID, machine.id, adapter, JSON.stringify(config), at, at);
     ctx.json({ ...targetView(db.get<any>("SELECT t.*,m.name AS machine_name FROM service_targets t JOIN managed_machines m ON m.id=t.machine_id WHERE t.id=?", targetID)!), preflight: null }, 201);
   }));
+  const saveTarget = (current: { id: string; service_id: string }, adapter: string, config: ReturnType<typeof safeTargetConfig>, status: string) => {
+    db.run("UPDATE service_targets SET adapter=?,config_json=?,status=?,updated_at=? WHERE id=? AND service_id=?", adapter, JSON.stringify(config), status, nowISO(deps), current.id, current.service_id);
+  };
   router.patch("/api/v1/services/:id/targets/:targetId", safe(deps, async (ctx) => {
     admin(deps, ctx);
-    const current = ensureTarget(ctx.params.id, ctx.params.targetId), input = await body(ctx);
+    const input = await body(ctx), current = ensureTarget(ctx.params.id, ctx.params.targetId);
     const adapter = text(input.adapter ?? current.adapter, "adapter", 32) as ServiceAdapter;
     if (!ADAPTERS.has(adapter)) fail(400, "unsupported deployment adapter");
     const config = safeTargetConfig(adapter, jsonObject(input.config ?? parse(current.config_json, {}), "config")), status = text(input.status ?? current.status, "status", 32);
     if (!["unknown", "ready", "degraded", "disabled"].includes(status)) fail(400, "invalid target status");
-    const at = nowISO(deps);
-    db.run("UPDATE service_targets SET adapter=?,config_json=?,status=?,updated_at=? WHERE id=? AND service_id=?", adapter, JSON.stringify(config), status, at, current.id, current.service_id);
+    saveTarget(current, adapter, config, status);
     ctx.json({ ...targetView(db.get<any>("SELECT t.*,m.name AS machine_name FROM service_targets t JOIN managed_machines m ON m.id=t.machine_id WHERE t.id=?", current.id)!), preflight: null });
   }));
 
@@ -941,6 +998,88 @@ export function registerServiceDeployments(
     if (Object.keys(input).some((key) => key !== "confirm") || input.confirm !== true) fail(400, "必须明确确认执行只读主机预检");
     const result = queuePreflight(latestPreflight(ctx.params.id, ctx.params.targetId), ctx.user.id);
     ctx.json(result.preflight, result.created ? 202 : 200);
+  }));
+
+  const findTargetRepair = (repairID: string, actorID: string) => {
+    if (!SERVICE_ID.test(repairID)) fail(400, "invalid repair_id");
+    const row = db.get<TargetRepairRow>("SELECT * FROM service_target_repairs WHERE id=? AND created_by=?", repairID, actorID);
+    if (!row) fail(404, "target_repair_not_found");
+    return row;
+  };
+  const failedCurrentPreflight = (latest: ReturnType<typeof latestPreflight>, preflightID: string) =>
+    latest.current.target.status !== "disabled" && latest.view?.id === preflightID && latest.view.current && !latest.view.ready;
+  const repairView = (row: TargetRepairRow, latest = latestPreflight(row.service_id, row.target_id)): ServiceTargetRepair => {
+    let status: ServiceTargetRepair["status"] = "awaiting_approval";
+    let verification = null;
+    if (row.applied_at) {
+      status = "applied";
+      const stored = db.get<any>("SELECT * FROM service_target_preflights WHERE id=? AND target_id=?", row.verification_id, row.target_id);
+      if (stored) verification = preflightView(stored, latest.view?.id === stored.id && latest.view?.current === true);
+    } else if (Date.parse(row.expires_at) <= deps.now().getTime()) status = "expired";
+    else if (row.target_revision !== latest.current.revision || !failedCurrentPreflight(latest, row.preflight_id)) status = "stale";
+    return {
+      id: row.id, service_id: row.service_id, target_id: row.target_id,
+      machine_name: latest.current.target.machine_name, service_name: service(row.service_id).name, status,
+      before: parse(row.before_json, { unit: "", release_directory: "" }), after: parse(row.after_json, { unit: "", release_directory: "" }),
+      preflight_id: row.preflight_id, target_revision: row.target_revision, expires_at: row.expires_at,
+      applied_at: row.applied_at, verification,
+      review_url: `/services?service=${encodeURIComponent(row.service_id)}`,
+    };
+  };
+  const assistantTargetRepair: ServiceDeploymentStore["assistantTargetRepair"] = (repairID, actorID) => repairView(findTargetRepair(repairID, actorID));
+  const assistantProposeTargetRepair: ServiceDeploymentStore["assistantProposeTargetRepair"] = (input, actorID) => db.transaction(() => {
+    const latest = latestPreflight(input.service_id, input.target_id), { current } = latest;
+    if (!failedCurrentPreflight(latest, input.preflight_id)) fail(409, "target_repair_preflight_not_current");
+    const before = { unit: current.config.unit, release_directory: current.config.release_directory };
+    const next = safeTargetConfig(current.target.adapter, {
+      unit: input.unit ?? before.unit, release_directory: input.release_directory ?? before.release_directory,
+    });
+    const after = { unit: next.unit, release_directory: next.release_directory };
+    const unitChanged = before.unit !== after.unit, directoryChanged = before.release_directory !== after.release_directory;
+    if (!unitChanged && !directoryChanged) fail(400, "target_repair_no_change");
+    const preflight = latest.view!.snapshot.preflight;
+    if (unitChanged && (!preflight.systemd_available || (preflight.unit_exists && preflight.entrypoint_matches)))
+      fail(409, "target_repair_unit_issue_not_observed");
+    if (directoryChanged && (!preflight.filesystem_check_supported || (preflight.release_directory_exists
+      && preflight.release_directory_writable && preflight.current_pointer_valid && preflight.entrypoint_matches)))
+      fail(409, "target_repair_directory_issue_not_observed");
+    const { target } = current, afterJSON = JSON.stringify(after);
+    const existing = db.get<TargetRepairRow>(`SELECT * FROM service_target_repairs
+      WHERE target_id=? AND preflight_id=? AND created_by=? AND after_json=?`, target.id, input.preflight_id, actorID, afterJSON);
+    if (existing) return repairView(existing, latest);
+    const repairID = id();
+    db.run(`INSERT INTO service_target_repairs(id,target_id,service_id,created_by,preflight_id,target_revision,before_json,after_json,expires_at)
+      VALUES(?,?,?,?,?,?,?,?,?)`, repairID, target.id, target.service_id, actorID, input.preflight_id, current.revision,
+      JSON.stringify(before), afterJSON, latest.view!.expires_at);
+    return assistantTargetRepair(repairID, actorID);
+  });
+  router.get("/api/v1/service-target-repairs/:repairId", safe(deps, (ctx) => {
+    admin(deps, ctx);
+    ctx.json(assistantTargetRepair(ctx.params.repairId, ctx.user.id));
+  }));
+  router.post("/api/v1/service-target-repairs/:repairId/apply", safe(deps, async (ctx) => {
+    admin(deps, ctx);
+    const input = await body(ctx);
+    if (Object.keys(input).some(key => !["confirm", "expected_revision"].includes(key)) || input.confirm !== true)
+      fail(400, "target_repair_confirmation_required");
+    const value = db.transaction(() => {
+      const row = findTargetRepair(ctx.params.repairId, ctx.user.id);
+      if (input.expected_revision !== row.target_revision) fail(409, "target_repair_revision_mismatch");
+      const latest = latestPreflight(row.service_id, row.target_id);
+      const proposal = repairView(row, latest);
+      if (proposal.status === "applied") return proposal;
+      if (proposal.status !== "awaiting_approval") fail(409, "target_repair_preflight_not_current");
+      if (db.get(`SELECT 1 FROM deployments WHERE target_id=? AND status IN
+        ('agent_ready','staging','activating','verifying','running','rollback_pending','rolling_back') LIMIT 1`, row.target_id))
+        fail(409, "target_repair_deployment_in_progress");
+      const { target, config } = latest.current;
+      saveTarget(target, target.adapter, safeTargetConfig(target.adapter, { ...config, ...proposal.after }), target.status);
+      const verifiedTarget = latestPreflight(row.service_id, row.target_id);
+      const { preflight } = queuePreflight(verifiedTarget, ctx.user.id);
+      db.run("UPDATE service_target_repairs SET applied_at=?,verification_id=? WHERE id=?", nowISO(deps), preflight.id, row.id);
+      return assistantTargetRepair(row.id, ctx.user.id);
+    });
+    ctx.json(value);
   }));
 
   router.get("/api/v1/services/:id/releases", safe(deps, (ctx) => { admin(deps, ctx); ctx.json(releases(ctx.params.id)); }));
@@ -1306,5 +1445,5 @@ export function registerServiceDeployments(
     }
     return { service_id, target_id, review_url: `/services?service=${encodeURIComponent(service_id)}`, preflight };
   };
-  return { assistantServices, assistantDeployment, assistantDeploymentEvents, assistantServiceDetails, assistantDeployments, assistantPlan, assistantPreflight };
+  return { assistantServices, assistantDeployment, assistantDeploymentEvents, assistantServiceDetails, assistantDeployments, assistantPlan, assistantPreflight, assistantProposeTargetRepair, assistantTargetRepair };
 }

@@ -24,6 +24,7 @@ import AgentUpdateProgress from './AgentUpdateProgress';
 import WorkbenchInspector,{type WorkbenchTab} from './WorkbenchInspector';
 import {agentUpdateToolValue} from './agent-update-progress';
 import AlertProposalProgress from './AlertProposalProgress';
+import TargetRepairProgress from './TargetRepairProgress';
 import AssistantComposer, { type ComposerCommand, type ComposerInput } from './AssistantComposer';
 import type { AssistantConfig, AssistantContext, AssistantEvent, AssistantSession, Attachment, CodeTaskResult, DashboardDraft, DraftPanel, ToolTrace, TurnView } from './types';
 import './assistant.css';
@@ -108,6 +109,7 @@ function toolLabelMap(t:Translator=chinese): Record<string,string> {
     list_tables: t("读取数据表目录","Read table catalog"), describe_table: t("检查表结构","Inspect table schema"), run_query: t("执行 SQL 查询","Run SQL query"), draft_dashboard: t("生成大盘草稿","Generate dashboard draft"), code_task: t("执行代码任务","Run code task"),
     list_alert_rules: t("查询告警规则","Find alert rules"), get_alert_rule: t("读取告警规则","Read alert rule"), list_alert_silences: t("查询静默窗口","Find silence windows"), get_alert_silence: t("读取静默窗口","Read silence window"), list_alert_groups: t("查询告警组","Find alert groups"), get_alert_proposal: t("核验告警提案","Verify alert proposal"), propose_alert_change: t("准备告警变更","Prepare alert change"),
     list_services:t('查询服务目录','Find services'),list_service_details:t('读取服务目标和制品','Read service targets and artifacts'),check_service_target:t('检查主机部署条件','Check host deployment prerequisites'),get_service_deployment:t('读取服务部署','Read service deployment'),get_service_deployment_events:t('读取部署事件','Read deployment events'),propose_service_deployment:t('准备服务部署计划','Prepare service deployment plan'),
+    propose_service_target_repair:t('准备服务目标修正','Prepare service target repair'),get_service_target_repair:t('核对服务目标修正','Verify service target repair'),
     list_agent_releases:t('查询 Agent 版本','Find Agent releases'),get_agent_update:t('读取 Agent 更新','Read Agent update'),scan_sdk_instrumentation:t('扫描 SDK 插桩','Scan SDK instrumentation'),propose_sdk_instrumentation:t('准备 SDK 插桩方案','Prepare SDK instrumentation plan'),
     list_operations_resources:t('查询运维资源','Find operations resources'),get_operations_run:t('读取运维执行','Read operations run'),propose_operations_action:t('准备运维操作','Prepare operations action'),
     list_tasks:t('查询任务','Find tasks'),get_task:t('读取任务','Read task'),list_task_runs:t('查询任务执行','Find task runs'),get_task_run:t('读取任务执行','Read task run'),get_task_proposal:t('读取任务提案','Read task proposal'),propose_task_action:t('准备任务操作','Prepare task action'),
@@ -209,6 +211,8 @@ function ToolProgress({ turn, onDraft, canUseCodeTasks, canApproveAgentUpdate }:
   return <div className="lm-assistant-tools">{tools.map(tool => {
     if (tool.name === 'code_task') return <CodeTaskProgress key={tool.callId} tool={tool} />;
     if (tool.name === 'propose_alert_change') return <AlertProposalProgress key={tool.callId} tool={tool} />;
+    if (['propose_service_target_repair', 'get_service_target_repair'].includes(tool.name) && tool.status === 'success')
+      return <TargetRepairProgress key={tool.callId} tool={tool} canApprove={canApproveAgentUpdate}/>;
     const agentUpdate = agentUpdateToolValue(tool.name, tool.result);
     if (agentUpdate) return <AgentUpdateProgress key={tool.callId} value={agentUpdate} canApprove={canApproveAgentUpdate} />;
     const result = tool.result as { draft?: DashboardDraft; error?: string;id?:string;machine_id?:string;status?:string;review_url?:string } | undefined;
