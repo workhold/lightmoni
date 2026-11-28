@@ -1,3 +1,4 @@
+import { createUUID } from '../../shared/uuid';
 import {useMonitoringI18n} from '../monitoring-i18n';
 import {useEffect,useRef,useState} from 'react';
 import {api,post} from '../../shared/api';
@@ -19,7 +20,7 @@ export default function PanelAlerts({panel,tables,variables,values,choices,range
  const [groups,setGroups]=useState<AlertGroup[]>([]),[error,setError]=useState(''),[loading,setLoading]=useState(true),[busy,setBusy]=useState(''),[preview,setPreview]=useState<AlertPreviewData>(),[previewOpen,setPreviewOpen]=useState(false),[previewError,setPreviewError]=useState(''),[toast,holder]=message.useMessage();
  const latest=useRef(panel);latest.current=panel;
  const lines=alertLines(panel,results,language),ids=Array.isArray(panel.options.alert_rule_ids)?panel.options.alert_rule_ids as string[]:[];
- const makePanelAlertDraft=():PanelAlertDraft=>({key:crypto.randomUUID(),dirty:false,rule:{...newAlertRule(),name:l("{0} 告警",panel.title),for_seconds:0,notify_health:false,panel_condition:{panel_id:panel.id,query_ref:panel.queries.find(query=>query.enabled!==false)?.refId??'',reducer:'last'}}});
+ const makePanelAlertDraft=():PanelAlertDraft=>({key:createUUID(),dirty:false,rule:{...newAlertRule(),name:l("{0} 告警",panel.title),for_seconds:0,notify_health:false,panel_condition:{panel_id:panel.id,query_ref:panel.queries.find(query=>query.enabled!==false)?.refId??'',reducer:'last'}}});
  useEffect(()=>{let active=true;void Promise.all([api<AlertRule[]>('/alerts/rules'),api<AlertGroup[]>('/alerts/groups')]).then(([rules,groups])=>{
   if(!active)return;setGroups(groups);const order=(id:string)=>ids.includes(id)?ids.indexOf(id):ids.length;
   const selected=rules.filter(rule=>ids.includes(rule.id)||rule.panel_condition?.panel_id===panel.id).sort((a,b)=>order(a.id)-order(b.id)||(a.panel_condition?.query_ref??'').localeCompare(b.panel_condition?.query_ref??'')||a.name.localeCompare(b.name)||a.id.localeCompare(b.id));

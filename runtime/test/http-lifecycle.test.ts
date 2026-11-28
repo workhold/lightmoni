@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { spawn, execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,7 +23,7 @@ test("Agent CLI executes through an installed current-release symlink", () => {
         cwd: fileURLToPath(new URL("..", import.meta.url)),
         encoding: "utf8",
       }).trim(),
-      "0.1.0",
+      JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version,
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
@@ -79,7 +79,12 @@ test(
   { timeout: 15000 },
   async () => {
     const directory = mkdtempSync(join(tmpdir(), "lightmoni-startup-"));
-    const ch = createServer((_req, res) => {
+    let sqlInURL = false, receivedReaderDDL = false;
+    const ch = createServer(async (req, res) => {
+      sqlInURL ||= new URL(req.url!, "http://fixture").searchParams.has("query");
+      let body = "";
+      for await (const chunk of req) body += chunk.toString();
+      receivedReaderDDL ||= body.startsWith("ALTER USER lightmoni_reader IDENTIFIED WITH sha256_password");
       res.setHeader("content-type", "application/json");
       res.end('{"meta":[],"data":[],"rows":0}');
     });
@@ -116,6 +121,8 @@ test(
       assert.equal(signal, null, output);
       assert.equal(code, 1, output);
       assert.match(output, /EADDRINUSE/);
+      assert.equal(sqlInURL, false);
+      assert.equal(receivedReaderDDL, true);
     } finally {
       clearTimeout(timer);
       child.kill();

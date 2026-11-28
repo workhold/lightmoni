@@ -1,3 +1,4 @@
+import { createUUID } from '../shared/uuid';
 import {useEffect,useRef,useState} from 'react';
 import {api,ApiError} from '../shared/api';
 import {canonicalHostAction,hostContainerTerminal,type HostAction,type HostContainerJob} from './host-container-model';
@@ -22,7 +23,7 @@ export function useHostContainerJobs(machineID:string){
  };
  const run=async(action:HostAction):Promise<HostContainerJob|undefined>=>{
   if(pending.current||uncertain)return;pending.current=true;setBusy(true);setError('');const abort=new AbortController();controller.current=abort;
-  const intent={requestID:crypto.randomUUID(),action,jobID:undefined as string|undefined};let submitted=false;
+  const intent={requestID:createUUID(),action,jobID:undefined as string|undefined};let submitted=false;
   try{
    submitted=true;let job=await api<HostContainerJob>(path,{method:'POST',signal:abort.signal,body:JSON.stringify({request_id:intent.requestID,confirmed:!['inspect','inspect_many','images'].includes(action.operation),action})});
    if(typeof job.id!=='string'||!job.id||job.request_id!==intent.requestID||canonicalHostAction(job.action)!==canonicalHostAction(action))throw Error('host_docker_receipt_mismatch');intent.jobID=job.id;if(alive.current)merge(job);

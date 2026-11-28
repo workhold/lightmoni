@@ -75,7 +75,7 @@ test("password and private-key first preflights record their handshake key and k
     const check = await f.request(`/machines/${h.id}/ssh-check`, "POST", { credential_id: h.cid }); assert.equal(check.status, 200); assert.equal(check.data.ready, true, JSON.stringify(check.data));
     const learned = f.machines.get(h.id); assert.equal(learned.host_key_fingerprint, firstKey.fingerprint); assert.equal(learned.host_key_public_key, firstKey.publicKey); assert.equal(learned.host_key_status, "observed"); assert.ok(learned.host_key_observed_at);
     const plan = await f.request(`/machines/${h.id}/deployments/plan`, "POST", { check_id: check.data.id, credential_id: h.cid, version: "0.1.0", arch: "amd64" }); assert.equal(plan.status, 201, JSON.stringify(plan.data));
-    const assistant = f.machines.assistantGet(h.id); assert.equal(assistant.host_key_public_key, ""); assert.equal(assistant.host_key_fingerprint, "");
+    const assistant = f.machines.assistantGet(h.id); assert.ok(!Object.hasOwn(assistant, "host_key_public_key")); assert.ok(!Object.hasOwn(assistant, "host_key_fingerprint"));
     const again = await f.request(`/machines/${h.id}/ssh-check`, "POST", { credential_id: h.cid }); assert.equal(again.data.ready, true); assert.equal(f.machines.get(h.id).host_key_observed_at, learned.host_key_observed_at);
   }
   assert.equal(ssh.commands.length, 4);

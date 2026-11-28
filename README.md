@@ -83,11 +83,13 @@ docker compose exec lightmoni lightmoni-admin reset-password --name admin
 
 使用 Nginx 时，将 `LIGHTMONI_EXTERNAL_URL` 设为浏览器访问的 HTTPS 域名；如只允许宿主机反向代理访问，设置 `LIGHTMONI_BIND_ADDRESS=127.0.0.1`。SDK/节点默认上报地址初始使用工作台地址，也可在“管理后台 → 接入配置”保存多个入口。`sh deploy/server/start.sh` 使用根配置拉取并启动。部署统一使用根目录 `compose.yaml`。
 
-更新时先执行 `git pull --ff-only origin main`，获取仓库维护的镜像版本，再执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`，无需修改 `.env` 的镜像设置。仓库也提供 `latest`；根 Compose 使用固定发布标签。数据库密码、端口和项目名仍通过 `.env` 配置。发布仓库需要鉴权时先执行 `docker login docker.heyphp.com`；指定历史版本的回滚方法见 [Docker 更新与回滚](deploy/server/README.md#同基线程序回滚)。源码构建则填写 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD` 的结果，并显式执行：
+更新时先执行 `git pull --ff-only origin main`，获取仓库维护的镜像版本，再执行 `docker compose pull lightmoni` 和 `docker compose up -d --no-build --wait`。数据库密码、端口和项目名仍通过 `.env` 配置。发布仓库需要鉴权时先执行 `docker login docker.heyphp.com`。指定历史版本的回滚方法见 [Docker 更新与回滚](deploy/server/README.md#同基线程序回滚)。源码构建使用 Compose 覆盖文件，以本机架构构建独立镜像，并沿用当前项目的数据卷。
 
 ```sh
-docker compose build lightmoni
-docker compose up -d --no-build --pull never --wait
+export LIGHTMONI_BUILD_REVISION="$(git rev-parse HEAD)"
+docker compose -f compose.yaml -f deploy/server/compose.source.yml pull clickhouse
+docker compose -f compose.yaml -f deploy/server/compose.source.yml build lightmoni
+docker compose -f compose.yaml -f deploy/server/compose.source.yml up -d --no-build --pull never --wait
 ```
 
 构建源参数仍支持 `LIGHTMONI_NPM_REGISTRY`、`LIGHTMONI_NODE_DIST_URL`、`LIGHTMONI_DEBIAN_MIRROR` 和 `LIGHTMONI_DEBIAN_SECURITY_MIRROR`，默认使用官方源，继续核对 npm integrity、Node 官方 SHA256 和 Debian 仓库签名。地址只填写无凭据公开源。
@@ -191,12 +193,12 @@ npm run release:sdk -- 0.1.36
 
 ### 版本号与 AI 发布检查
 
-根 `package.json.version` 是平台、Agent 和随镜像分发 SDK 的统一版本事实来源。AI/自动化代理在**每次推送前**必须运行 `npm run version:check`；检查失败时先补齐遗漏，不得直接推送或发布。普通提交不需要机械涨版，只有发布 PR 才递增版本：修复使用补丁号，例如当前为 `0.1.36`，下一个补丁版本示例为 `0.1.36`。
+根 `package.json.version` 是平台、Agent 和随镜像分发 SDK 的统一版本事实来源。AI/自动化代理在**每次推送前**必须运行 `npm run version:check`。发布 PR 将当前版本的 PATCH 位加一，并将尚未发布的版本设为 `NEXT_VERSION`。
 
 ```sh
 # 每次推送前检查；发布 PR 中先递增，再复查。
 npm run version:check
-npm run version:bump -- 0.1.36
+npm run version:bump -- "$NEXT_VERSION"
 npm run version:check
 ```
 
@@ -256,7 +258,7 @@ Node 主服务为每轮对话启动一个 Mastra Node worker，使用私有 stdi
 
 支持 API 基地址、根地址，以及完整 `/chat/completions`、`/responses`、`/messages` 或 Gemini 生成接口地址。使用新填写的 Key 或无需 Key 时，根地址按协议优先尝试 `/v1`；Gemini 可回退到 `/v1beta`，最后尝试无版本目录。OpenAI/Anthropic 的独立末段 `/v1beta` 会修正为 `/v1`；Gemini 明确填写的版本和自定义路径保留。各协议的版本修正、目录鉴权及查询参数集中维护，获取模型、测试连接和保存共用地址规范化；修正后在输入框回填并显示原因。已保存 Key 只可在原规范 API 基地址复用，改地址须重新填写或明确清除；同地址切换协议可保留 Key。目录查询不会保存配置或发起生成请求，401 表示供应商未接受凭证。
 
-默认输入预算 32,000、单次模型输出上限 4,096、每轮 8 步（最多 12 步），整轮仍限制 2 分钟，每个实例最多并行执行 4 轮，达到上限时明确提示稍后重试。输入预算使用保守的 UTF-8 字节估算并在每次模型调用前检查；它不是精确的 tokenizer 计数，应设在模型实际上下文容量以内并预留输出空间。历史整理会产生额外的模型请求和用量，只有供应商实际返回的计数才作为已知用量展示。管理员在“模型管理”中设置每百万 token 的输入、输出单价及币种，查看 7/30/90 天的 token 和估算费用；助手、历史整理、连接测试及 Pi 代码任务均计入，未知用量/单价分别标明，修改价格不重算历史费用。Responses 使用 `store:false`；多轮所需的加密推理状态和 Gemini 签名仅在服务端有界保存、通过私有管道重放，不返回浏览器，也不保存隐藏推理明文。
+默认输入预算 32,000、单次模型输出上限 4,096、每轮 8 步（最多 12 步），模型和工具连续空闲 2 分钟会结束本轮。每轮总上限为 30 分钟。每个实例最多并行执行 4 轮，达到上限时会提示稍后重试。输入预算使用保守的 UTF-8 字节估算并在每次模型调用前检查；它不是精确的 tokenizer 计数，应设在模型实际上下文容量以内并预留输出空间。历史整理会产生额外的模型请求和用量，只有供应商实际返回的计数才作为已知用量展示。管理员在“模型管理”中设置每百万 token 的输入、输出单价及币种，查看 7/30/90 天的 token 和估算费用；助手、历史整理、连接测试及 Pi 代码任务均计入，未知用量/单价分别标明，修改价格不重算历史费用。Responses 使用 `store:false`；多轮所需的加密推理状态和 Gemini 签名仅在服务端有界保存、通过私有管道重放，不返回浏览器，也不保存隐藏推理明文。
 
 模型管理记录每个实际发出请求的成功、失败、取消或进行中状态；服务重启会将遗留进行中请求标为中断失败，未报告的 token 保持未知。调用明细保留当时输入/输出单价和分项费用，仅有一侧可计价时显示已知部分。同一连接保存执行限制会保留单价草稿，更换连接或重新加载前提示确认。统计刷新保留分组和有效页码，默认最近日期优先，显示最后刷新时间。
 

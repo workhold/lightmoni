@@ -16,7 +16,7 @@ export class ClickHouse implements Contract {
   ): Promise<string> {
     const url = new URL(this.endpoint);
     if (this.database) url.searchParams.set("database", this.database);
-    url.searchParams.set("query", sql);
+    url.searchParams.delete("query");
     if (reader)
       for (const [key, value] of Object.entries({
         max_execution_time: "10",
@@ -34,7 +34,7 @@ export class ClickHouse implements Contract {
       url.searchParams.set("param_" + key, value);
     const response = await fetch(url, {
       method: "POST",
-      body: data,
+      body: data ? `${sql}\n${data}` : sql,
       headers: {
         authorization:
           "Basic " +

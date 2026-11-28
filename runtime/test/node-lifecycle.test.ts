@@ -206,14 +206,15 @@ test("overview and operations selectors exclude archived nodes and new plans rej
   const definition: OperationDefinition = { kind: "certificate", operations: ["inspect"], readOnly: ["inspect"], validate: v => v as any, publicConfig: v => v, validateInput: (_op,v) => v as any };
   const ops = registerOperations({ ...f.deps, encrypt: v => v, decrypt: v => v }, { jobs: f.jobs, credentials: f.credentials, definitions: [definition] });
   t.after(() => ops.close?.());
-  const resource = await f.request("/api/v1/operations/resources", "POST", { kind: "certificate", name: "test", agent_id: node.id, config: {} });
+  const session = { cookie: "lm_session=fixture-admin" };
+  const resource = await f.request("/api/v1/operations/resources", "POST", { kind: "certificate", name: "test", agent_id: node.id, config: {} }, session);
   assert.equal(resource.status, 201);
   assert.equal((await f.request("/api/v1/overview")).data.agent_count, 2);
   await remove(f, node.id);
   assert.equal((await f.request("/api/v1/overview")).data.agent_count, 1);
   assert.deepEqual((await f.request("/api/v1/operations/agents")).data.agents.map((a: any) => a.id), [other.id]);
-  assert.equal((await f.request("/api/v1/operations/resources", "POST", { kind: "certificate", name: "removed", agent_id: node.id, config: {} })).status, 409);
-  assert.equal((await f.request(`/api/v1/operations/resources/${resource.data.resource.id}/plans`, "POST", { operation: "inspect" })).status, 409);
+  assert.equal((await f.request("/api/v1/operations/resources", "POST", { kind: "certificate", name: "removed", agent_id: node.id, config: {} }, session)).status, 409);
+  assert.equal((await f.request(`/api/v1/operations/resources/${resource.data.resource.id}/plans`, "POST", { operation: "inspect" }, session)).status, 409);
 });
 
 

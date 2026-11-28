@@ -1,3 +1,4 @@
+import { createUUID } from '../shared/uuid';
 import {type SSHAccount,type SSHAccountHost,sshCredentialLabel} from './machine-credentials';
 import { useEffect, useRef, useState } from "react";
 import {
@@ -265,7 +266,7 @@ export default function AgentRuntimePanel({
         setTarget(active.plan.runtime_mode);
         setCredential(active.plan.credential_id);
         attempted.current = runtimePlanPending(active.status);
-        requestID.current = crypto.randomUUID();
+        requestID.current = createUUID();
       }
     } catch (e) {
       if (valid(id)) setError(failure(e));
@@ -318,7 +319,7 @@ export default function AgentRuntimePanel({
             keep(candidates[0]);
             preparing.current = undefined;
             setUncertain(false);
-            requestID.current = crypto.randomUUID();
+            requestID.current = createUUID();
           } else setUncertain(true);
         }
       }
@@ -362,7 +363,7 @@ export default function AgentRuntimePanel({
         attempted.current = runtimePlanPending(active.status);
         setTarget(active.plan.runtime_mode);
         setCredential(active.plan.credential_id);
-        requestID.current = crypto.randomUUID();
+        requestID.current = createUUID();
         return;
       }
       preparing.current = {
@@ -397,7 +398,7 @@ export default function AgentRuntimePanel({
       keep(next);
       sent = false;
       preparing.current = undefined;
-      requestID.current = crypto.randomUUID();
+      requestID.current = createUUID();
     } catch (e) {
       if (valid(id)) {
         setError(failure(e));
@@ -428,7 +429,7 @@ export default function AgentRuntimePanel({
     setError("");
     const id = ++generation.current;
     try {
-      requestID.current ||= crypto.randomUUID();
+      requestID.current ||= createUUID();
       const next = await api<AgentRuntimePlan>(
         base + "/plans/" + encodeURIComponent(record.id) + "/apply",
         {
@@ -1023,7 +1024,7 @@ export default function AgentRuntimePanel({
                   keep(next);
                   attempted.current = next.status !== "awaiting_approval";
                   setCredential(next.plan.credential_id);
-                  requestID.current = crypto.randomUUID();
+                  requestID.current = createUUID();
                   setUncertain(false);
                 }
               }}

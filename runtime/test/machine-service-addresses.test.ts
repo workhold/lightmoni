@@ -11,7 +11,7 @@ import {normalizeNetworkAddresses} from '../src/shared/host-network.js';
 
 async function fixture(t:any){
  const db=new DB(':memory:'),router=new Router(),now=new Date('2026-11-01T12:00:00Z');
- db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL DEFAULT '')");
+ db.exec("CREATE TABLE agents(id TEXT PRIMARY KEY,last_seen TEXT NOT NULL DEFAULT '',heartbeat TEXT NOT NULL DEFAULT '{}')");
  const deps:any={db,router,...cipher(Buffer.alloc(32,31)),now:()=>now,externalURL:'https://qa.example.test',logger:{info(){},warn(){},error(){}},cat:{list:async()=>[]},auth:{master:Buffer.alloc(32,31),user:(req:any)=>({id:'qa-admin',name:'QA',role:req.headers['x-role']??'admin'}),requireAdmin:(ctx:any)=>{if(ctx.user.role!=='admin')fail(403,'administrator_required')}}};
  router.auth=deps.auth;
  const machines=registerManagedMachines(deps,{agentCredentials:{has:()=>false} as any,sshRunner:async()=>{throw Error('qa_ssh_disabled')}});

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { CloudUploadOutlined, PlusOutlined, ReloadOutlined, SafetyCertificateOutlined, UploadOutlined } from '@ant-design/icons';
 import { Alert, App, Button, Card, Descriptions, Divider, Empty, Form, Input, Modal, Popconfirm, Select, Space, Spin, Table, Tag, Typography, Upload } from '../shared/ui';
@@ -18,9 +18,19 @@ type Deployment = { id: string; target_id: string; release_id: string; adapter: 
 type Event = { id: string; phase: string; state: string; code: string; summary: string; actor: string; created_at: string };
 type ServiceDetail = { service: Service; targets: Target[]; releases: Release[]; deployments: Deployment[] };
 
-const statusColor: Record<string, string> = { succeeded: 'success', running: 'processing', agent_ready: 'processing', staging: 'processing', activating: 'processing', verifying: 'processing', awaiting_approval: 'warning', failed: 'error', rollback_pending: 'warning', rolling_back: 'processing', rolled_back: 'default', cancelled: 'default' };
+const statusColor: Record<string, string> = { unknown: 'warning', succeeded: 'success', running: 'processing', agent_ready: 'processing', staging: 'processing', activating: 'processing', verifying: 'processing', awaiting_approval: 'warning', failed: 'error', rollback_pending: 'warning', rolling_back: 'processing', rolled_back: 'default', cancelled: 'default' };
 const RELEASE_ARTIFACT_MAX_BYTES = 64 * 1024 * 1024;
 const RELEASE_ARTIFACT_CONTENT_TYPE = 'application/vnd.lightmoni.release+gzip';
+const activeDeploymentStates = new Set(['preflight', 'agent_ready', 'staging', 'activating', 'verifying', 'running', 'rollback_pending', 'rolling_back']);
+
+function hasActiveWork(detail?: ServiceDetail) {
+  return detail?.targets.some(target => ['queued', 'running'].includes(target.preflight?.status ?? '')) ||
+    detail?.deployments.some(deployment => activeDeploymentStates.has(deployment.status));
+}
+
+function chosenDeployment(detail: ServiceDetail | undefined, id: string) {
+  return id ? detail?.deployments.find(deployment => deployment.id === id) : detail?.deployments[0];
+}
 
 async function sha256(file: File) {
   const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', await file.arrayBuffer()));
@@ -36,9 +46,12 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
   const [params, setParams] = useSearchParams();
   const [services, setServices] = useState<Service[]>([]);
   const [machines, setMachines] = useState<Machine[]>([]);
-  const [detail, setDetail] = useState<ServiceDetail>();
-  const [events, setEvents] = useState<Event[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [snapshot, setSnapshot] = useState<ServiceDetail>();
+  const [timeline, setTimeline] = useState<{ deploymentID: string; events: Event[] }>();
+  const [refreshVersion, setRefreshVersion] = useState(0);
+  const [loadingInventory, setLoadingInventory] = useState(true);
+  const [inventoryError, setInventoryError] = useState('');
+  const [readError, setReadError] = useState('');
   const [error, setError] = useState('');
   const [serviceModal, setServiceModal] = useState(false);
   const [targetModal, setTargetModal] = useState(false);
@@ -48,39 +61,76 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
   const [uploadRelease, setUploadRelease] = useState<Release>();
   const [uploadError, setUploadError] = useState('');
   const [busy, setBusy] = useState(false);
-  const [selectedDeployment, setSelectedDeployment] = useState<Deployment>();
-  const selectedDeploymentID = useRef<string | undefined>(undefined);
   const [preflighting, setPreflighting] = useState("");
   const [releaseSelection, setReleaseSelection] = useState<Record<string, string>>({});
   const [serviceForm] = Form.useForm();
   const [targetForm] = Form.useForm();
   const [releaseForm] = Form.useForm();
-  const selectedID = params.get('service') || services[0]?.id || '';
-  selectedDeploymentID.current = selectedDeployment?.id;
+  const selectedID = params.get('service') ?? '';
+  const deploymentID = params.get('deployment') ?? '';
+  const detail = snapshot?.service.id === selectedID ? snapshot : undefined;
+  const selectedDeployment = chosenDeployment(detail, deploymentID);
+  const events = timeline?.deploymentID === selectedDeployment?.id ? timeline?.events ?? [] : [];
+  const loading = loadingInventory || !detail && !readError;
 
-  const load = useCallback(async (id?: string) => {
-    setLoading(true); setError('');
-    try {
-      const [nextServices, nextMachines] = await Promise.all([api<Service[]>('/services'), api<Machine[]>('/machines')]);
-      setServices(nextServices); setMachines(nextMachines);
-      const serviceID = id || params.get('service') || nextServices[0]?.id;
-      if (!serviceID) { setDetail(undefined); return; }
-      const next = await api<ServiceDetail>(`/services/${encodeURIComponent(serviceID)}`);
-      setDetail(next);
-      if (params.get('service') !== serviceID) setParams(current => { current.set('service', serviceID); return current; }, { replace: true });
-      const deploymentID = params.get('deployment');
-      const deployment = next.deployments.find(item => item.id === deploymentID) || next.deployments[0];
-      setSelectedDeployment(deployment);
-      if (deployment) setEvents(await api<Event[]>(`/deployments/${encodeURIComponent(deployment.id)}/events`)); else setEvents([]);
-    } catch (value) { setError(value instanceof Error ? value.message : t('读取服务部署信息失败', 'Unable to load service deployments')); }
-    finally { setLoading(false); }
-  }, [params, setParams, t]);
+  function refresh() {
+    setError('');
+    setRefreshVersion(version => version + 1);
+  }
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]);
+    setLoadingInventory(true);
+    setInventoryError('');
+    void Promise.all([api<Service[]>('/services', { signal }), api<Machine[]>('/machines', { signal })])
+      .then(([nextServices, nextMachines]) => {
+        if (controller.signal.aborted) return;
+        setServices(nextServices);
+        setMachines(nextMachines);
+      })
+      .catch(problem => {
+        if (!controller.signal.aborted) setInventoryError(actionError(problem, t('读取服务或主机列表失败', 'Unable to load services or hosts')));
+      })
+      .finally(() => { if (!controller.signal.aborted) setLoadingInventory(false); });
+    return () => controller.abort();
+  }, [refreshVersion, t]);
 
-  const selectService = async (id: string) => { setParams({ service: id }); await load(id); };
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: number | undefined;
+    let activeWork = hasActiveWork(detail);
+    setReadError('');
+    const read = async () => {
+      let readTimeline = false;
+      try {
+        const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]);
+        const next = await api<ServiceDetail>(`/services/${encodeURIComponent(selectedID)}`, { signal });
+        if (controller.signal.aborted) return;
+        setSnapshot(next);
+        activeWork = hasActiveWork(next);
+        const selected = chosenDeployment(next, deploymentID);
+        if (selected) {
+          readTimeline = true;
+          const events = await api<Event[]>(`/deployments/${encodeURIComponent(selected.id)}/events`, { signal });
+          if (controller.signal.aborted) return;
+          setTimeline({ deploymentID: selected.id, events });
+          readTimeline = false;
+        }
+        setReadError('');
+      } catch (problem) {
+        if (!controller.signal.aborted) setReadError(actionError(problem, t('读取服务部署信息失败', 'Unable to load service deployments')));
+      } finally {
+        if (!controller.signal.aborted && (activeWork || readTimeline)) timer = window.setTimeout(read, 3000);
+      }
+    };
+    void read();
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [selectedID, deploymentID, refreshVersion, t]);
+
+  const selectService = (id: string) => setParams({ service: id });
   const createService = async (values: Record<string, string>) => {
-    setBusy(true); try { const created = await post<Service>('/services', values); setServiceModal(false); serviceForm.resetFields(); await load(created.id); void message.success(t('服务已创建', 'Service created')); } catch (value) { setError(value instanceof Error ? value.message : t('创建服务失败', 'Unable to create service')); } finally { setBusy(false); }
+    setBusy(true); try { const created = await post<Service>('/services', values); setServiceModal(false); serviceForm.resetFields(); setParams({ service: created.id }); refresh(); void message.success(t('服务已创建', 'Service created')); } catch (value) { setError(value instanceof Error ? value.message : t('创建服务失败', 'Unable to create service')); } finally { setBusy(false); }
   };
   const saveTarget = async (values: Record<string, string>) => {
     if (!detail) return;
@@ -95,7 +145,7 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
       const input = { ...(editingTarget ? {} : { machine_id: values.machine_id }), adapter: 'systemd', config: { unit: values.unit, release_directory: values.release_directory, ...(table ? { telemetry: { table, service, instance_id: instanceID } } : {}) } };
       if (editingTarget) await api(`/services/${encodeURIComponent(detail.service.id)}/targets/${encodeURIComponent(editingTarget.id)}`, { method: 'PATCH', body: JSON.stringify(input) });
       else await post(`/services/${encodeURIComponent(detail.service.id)}/targets`, input);
-      setTargetModal(false); setEditingTarget(undefined); targetForm.resetFields(); await load(detail.service.id); void message.success(t('服务目标已保存', 'Service target saved'));
+      setTargetModal(false); setEditingTarget(undefined); targetForm.resetFields(); refresh(); void message.success(t('服务目标已保存', 'Service target saved'));
     } catch (value) { setError(value instanceof Error ? value.message : t('保存服务目标失败', 'Unable to save service target')); }
     finally { setBusy(false); }
   };
@@ -110,8 +160,8 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
     if (!detail) return; setPreflighting(target.id); setError('');
     try {
       await post(`/services/${encodeURIComponent(detail.service.id)}/targets/${encodeURIComponent(target.id)}/preflight`, { confirm: true });
-      await load(detail.service.id);
-      void message.success(t('只读预检任务已提交；完成后刷新查看结果', 'Read-only preflight queued; refresh to see its result'));
+      refresh();
+      void message.success(t('只读预检任务已提交', 'Read-only preflight queued'));
     } catch (value) { setError(actionError(value,t('提交主机预检失败', 'Unable to submit host preflight'))); }
     finally { setPreflighting(""); }
   };
@@ -150,33 +200,30 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
         headers: { 'Content-Type': RELEASE_ARTIFACT_CONTENT_TYPE, 'X-Artifact-Sha256': digest },
       });
       setReleaseModal(false); setUploadRelease(undefined); setUploadFile(undefined); releaseForm.resetFields();
-      await load(detail.service.id);
+      refresh();
       void message.success(t('制品上传并校验通过；刷新后的就绪版本可用于生成部署计划。', 'Artifact uploaded and verified. The refreshed ready release can now be used to create a deployment plan.'));
     } catch (value) {
       setUploadError(value instanceof Error ? t(`制品上传失败：${value.message}。待上传版本已保留，可选择文件后重试。`, `Artifact upload failed: ${value.message}. The pending release is retained; choose a file and retry.`) : t('制品上传失败。待上传版本已保留，可重新选择文件后重试。', 'Artifact upload failed. The pending release is retained; choose another file and retry.'));
-      if (pendingRelease) await load(detail.service.id);
+      if (pendingRelease) refresh();
     } finally { setBusy(false); }
   };
   const plan = async (targetID: string, releaseID: string) => {
-    if (!detail) return; setBusy(true); try { const result = await post<Deployment>(`/services/${encodeURIComponent(detail.service.id)}/deployments/plan`, { target_id: targetID, release_id: releaseID }); setParams({ service: detail.service.id, deployment: result.id }); await load(detail.service.id); const reason = result.plan.provider_plan_reason; void message.success(reason === 'artifact_missing' || reason === 'artifact_invalid' || reason === 'artifact_architecture_mismatch' || reason === 'agent_architecture_unknown' ? t('计划已生成，但当前制品或 Agent 条件不满足执行要求；请查看计划详情。', 'Plan created, but the artifact or Agent does not meet execution requirements. Review the plan details.') : reason === 'agent_preflight_required' ? t('预览计划已生成；请先完成只读预检，再为最新状态重新生成计划。', 'Preview plan created. Complete read-only preflight, then create a plan from the latest state.') : t('可审阅的部署计划已生成。', 'Reviewable deployment plan created.')); } catch (value) { setError(value instanceof Error ? value.message : t('生成部署计划失败', 'Unable to create deployment plan')); } finally { setBusy(false); }
+    if (!detail) return; setBusy(true); try { const result = await post<Deployment>(`/services/${encodeURIComponent(detail.service.id)}/deployments/plan`, { target_id: targetID, release_id: releaseID }); setParams({ service: detail.service.id, deployment: result.id }); refresh(); const reason = result.plan.provider_plan_reason; void message.success(reason === 'artifact_missing' || reason === 'artifact_invalid' || reason === 'artifact_architecture_mismatch' || reason === 'agent_architecture_unknown' ? t('计划已生成，但当前制品或 Agent 条件不满足执行要求；请查看计划详情。', 'Plan created, but the artifact or Agent does not meet execution requirements. Review the plan details.') : reason === 'agent_preflight_required' ? t('预览计划已生成；请先完成只读预检，再为最新状态重新生成计划。', 'Preview plan created. Complete read-only preflight, then create a plan from the latest state.') : t('可审阅的部署计划已生成。', 'Reviewable deployment plan created.')); } catch (value) { setError(value instanceof Error ? value.message : t('生成部署计划失败', 'Unable to create deployment plan')); } finally { setBusy(false); }
   };
   const approve = async (deployment: Deployment) => {
-    setBusy(true); try { await post(`/deployments/${encodeURIComponent(deployment.id)}/approve`, { confirm: true, expected_state: deployment.status }); await load(detail?.service.id); void message.success(t('部署已批准，等待中心 SSH 执行', 'Deployment approved; waiting for center SSH execution')); } catch (value) { setError(actionError(value,t('批准部署失败', 'Unable to approve deployment'))); } finally { setBusy(false); }
+    setBusy(true); try { await post(`/deployments/${encodeURIComponent(deployment.id)}/approve`, { confirm: true, expected_state: deployment.status }); refresh(); void message.success(t('部署已批准，等待中心 SSH 执行', 'Deployment approved; waiting for center SSH execution')); } catch (value) { setError(actionError(value,t('批准部署失败', 'Unable to approve deployment'))); } finally { setBusy(false); }
   };
   const cancel = async (deployment: Deployment) => {
-    setBusy(true); try { await post(`/deployments/${encodeURIComponent(deployment.id)}/cancel`, { confirm: true, expected_state: deployment.status }); await load(detail?.service.id); void message.success(t('部署计划已取消', 'Deployment plan cancelled')); } catch (value) { setError(value instanceof Error ? value.message : t('取消部署失败', 'Unable to cancel deployment')); } finally { setBusy(false); }
+    setBusy(true); try { await post(`/deployments/${encodeURIComponent(deployment.id)}/cancel`, { confirm: true, expected_state: deployment.status }); refresh(); void message.success(t('部署计划已取消', 'Deployment plan cancelled')); } catch (value) { setError(value instanceof Error ? value.message : t('取消部署失败', 'Unable to cancel deployment')); } finally { setBusy(false); }
   };
   const rollback = async (deployment: Deployment) => {
-    setBusy(true); try { await post(`/deployments/${encodeURIComponent(deployment.id)}/rollback`, { confirm: true, expected_state: deployment.status, reason: t('管理员从部署工作台确认回滚', 'Administrator confirmed rollback from deployment workspace') }); await load(detail?.service.id); void message.success(t('回滚任务已提交给 Agent', 'Rollback job queued for the Agent')); } catch (value) { setError(value instanceof Error ? value.message : t('提交回滚任务失败', 'Unable to queue rollback job')); } finally { setBusy(false); }
+    setBusy(true); try { await post(`/deployments/${encodeURIComponent(deployment.id)}/rollback`, { confirm: true, expected_state: deployment.status, reason: t('管理员从部署工作台确认回滚', 'Administrator confirmed rollback from deployment workspace') }); refresh(); void message.success(t('回滚任务已提交给 Agent', 'Rollback job queued for the Agent')); } catch (value) { setError(value instanceof Error ? value.message : t('提交回滚任务失败', 'Unable to queue rollback job')); } finally { setBusy(false); }
   };
   const verifyTelemetry = async (deployment: Deployment) => {
     setBusy(true); setError('');
     try {
       const result = await post<Deployment>(`/deployments/${encodeURIComponent(deployment.id)}/verify-telemetry`, {});
-      setDetail(current => current ? { ...current, deployments: current.deployments.map(item => item.id === result.id ? result : item) } : current);
-      setSelectedDeployment(current => current?.id === result.id ? result : current);
-      const nextEvents = await api<Event[]>(`/deployments/${encodeURIComponent(result.id)}/events`);
-      if (selectedDeploymentID.current === result.id) setEvents(nextEvents);
+      refresh();
       if (result.telemetry?.state === 'verified' && !result.telemetry.stale) void message.success(t('已发现匹配的部署后遥测', 'Matching post-deployment telemetry found'));
     } catch (value) { setError(value instanceof Error ? value.message : t('核验遥测失败，请刷新部署状态后重试', 'Unable to verify telemetry. Refresh the deployment and retry.')); }
     finally { setBusy(false); }
@@ -206,7 +253,7 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
       return Boolean(capability && (plan.capabilities as string[]).includes(capability));
     });
   };
-  const selectDeployment = async (deployment: Deployment) => { setSelectedDeployment(deployment); setParams({ service: detail?.service.id || '', deployment: deployment.id }); setEvents(await api<Event[]>(`/deployments/${encodeURIComponent(deployment.id)}/events`)); };
+  const selectDeployment = (deployment: Deployment) => setParams({ service: selectedID, deployment: deployment.id });
   const serviceOptions = useMemo(() => services.map(item => ({ value: item.id, label: item.name })), [services]);
   const machineOptions = machines.map(item => ({ value: item.id, label: `${item.name} · ${item.address} · ${item.agent_status === 'online' ? t('Agent 在线', 'Agent online') : t('Agent 未在线', 'Agent offline')}` }));
   const statusName = (value: string) => ({
@@ -219,6 +266,7 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
     accepted: t('SSH 作业已接收', 'Accepted by SSH worker'), rollback_requested: t('已提交回滚提案', 'Rollback requested'),
   }[value] ?? value);
   const deploymentStatusName = (deployment: Deployment) => {
+    if (deployment.receipt?.state === 'unknown') return statusName('unknown');
     if (deployment.status !== 'awaiting_approval' || canApprove(deployment)) return statusName(deployment.status);
     if (deployment.plan.provider_plan_reason === 'artifact_missing') return t('等待上传制品', 'Waiting for artifact upload');
     if (deployment.plan.provider_plan_reason === 'artifact_invalid') return t('制品校验未通过', 'Artifact validation failed');
@@ -245,7 +293,12 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
   const formatTime = (value?: string) => value ? new Date(value).toLocaleString(language) : '—';
 
   return <div className="lm-page lm-deployments-page">
-    <div className="lm-page-heading"><div><h1>{t('服务部署', 'Service deployments')}</h1><p>{t('从已确认的源码和制品生成可审阅的部署计划，由中心通过 SSH 执行。', 'Create reviewable deployment plans from confirmed source and releases; the center executes them over SSH.')}</p></div><Space><Button icon={<ReloadOutlined />} loading={loading} onClick={() => void load()}>{t('刷新', 'Refresh')}</Button>{user.role === 'admin' && <Button type="primary" icon={<PlusOutlined />} onClick={() => setServiceModal(true)}>{t('新建服务', 'New service')}</Button>}</Space></div>
+    <div className="lm-page-heading"><div><h1>{t('服务部署', 'Service deployments')}</h1><p>{t('从已确认的源码和制品生成可审阅的部署计划，由中心通过 SSH 执行。', 'Create reviewable deployment plans from confirmed source and releases; the center executes them over SSH.')}</p></div><Space><Button icon={<ReloadOutlined />} loading={loading} onClick={refresh}>{t('刷新', 'Refresh')}</Button>{user.role === 'admin' && <Button type="primary" icon={<PlusOutlined />} onClick={() => setServiceModal(true)}>{t('新建服务', 'New service')}</Button>}</Space></div>
+    {inventoryError && <Alert type="error" showIcon title={inventoryError} />}
+    {readError && <Alert type={detail ? 'warning' : 'error'} showIcon
+      title={detail ? t('进度刷新失败，显示上次结果', 'Could not refresh progress. Showing the last result.') : readError}
+      description={detail ? readError : undefined} />}
+    {deploymentID && detail && !selectedDeployment && <Alert type="warning" showIcon title={t('未找到此部署记录', 'Deployment record not found')} />}
     {error && <Alert type="error" showIcon closable onClose={() => setError('')} title={error} />}
     {loading && !detail ? <Spin /> : <div className="lm-deployments-layout">
       <Card title={t('业务服务', 'Services')} extra={services.length ? <Select aria-label={t('选择服务', 'Select service')} value={selectedID} options={serviceOptions} onChange={selectService} style={{ minWidth: 180 }} /> : undefined}>
@@ -282,7 +335,7 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
           {detail.releases.some(release => release.status !== 'ready') && <Alert type="info" showIcon style={{ marginTop: 12 }} title={t('仅就绪制品可用于部署计划', 'Only ready artifacts can be used in deployment plans')} description={t('上传 lightmoni-release-v1.tar.gz 后，中心会校验 SHA-256、归属和 manifest。上传成功并刷新后，版本才会出现在部署选择列表中。', 'After uploading lightmoni-release-v1.tar.gz, the center validates its SHA-256, ownership, and manifest. A release appears in deployment selectors only after upload succeeds and the list refreshes.')} />}
         </Card>
         <Card title={t('部署计划', 'Deployment plans')} extra={<Typography.Text type="secondary">{t('计划不会直接执行主机操作', 'Plans do not execute host actions directly')}</Typography.Text>}>
-          <Table<Deployment> size="small" rowKey="id" dataSource={detail.deployments} loading={loading} scroll={{ x: 940 }} locale={{ emptyText: <Empty description={t('尚未生成部署计划', 'No deployment plans yet')} /> }} columns={[{ title: t('状态', 'Status'), dataIndex: 'status', render: (_: string, deployment: Deployment) => <Tag color={statusColor[deployment.status] || 'default'}>{deploymentStatusName(deployment)}</Tag> }, { title: t('目标', 'Target'), dataIndex: 'target_id', render: value => detail.targets.find(item => item.id === value)?.machine_name || value }, { title: t('制品', 'Release'), dataIndex: 'release_id', render: value => detail.releases.find(item => item.id === value)?.version || value }, { title: t('创建时间', 'Created'), dataIndex: 'created_at', render: value => value ? new Date(value).toLocaleString(language) : '—' }, { title: t('操作', 'Actions'), fixed: 'right', render: (_: unknown, deployment) => <Space><Button size="small" onClick={() => void selectDeployment(deployment)}>{t('查看时间线', 'View timeline')}</Button>{user.role === 'admin' && deployment.status === 'awaiting_approval' && canApprove(deployment) && <Button size="small" type="primary" loading={busy} onClick={() => void approve(deployment)}>{t('批准', 'Approve')}</Button>}{user.role === 'admin' && ['awaiting_approval', 'agent_ready'].includes(deployment.status) && <Popconfirm title={t('取消此部署计划？', 'Cancel this deployment plan?')} description={deployment.status === 'agent_ready' ? t('仅当 SSH 作业尚未开始时可以取消；若已开始，系统会拒绝取消并要求检查主机。', 'Cancellation is allowed only before the SSH job starts. If it has started, the request is rejected and the host must be checked.'):t('尚未批准的部署计划将被标记为已取消。', 'The unapproved deployment plan will be marked cancelled.')} okText={t('确认取消', 'Confirm cancel')} cancelText={t('返回', 'Back')} onConfirm={() => void cancel(deployment)}><Button size="small" danger loading={busy}>{t('取消', 'Cancel')}</Button></Popconfirm>}{user.role === 'admin' && ['succeeded', 'failed'].includes(deployment.status) && deployment.plan.rollback?.available === true && <Popconfirm title={t(`回滚到版本 ${deployment.plan.rollback.previous_version}？`, `Roll back to ${deployment.plan.rollback.previous_version}?`)} description={rollbackReady(deployment) ? t('中心 SSH 作业将先用 CAS 确认当前仍为本次部署版本，再恢复旧版、重启并执行健康检查。', 'The center SSH job will confirm the deployed version with CAS, restore the previous release, restart it, and run a health check.') : t('请先对该目标执行只读预检；只有 current version 仍是本次部署版本时才能回滚。', 'Run read-only preflight first. Rollback is allowed only while the current version is still this deployment.')} okText={t('确认回滚', 'Confirm rollback')} cancelText={t('返回', 'Back')} disabled={!rollbackReady(deployment)} onConfirm={() => void rollback(deployment)}><Button size="small" danger loading={busy} disabled={!rollbackReady(deployment)}>{t(`回滚到 ${deployment.plan.rollback.previous_version}`, `Roll back to ${deployment.plan.rollback.previous_version}`)}</Button></Popconfirm>}</Space> }]} />
+          <Table<Deployment> size="small" rowKey="id" dataSource={detail.deployments} loading={loading} scroll={{ x: 940 }} locale={{ emptyText: <Empty description={t('尚未生成部署计划', 'No deployment plans yet')} /> }} columns={[{ title: t('状态', 'Status'), dataIndex: 'status', render: (_: string, deployment: Deployment) => <Tag color={statusColor[deployment.receipt?.state === 'unknown' ? 'unknown' : deployment.status] || 'default'}>{deploymentStatusName(deployment)}</Tag> }, { title: t('目标', 'Target'), dataIndex: 'target_id', render: value => detail.targets.find(item => item.id === value)?.machine_name || value }, { title: t('制品', 'Release'), dataIndex: 'release_id', render: value => detail.releases.find(item => item.id === value)?.version || value }, { title: t('创建时间', 'Created'), dataIndex: 'created_at', render: value => value ? new Date(value).toLocaleString(language) : '—' }, { title: t('操作', 'Actions'), fixed: 'right', render: (_: unknown, deployment) => <Space><Button size="small" onClick={() => void selectDeployment(deployment)}>{t('查看时间线', 'View timeline')}</Button>{user.role === 'admin' && deployment.status === 'awaiting_approval' && canApprove(deployment) && <Button size="small" type="primary" loading={busy} onClick={() => void approve(deployment)}>{t('批准', 'Approve')}</Button>}{user.role === 'admin' && ['awaiting_approval', 'agent_ready'].includes(deployment.status) && <Popconfirm title={t('取消此部署计划？', 'Cancel this deployment plan?')} description={deployment.status === 'agent_ready' ? t('仅当 SSH 作业尚未开始时可以取消；若已开始，系统会拒绝取消并要求检查主机。', 'Cancellation is allowed only before the SSH job starts. If it has started, the request is rejected and the host must be checked.'):t('尚未批准的部署计划将被标记为已取消。', 'The unapproved deployment plan will be marked cancelled.')} okText={t('确认取消', 'Confirm cancel')} cancelText={t('返回', 'Back')} onConfirm={() => void cancel(deployment)}><Button size="small" danger loading={busy}>{t('取消', 'Cancel')}</Button></Popconfirm>}{user.role === 'admin' && ['succeeded', 'failed'].includes(deployment.status) && deployment.plan.rollback?.available === true && <Popconfirm title={t(`回滚到版本 ${deployment.plan.rollback.previous_version}？`, `Roll back to ${deployment.plan.rollback.previous_version}?`)} description={rollbackReady(deployment) ? t('中心 SSH 作业将先用 CAS 确认当前仍为本次部署版本，再恢复旧版、重启并执行健康检查。', 'The center SSH job will confirm the deployed version with CAS, restore the previous release, restart it, and run a health check.') : t('请先对该目标执行只读预检；只有 current version 仍是本次部署版本时才能回滚。', 'Run read-only preflight first. Rollback is allowed only while the current version is still this deployment.')} okText={t('确认回滚', 'Confirm rollback')} cancelText={t('返回', 'Back')} disabled={!rollbackReady(deployment)} onConfirm={() => void rollback(deployment)}><Button size="small" danger loading={busy} disabled={!rollbackReady(deployment)}>{t(`回滚到 ${deployment.plan.rollback.previous_version}`, `Roll back to ${deployment.plan.rollback.previous_version}`)}</Button></Popconfirm>}</Space> }]} />
         </Card>
         {selectedDeployment && <Card title={t('部署后遥测核验', 'Post-deployment telemetry verification')} extra={user.role === 'admin' && selectedDeployment.status === 'succeeded' && selectedDeployment.operation_kind !== 'rollback' && <Button loading={busy} disabled={telemetry?.stale === true} onClick={() => void verifyTelemetry(selectedDeployment)}>{telemetry ? t('重新核验', 'Check again') : t('核验遥测', 'Verify telemetry')}</Button>}>
           <Alert
@@ -314,8 +367,8 @@ export default function ServiceDeploymentsPage({ user }: { user: User }) {
           ]} />
           <Typography.Paragraph type="secondary" style={{ marginTop: 12, marginBottom: 0 }}>{t('SDK 必须显式设置上述服务名、稳定实例 ID 和发布版本。核验仅证明部署完成后身份、版本与时间匹配的数据已入库；不证明部署因果关系，也不校验 SDK 身份不可伪造。启动与健康检查之前的数据不计入。', 'The SDK must explicitly set this service name, stable instance ID, and release version. Verification only proves that matching post-deployment data reached storage; it does not prove deployment causality or unforgeable SDK identity. Data from startup and before health-check completion does not count.')}</Typography.Paragraph>
         </Card>}
-        {selectedDeployment && <Card title={<Space><SafetyCertificateOutlined />{t('执行时间线', 'Execution timeline')}<Tag color={statusColor[selectedDeployment.status] || 'default'}>{deploymentStatusName(selectedDeployment)}</Tag></Space>}>
-          <Alert type="info" showIcon title={t('审批边界', 'Approval boundary')} description={t('批准只允许已在线 Agent 获取后续任务；当前页面不会直接执行 SSH、Shell 或主机命令。健康检查表示 Agent 已回报计划中的检查通过；中心遥测核验结果单独展示。', 'Approval only allows an online Agent to receive the next job. This page never executes SSH, Shell, or host commands. Health checks reflect the Agent\'s planned checks; central telemetry verification is shown separately.')} />
+        {selectedDeployment && <Card title={<Space><SafetyCertificateOutlined />{t('执行时间线', 'Execution timeline')}<Tag color={statusColor[selectedDeployment.receipt?.state === 'unknown' ? 'unknown' : selectedDeployment.status] || 'default'}>{deploymentStatusName(selectedDeployment)}</Tag></Space>}>
+          <Alert type="info" showIcon title={t('审批边界', 'Approval boundary')} description={t('批准后由中心通过 SSH 派发已审阅的计划。健康检查和遥测核验分别显示。', 'After approval, the center dispatches the reviewed plan over SSH. The health check and telemetry verification are shown separately.')} />
           {selectedDeployment.status === 'awaiting_approval' && !canApprove(selectedDeployment) && <Alert type="warning" showIcon title={t('此计划当前不可执行', 'This plan cannot be executed yet')} description={selectedDeployment.plan.provider_plan_reason === 'artifact_missing' ? t('该版本还没有成功上传制品。上传并校验 lightmoni-release-v1.tar.gz 后，请为就绪版本重新生成计划。', 'This release has no successfully uploaded artifact. Upload and validate lightmoni-release-v1.tar.gz, then create a new plan for the ready release.') : selectedDeployment.plan.provider_plan_reason === 'artifact_invalid' ? t('制品或 manifest 校验失败。请查看该版本状态，必要时重新登记版本并上传正确的制品包。', 'Artifact or manifest validation failed. Review the release status; if needed, register a new release and upload a valid bundle.') : selectedDeployment.plan.provider_plan_reason === 'artifact_architecture_mismatch' ? t('制品架构与目标 Agent 不匹配，请为该架构上传对应版本。', 'Artifact architecture does not match the target Agent. Upload a bundle for the matching architecture.') : selectedDeployment.plan.provider_plan_reason === 'agent_architecture_unknown' ? t('中心无法确认 Agent 架构，请先更新 Agent 并刷新节点状态。', 'The Agent architecture is unknown. Update the Agent and refresh node status first.') : selectedDeployment.plan.provider_plan_reason === 'agent_preflight_required' ? t('请先为目标 Agent 执行只读 systemd 预检，完成后基于最新状态重新生成计划。', 'Run a read-only systemd preflight for the target Agent, then create a plan using the latest state.') : t('计划未生成可执行部署动作，请检查目标预检、版本状态和计划详情。', 'No executable deployment actions were generated. Review target preflight, release status, and plan details.')} />}
           {selectedDeployment.receipt?.state === 'unknown' && <Alert type="warning" showIcon title={t('部署结果待确认', 'Deployment result needs review')} description={selectedDeployment.receipt.summary || t('Agent 未能确认目标主机当前状态，请检查主机后再决定是否重试。', 'The Agent could not confirm the target host state. Inspect the host before deciding whether to retry.')} />}
           {selectedDeployment.status === 'succeeded' && <Alert type="success" showIcon title={t('Agent 健康检查已通过', 'Agent health check passed')} description={t('业务健康状态与遥测核验结果独立。请在部署后遥测核验中查看是否已有匹配数据到达中心。', 'Business health and telemetry verification are independent. Check post-deployment telemetry verification to see whether matching data reached the center.')} />}

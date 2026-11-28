@@ -1,3 +1,4 @@
+import { createUUID } from '../../shared/uuid';
 import {useMonitoringI18n} from '../monitoring-i18n';
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { TableRef } from "antd/es/table";
@@ -936,7 +937,7 @@ export default function LogExplorePage() {
         variables: [],
         panels: [
           {
-            id: crypto.randomUUID(),
+            id: createUUID(),
             title: l("日志时间分布"),
             type: "bar",
             queries: [

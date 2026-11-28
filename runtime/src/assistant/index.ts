@@ -587,30 +587,38 @@ export function registerAssistant(
       });
     }, "cannot read assistant usage details"),
   );
+  const statusForSession = (ctx: Context, session: Session) => {
+    const currentReview = (event: Event): boolean | undefined => {
+      const value = event.data.value;
+      if (!value || typeof value !== "object") return;
+      const proposalID = value.proposal?.id ?? value.id ?? value.run?.id;
+      try {
+        if (event.data.tool === "propose_alert_change" && alertProposals && typeof value.proposal?.id === "string") {
+          const proposal = alertProposals.get(ctx.user, value.proposal.id);
+          return proposal.status === "awaiting_approval" && Date.parse(proposal.expires_at) > deps.now().getTime();
+        }
+        if (event.data.tool === "code_task" && codeTasks && typeof value.id === "string")
+          return codeTasks.get(value.id, ctx.user)?.status === "awaiting_approval";
+        if (event.data.tool === "propose_agent_install" && options.machines && typeof proposalID === "string")
+          return options.machines.assistantDeployment(proposalID).status === "awaiting_approval";
+        if (event.data.tool === "propose_agent_update" && options.machines?.agentUpdates && typeof value.id === "string" && typeof value.machine_id === "string")
+          return options.machines.agentUpdates.assistantGet(value.machine_id, value.id).status === "awaiting_approval";
+        if (event.data.tool === "propose_service_deployment" && options.deployments && typeof proposalID === "string")
+          return options.deployments.assistantDeployment(proposalID).status === "awaiting_approval";
+        if (event.data.tool === "propose_operations_action" && options.operations && typeof proposalID === "string") {
+          const run = options.operations.getRun(proposalID);
+          return run.state === "awaiting_approval" && Date.parse(run.expires_at) > deps.now().getTime();
+        }
+      } catch { /* Keep the stored review marker if a domain record is temporarily unavailable. */ }
+    };
+    return sessionStatus(session, active.has(key(ctx.user.id, session.id)), currentReview);
+  };
   deps.router.get(
     route + "/sessions",
     safe((ctx) => {
-      const currentReview = (event: Event): boolean | undefined => {
-        const value = event.data.value;
-        if (!value || typeof value !== "object") return;
-        try {
-          if (event.data.tool === "propose_alert_change" && alertProposals && typeof value.proposal?.id === "string") {
-            const proposal = alertProposals.get(ctx.user, value.proposal.id);
-            return proposal.status === "awaiting_approval" && Date.parse(proposal.expires_at) > deps.now().getTime();
-          }
-          if (event.data.tool === "code_task" && codeTasks && typeof value.id === "string")
-            return codeTasks.get(value.id, ctx.user)?.status === "awaiting_approval";
-          if (event.data.tool === "propose_agent_install" && options.machines && typeof value.id === "string")
-            return options.machines.assistantDeployment(value.id).status === "awaiting_approval";
-          if (event.data.tool === "propose_agent_update" && options.machines?.agentUpdates && typeof value.id === "string" && typeof value.machine_id === "string")
-            return options.machines.agentUpdates.assistantGet(value.machine_id, value.id).status === "awaiting_approval";
-          if (event.data.tool === "propose_service_deployment" && options.deployments && typeof value.id === "string")
-            return options.deployments.assistantDeployment(value.id).status === "awaiting_approval";
-        } catch { /* Keep the stored review marker if a domain record is temporarily unavailable. */ }
-      };
       const items = store
         .sessions(`session/${ctx.user.id}/`)
-        .map((s) => ({ ...s, category: s.category ?? "", status: sessionStatus(s, active.has(key(ctx.user.id, s.id)), currentReview), messages: null, events: null }));
+        .map((s) => ({ ...s, category: s.category ?? "", status: statusForSession(ctx, s), messages: null, events: null }));
       ctx.json({ items });
     }, "cannot list assistant sessions"),
   );
@@ -756,7 +764,10 @@ export function registerAssistant(
   deps.router.get(
     route + "/sessions/:id",
     safe(
-      (ctx) => ctx.json(publicSession(session(ctx))),
+      (ctx) => {
+        const value = session(ctx);
+        ctx.json({ ...publicSession(value), status: statusForSession(ctx, value) });
+      },
       "cannot read assistant session",
     ),
   );
@@ -1040,8 +1051,11 @@ export function registerAssistant(
   deps.router.post(
     route + "/sessions/:id/turns",
     safe(async (ctx) => {
-      const input = await body(ctx, ["text", "context", "attachments"], 2 << 20),
-        message = text(input.text).trim();
+      const input = await body(ctx, ["text", "context", "attachments", "request_id"], 2 << 20),
+        message = text(input.text).trim(),
+        requestID = text(input.request_id);
+      if (input.request_id != null && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(requestID))
+        throw new AssistantError(400, "invalid turn request_id");
       if (
         !message ||
         bytes(message) > 16000 ||
@@ -1051,8 +1065,10 @@ export function registerAssistant(
           400,
           "message is empty or exceeds the size limit",
         );
-      const attachments = parseAttachments(input.attachments);
       let value = session(ctx);
+      if (requestID && value.events.some(event => event.type === "user.message" && event.data.request_id === requestID))
+        throw new AssistantError(409, "turn request was already accepted", "turn_already_accepted");
+      const attachments = parseAttachments(input.attachments);
       const codeWorkspace = input.context?.code_workspace;
       if (
         codeWorkspace != null &&
@@ -1182,7 +1198,11 @@ export function registerAssistant(
         value.messages.push({ role: "user", content: message, ...(attachments.length ? { attachments: attachments.map(item => item.ref) } : {}) });
         let error: unknown;
         try {
-          emit("user.message", { text: message, ...(attachments.length ? { attachments: attachmentMetadata(attachments.map(item => item.ref)) } : {}) });
+          emit("user.message", {
+            text: message,
+            ...(requestID ? { request_id: requestID } : {}),
+            ...(attachments.length ? { attachments: attachmentMetadata(attachments.map(item => item.ref)) } : {}),
+          });
           emit("turn.started", {});
           const base = structuredClone(value.messages);
           if (alertProposals) {

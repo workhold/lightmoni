@@ -549,7 +549,10 @@ export function registerManagedMachines(deps: Dependencies, options: ManagedMach
     const value = db.get<any>("SELECT * FROM effective_machine_credentials WHERE id=? AND machine_id=?", credentialID, machineID);
     if (!value) fail(404, "连接凭据不存在");
     if (value.revoked_at) fail(409, "连接凭据已撤销");
-    if (!machineCredentialCurrent(value, now())) fail(409, "连接凭据已过期或有效期无效");
+    if (!machineCredentialCurrent(value, now())) {
+      if (!value.secret_cleared_at) clearCredential(credentialID, "expired");
+      fail(409, "连接凭据已过期或有效期无效");
+    }
     if (!CREDENTIALS.has(value.method)) fail(400, "连接凭据仅支持 SSH 私钥或密码，请添加有效凭据");
     if (value.secret_cleared_at || !value.secret_encrypted) fail(409, "连接凭据秘密已清除，请添加新凭据");
     return value;

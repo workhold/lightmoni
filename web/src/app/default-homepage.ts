@@ -47,5 +47,7 @@ export function isPageDeepLink(pathname:string):boolean{
 }
 
 export function loginDestination(user:HomepageUser,pathname:string,search:string):string{
- return isPageDeepLink(pathname)?pathname+search:readDefaultHomepage(user);
+ const params=new URLSearchParams(search);
+ const adminReview=user.role==='admin'&&(pathname==='/services'&&params.get('service')||pathname==='/operations'&&params.get('run'));
+ return isPageDeepLink(pathname)||adminReview?pathname+search:readDefaultHomepage(user);
 }

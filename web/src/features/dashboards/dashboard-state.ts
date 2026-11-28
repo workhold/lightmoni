@@ -1,3 +1,4 @@
+import { createUUID } from '../../shared/uuid';
 import {monitoringText,type MonitoringLanguage} from '../monitoring-translations.ts';
 import type {Dashboard,DashboardLink,DashboardRow,Panel,Values,Variable} from './model';
 import type {TimeRange} from '../../shared/types';
@@ -45,8 +46,8 @@ export function removeRow(dashboard:Dashboard,row:DashboardRow):Dashboard {
  const released=assignPanels(dashboard,row.id,[]);return {...released,rows:released.rows?.filter(item=>item.id!==row.id)};
 }
 export function copyDefinition(dashboard:Dashboard):Dashboard {
- const ids=new Map(dashboard.panels.map(panel=>[panel.id,crypto.randomUUID()]));
- return {...dashboard,id:'',revision:0,panels:dashboard.panels.map(panel=>({...structuredClone(panel),id:ids.get(panel.id)!})),rows:dashboard.rows?.map(row=>({...row,id:crypto.randomUUID(),panel_ids:row.panel_ids.map(id=>ids.get(id)!)}))};
+ const ids=new Map(dashboard.panels.map(panel=>[panel.id,createUUID()]));
+ return {...dashboard,id:'',revision:0,panels:dashboard.panels.map(panel=>({...structuredClone(panel),id:ids.get(panel.id)!})),rows:dashboard.rows?.map(row=>({...row,id:createUUID(),panel_ids:row.panel_ids.map(id=>ids.get(id)!)}))};
 }
 export function interpolateTitle(text:string,values:Values,language:MonitoringLanguage='zh-CN'):string {
  const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);

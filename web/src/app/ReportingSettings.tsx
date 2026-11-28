@@ -1,3 +1,4 @@
+import { createUUID } from '../shared/uuid';
 import {useI18n} from '../shared/i18n';
 import {useEffect,useState} from 'react';
 import {Link} from 'react-router-dom';
@@ -42,7 +43,7 @@ export default function ReportingSettings(){
      <div className="lm-reporting-address-actions"><Form.Item noStyle shouldUpdate={(a,b)=>a.default_endpoint_id!==b.default_endpoint_id}>{({getFieldValue,setFieldValue})=><Radio disabled={addresses[index]?.scope==='internal'} checked={getFieldValue('default_endpoint_id')===addresses[index]?.id} onChange={()=>setFieldValue('default_endpoint_id',addresses[index]?.id)} aria-label={t(`设为默认地址 ${index+1}`,`Set address ${index+1} as default`)}>{t("默认","Default")}</Radio>}</Form.Item><Button type="text" danger icon={<DeleteOutlined/>} aria-label={t(`移除上报地址 ${index+1}`,`Remove reporting address ${index+1}`)} onClick={()=>{if(form.getFieldValue('default_endpoint_id')===addresses[index]?.id)form.setFieldValue('default_endpoint_id',addresses.find((a,i)=>i!==index&&a.scope==='public')?.id??'');remove(field.name)}}/></div>
     </div>)}
     {!fields.length&&<p className="lm-settings-hint">{t("保存后使用部署地址：","After saving, the deployment address is used: ")}{settings.default_endpoint}</p>}
-    <Button icon={<PlusOutlined/>} disabled={saving||fields.length>=20} onClick={()=>{const id=crypto.randomUUID();add({id,name:'',url:'',scope:'public'});if(!fields.length)form.setFieldValue('default_endpoint_id',id)}}>{t("新增地址","Add address")}</Button>
+    <Button icon={<PlusOutlined/>} disabled={saving||fields.length>=20} onClick={()=>{const id=createUUID();add({id,name:'',url:'',scope:'public'});if(!fields.length)form.setFieldValue('default_endpoint_id',id)}}>{t("新增地址","Add address")}</Button>
    </>}</Form.List>
    <Typography.Paragraph type="secondary" style={{marginTop:20}}>{t("至少保留一个公网入口作为引导地址。SDK 与 Agent 每 30 秒同步；修改内网地址无需重新部署。Agent 的控制、任务通道和数据上报共用所选入口。","Keep at least one public bootstrap entrance. SDKs and Agents sync every 30 seconds; internal address changes need no redeployment. Agent control, task channels, and telemetry share the selected entrance.")}</Typography.Paragraph>
    <Space wrap><Button type="primary" htmlType="submit" loading={saving}>{t("保存上报地址","Save reporting addresses")}</Button><Button onClick={()=>form.setFieldsValue({endpoints:[],default_endpoint_id:''})}>{t("使用部署地址","Use deployment address")}</Button><Link to="/data">{t("生成接入配置","Generate integration settings")}</Link></Space>

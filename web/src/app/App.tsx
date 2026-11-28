@@ -35,6 +35,8 @@ const OperationsPage=lazy(loadOperationsPage);
 const HostsNodesPage=lazy(loadHostsNodesPage);
 const DataManagementPage=lazy(loadDataManagementPage);
 const ConnectionCredentialsPage=lazy(loadConnectionCredentialsPage);
+const ServiceDeploymentsPage=lazy(()=>import('./ServiceDeploymentsPage'));
+const OperationReviewDrawer=lazy(()=>import('./ops/OperationReviewDrawer'));
 
 function ClaimLanding(){const {token}=useParams(),{search}=useLocation(),params=new URLSearchParams(search);params.set('claim',token??'');return <Navigate to={'/alerts?'+params} replace/>}
 
@@ -49,8 +51,11 @@ export default function Root(){
  const[publishedScope,setPublishedScope]=useState<PublishedScope>();
  const activePath=(url:string)=>location.pathname===url||(url==='/machines'&&(location.pathname==='/agents'||location.pathname.startsWith('/agents/')))||(url!=='/'&&location.pathname.startsWith(url+'/'));
  const currentLink=navigationLinks.find(link=>activePath(link.path));
- const currentPage=location.pathname==='/mcp/authorize'?t('授权 MCP 客户端','Authorize MCP client'):currentLink?t(currentLink.pageLabel,currentLink.pageEnglish):t('监控工作台','Monitoring workspace');
- const contextPageTitle=location.pathname==='/mcp/authorize'?'授权 MCP 客户端':currentLink?.pageLabel??'监控工作台';
+ const reviewParams=new URLSearchParams(location.search);
+ const serviceReview=location.pathname==='/services'&&!!reviewParams.get('service');
+ const operationReview=location.pathname==='/operations'&&reviewParams.get('run');
+ const currentPage=serviceReview?t('服务部署','Service deployments'):location.pathname==='/mcp/authorize'?t('授权 MCP 客户端','Authorize MCP client'):currentLink?t(currentLink.pageLabel,currentLink.pageEnglish):t('监控工作台','Monitoring workspace');
+ const contextPageTitle=serviceReview?'服务部署':location.pathname==='/mcp/authorize'?'授权 MCP 客户端':currentLink?.pageLabel??'监控工作台';
  const currentContext=useMemo(()=>({...((publishedScope?.pathname===location.pathname&&publishedScope.search===location.search)?publishedScope.context:{}),page:{path:location.pathname+location.search,title:contextPageTitle}}),[publishedScope,location.pathname,location.search,contextPageTitle]);
  const[navCollapsed,setNavCollapsed]=useState(()=>{try{const saved=localStorage.getItem('lightmoni.nav.collapsed');return saved===null?window.innerWidth<1100:saved==='true'}catch{return window.innerWidth<1100}});
  useEffect(()=>{const narrow=window.matchMedia('(max-width:680px)');const adapt=()=>{if(narrow.matches){setNavCollapsed(true);return;}try{const saved=localStorage.getItem('lightmoni.nav.collapsed');setNavCollapsed(saved===null?window.innerWidth<1100:saved==='true')}catch{setNavCollapsed(window.innerWidth<1100)}};adapt();narrow.addEventListener('change',adapt);return()=>narrow.removeEventListener('change',adapt)},[]);
@@ -77,8 +82,8 @@ export default function Root(){
     <Route path="/system/monitoring" element={<SystemMonitoring/>}/>
     <Route path="/system/backups" element={user.role==='admin'?<BackupTools/>:<Navigate to="/settings" replace/>}/>
     <Route path="/connection-credentials" element={user.role==='admin'?<ConnectionCredentialsPage/>:<Navigate to="/settings" replace/>}/>
-    <Route path="/services" element={<Navigate to={user.role==='admin'?"/applications":"/settings"} replace/>}/>
-    <Route path="/operations" element={<Navigate to="/applications" replace/>}/>
+    <Route path="/services" element={user.role==='admin'&&serviceReview?<ServiceDeploymentsPage user={user}/>:<Navigate to={user.role==='admin'?"/applications":"/settings"} replace/>}/>
+    <Route path="/operations" element={user.role==='admin'&&operationReview?<><OperationsPage user={user}/><OperationReviewDrawer key={operationReview} runID={operationReview} onClose={()=>navigate('/applications',{replace:true})}/></>:<Navigate to="/applications" replace/>}/>
     {["/clusters","/applications","/websites","/domains","/certificates"].map(path=><Route key={path} path={path} element={user.role==='admin'?<OperationsPage user={user}/>:<Navigate to="/settings" replace/>}/>)}
     <Route path="/image-management" element={user.role==='admin'?<ImageManagementPage/>:<Navigate to="/settings" replace/>}/>
     <Route path="/private-images" element={user.role==='admin'?<Navigate to="/image-management?tab=registry" replace/>:<Navigate to="/settings" replace/>}/>

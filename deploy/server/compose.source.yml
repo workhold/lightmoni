@@ -1,0 +1,14 @@
+services:
+  lightmoni:
+    image: lightmoni-local:${LIGHTMONI_BUILD_REVISION:?Set LIGHTMONI_BUILD_REVISION to the source revision}
+    platform: !reset null
+    pull_policy: never
+    build:
+      context: .
+      dockerfile: deploy/server/Dockerfile
+      args:
+        NPM_REGISTRY: ${LIGHTMONI_NPM_REGISTRY:-https://registry.npmjs.org}
+        NODE_DIST_URL: ${LIGHTMONI_NODE_DIST_URL:-https://nodejs.org/dist}
+        DEBIAN_MIRROR: ${LIGHTMONI_DEBIAN_MIRROR:-http://deb.debian.org/debian}
+        DEBIAN_SECURITY_MIRROR: ${LIGHTMONI_DEBIAN_SECURITY_MIRROR:-http://deb.debian.org/debian-security}
+        BUILD_REVISION: ${LIGHTMONI_BUILD_REVISION}

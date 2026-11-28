@@ -29,7 +29,7 @@ export default function ApplicationInstallDrawer({resourceId,resources,machines,
    const original=missing?await api<Run>('/ops/runs/'+encodeURIComponent(missing)):undefined;
    const needsUnknown=installationState(snapshot.resource)==='unknown'||(snapshot.resource.status.instances??[]).some((instance:Spec)=>!instance.retired&&instance.recovery?.state==='blocked'&&(instance.recovery?.code??instance.recovery?.error)==='unknown_execution_result');
    const available=original?[original,...history.runs]:history.runs;
-   const preferred=listed?.id??original?.id??(needsUnknown?available.find(r=>r.state==='unknown')?.id:undefined)??available.find(r=>['apply','deploy'].includes(r.action))?.id??available[0]?.id;
+   const preferred=listed?.id??original?.id??(needsUnknown?available.find(r=>r.state==='unknown')?.id:undefined)??available.find(r=>r.resource_revision===snapshot.resource.revision&&['apply','deploy'].includes(r.action))?.id??available.find(r=>['apply','deploy'].includes(r.action))?.id??available[0]?.id;
    if(!active)return;
    setResource(snapshot.resource);setRuns(available);setRunID(id=>manualRunSelection.current&&id&&available.some(r=>r.id===id)?id:preferred);setError('');
   }catch(e){if(active)setError(errorText(e))}finally{if(active)setLoaded(true);busy=false}};
@@ -43,9 +43,18 @@ export default function ApplicationInstallDrawer({resourceId,resources,machines,
   }}catch(e){if(active)setEventError(errorText(e))}finally{busy=false}};
   void load();const timer=setInterval(()=>void load(),2000);return()=>{active=false;clearInterval(timer)};
  },[resourceId,runID,refresh]);
- const overallState=resource?installationState(resource):'pending';
- const newestInstall=runs.find(r=>['apply','deploy'].includes(r.action));
- const state=overallState==='pending'&&newestInstall?.state==='failed'?'failed':overallState,result=run?.result??{},latest=events.at(-1);
+ const state=resource?installationState(resource,runs):'pending',result=run?.result??{},latest=events.at(-1);
+ const titles: Record<string,[string,string]> = {
+  succeeded: ['安装完成，应用已运行','Installation complete; application is running'],
+  failed: ['安装未完成','Installation incomplete'],
+  unknown: ['执行结果未知','Execution result unknown'],
+  unverified: ['运行状态待核实','Runtime state needs verification'],
+  stopped: ['应用已停止','Application is stopped'],
+  removed: ['应用已卸载','Application is uninstalled'],
+  configured: ['尚未部署','Not yet deployed'],
+  cancelled: ['本次安装已取消','Installation cancelled'],
+  pending: ['安装进行中','Installation in progress'],
+ };
  const failed=['failed','unknown','cancelled'].includes(run?.state??'');
  const cause=result.cause_code??result.code??(failed?[...events].reverse().find(e=>e.code)?.code:undefined);
  const dockerTarget=machines.find(m=>m.agent_id===run?.agent_id);
@@ -56,7 +65,7 @@ export default function ApplicationInstallDrawer({resourceId,resources,machines,
   <Space wrap style={{marginBottom:16}}><IconAction label={t('刷新','Refresh')} icon={<ReloadOutlined aria-hidden/>} onClick={()=>setRefresh(v=>v+1)}/>{resource&&<Button disabled={state==='unknown'||state==='unverified'} onClick={()=>onManage(resource)}>{t('调整配置 / 重新部署','Edit configuration / redeploy')}</Button>}</Space>
   {error&&<Alert type="error" showIcon title={t('进度读取失败，保留上次结果','Could not refresh progress; showing the last result')} description={error}/>}
   {!loaded?<Spin/>:resource?<>
-   <Alert className="lm-install-summary" showIcon type={state==='succeeded'?'success':state==='failed'?'error':['unknown','unverified'].includes(state)?'warning':'info'} title={state==='succeeded'?t('安装完成，应用已运行','Installation complete; application is running'):state==='failed'?t('安装未完成','Installation incomplete'):state==='unknown'?t('执行结果未知','Execution result unknown'):state==='unverified'?t('运行状态待核实','Runtime state needs verification'):state==='stopped'?t('应用已停止','Application is stopped'):t('安装进行中','Installation in progress')} description={state==='unknown'||state==='unverified'?t('请先查看下方原执行记录并核对目标实际状态，再决定后续操作。','Review the original execution below and verify the target before taking further action.'):state==='pending'?t('每 2 秒更新。关闭此窗口后仍会继续安装，可从应用列表重新查看。','Updates every 2 seconds. Installation continues after closing; reopen from the application list.'):t('各机器的执行记录和失败原因保留在下方。','Per-machine history and failure details are retained below.')}/>
+   <Alert className="lm-install-summary" showIcon type={state==='succeeded'?'success':state==='failed'?'error':['unknown','unverified'].includes(state)?'warning':'info'} title={t(...(titles[state]??titles.pending))} description={state==='unknown'||state==='unverified'?t('请先查看下方原执行记录并核对目标实际状态，再决定后续操作。','Review the original execution below and verify the target before taking further action.'):state==='pending'?t('每 2 秒更新。关闭此窗口后仍会继续安装，可从应用列表重新查看。','Updates every 2 seconds. Installation continues after closing; reopen from the application list.'):t('各机器的执行记录和失败原因保留在下方。','Per-machine history and failure details are retained below.')}/>
    {deployments.map(([id,d])=>(d.last_error||d.pending)?<Alert key={id} showIcon style={{marginTop:12}} type={d.last_error?'error':'info'} title={(resources.find(r=>r.id===id)?.name??id)+' · '+t(...installDiagnostic(d.last_error||d.pending).slice(0,2) as [string,string])} description={<>{String(d.last_error||d.pending)}<br/>{t(...installDiagnostic(d.last_error||d.pending).slice(2,4) as [string,string])}</>}/>:null)}
    {!deployments.some(([,d])=>d.last_error)&&resource.status.last_error&&state==='failed'&&<Alert style={{marginTop:12}} type="error" title={t(...installDiagnostic(resource.status.last_error).slice(0,2) as [string,string])} description={String(resource.status.last_error)}/>}
    {resource.status.quick_install&&<Alert style={{marginTop:12}} showIcon type={resource.status.quick_install.state==='ready'?'success':resource.status.quick_install.state==='failed'?'error':'info'} title={t('域名与 HTTPS 配置','Domain & HTTPS setup')+' · '+({awaiting_backend:t('等待应用与入口运行','Waiting for application and entry'),publishing:t('申请证书并发布网站','Requesting certificate and publishing website'),verifying_dns:t('等待 DNS 回读','Waiting for DNS verification'),ready:t('配置完成','Setup complete'),failed:t('配置失败','Setup failed'),unknown:t('执行结果需核对','Execution needs inspection')}[String(resource.status.quick_install.state)]??resource.status.quick_install.state)} description={<>{resource.status.quick_install.domain}{resource.status.quick_install.error&&<p>{String(resource.status.quick_install.error)}</p>}{resource.status.quick_install.state==='failed'&&<Button disabled={state==='unknown'||state==='unverified'} onClick={async()=>{try{await api('/ops/resources/'+encodeURIComponent(resource.id)+'/actions',{method:'POST',body:JSON.stringify({revision:resource.revision,confirmed:true,action:'quick-install-retry'})});setRefresh(v=>v+1)}catch(e){setError(errorText(e))}}}>{t('重试域名配置','Retry domain setup')}</Button>}</>}/>}

@@ -14,9 +14,9 @@ docker compose up -d --no-build --wait
 docker compose ps
 ```
 
-私有仓库先执行 `docker login docker.heyphp.com`。通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对源码提交，再检查登录、查询及 SDK/Agent 下载。源码构建需设置 `LIGHTMONI_BUILD_REVISION` 为 `git rev-parse HEAD`，执行 `docker compose build lightmoni`，启动时添加 `--pull never`。镜像源可按根 `.env.example` 配置；不关闭 TLS、npm integrity 或 Debian 签名校验。
+私有仓库先执行 `docker login docker.heyphp.com`。通过 `docker image inspect <镜像标签> --format '{{index .Config.Labels "org.opencontainers.image.revision"}}'` 核对源码提交，再检查登录、查询及 SDK/Agent 下载。源码部署使用独立本地镜像，按[根文档的构建步骤](../../README.md#docker-compose-部署)操作。镜像源可按根 `.env.example` 配置，继续验证 TLS、npm integrity 和 Debian 签名。
 
-当前存储只接受首次正式发布基线。没有 `center_schema=1` 标记的旧开发数据库会被明确拒绝；程序不执行升级、搬运或删除。需要保留的开发数据应由管理员先备份，再使用全新状态和遥测目录。清理与发布验收见 [SDD081](../../specs/081-prerelease-cleanup/validation.md)。
+当前中心接受 `center_schema=2` 的状态库，空库会初始化到该基线。旧开发数据库会被明确拒绝。需要保留的开发数据应由管理员先备份，再使用全新状态和遥测目录。早期基线验收见 [SDD081](../../specs/081-prerelease-cleanup/validation.md)。
 
 普通 Agent 保持非 root、无 Docker 权限，负责采集、上报、心跳和定时任务。应用、网站、Compose、证书、备份、容器等中心主动操作由中心通过已登记的默认 SSH 账户启动已安装程序的单次命令，再由独立执行器及默认关闭的 `operations.managed.v1` 核验签名计划和回执；业务数据使用独立 root 私有目录。不提供旧普通 Agent 业务目录接管命令。中心镜像更新不会自动更新已安装 Agent、授权主机能力或操作业务数据；启用 SSH 主动操作前，应通过已有 SSH 更新入口将目标主机 Agent 升至支持 `managed-once`、`jobs-once` 和 `task-once` 的版本。执行器维护保留审批、摘要、健康确认、程序回退及 unknown 栅栏，见[运维手册](../../docs/operations.md)。
 
