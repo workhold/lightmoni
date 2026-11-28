@@ -187,8 +187,8 @@ LIGHTMONI_DATA=.local-dev/node-dev/state LIGHTMONI_ADDR=127.0.0.1:18880 LIGHTMON
 需要测试下载与安装时，单独生成发布包（默认输出 `runtime/downloads`）：
 
 ```sh
-npm run release:agent -- 0.1.43
-npm run release:sdk -- 0.1.43
+npm run release:agent -- 0.1.44
+npm run release:sdk -- 0.1.44
 ```
 
 ### 版本号与 AI 发布检查

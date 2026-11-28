@@ -378,6 +378,11 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     return "";
   };
   const markUnknown = (operationID: string, message: string) => { const changed=db.run("UPDATE machine_agent_updates SET status='unknown',ticket_hash='',error=? WHERE id=? AND status IN ('running','verifying')", message, operationID);if(changed.changes)event(operationID,"unknown"); };
+  const verifyWorkerStopped = async (machine: MachineSummary | SSHMachineTarget, credential: any, operationID: string, signal: AbortSignal) => {
+    const { stdout } = await ssh(machine, credential, workerStopEvidenceCommand(operationID), signal, undefined, 8000);
+    if (!/^workerStopped=true(?: [a-z_]+=[^\n]+)*$/m.test(stdout)) fail(409, "recovery_worker_running");
+    return stdout.trim();
+  };
   const wait = (ms: number) => new Promise<void>((resolve, reject) => {
     if (controller.signal.aborted) return reject(Error("closed"));
     const done = () => { controller.signal.removeEventListener("abort", abort); resolve(); };
@@ -404,8 +409,15 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
           event(operation.id,"failed");
           return;
         }
-        const outcome = saveRemote(operation, remote, !commitRequested);
+        const outcome = saveRemote(operation, remote, !commitRequested && !remote.worker_exit);
         if (["succeeded", "rolled_back", "failed", "unknown"].includes(outcome)) return;
+        if (remote.worker_exit && ["accepted", "preparing", "switching", "waiting_confirmation"].includes(remote.status)) {
+          const stopped = await verifyWorkerStopped(machine, credential, operation.id, controller.signal).catch(() => "");
+          if (stopped) {
+            markUnknown(operationID, "维护进程已退出，结果待核对。请先只读核对，再审阅恢复。");
+            return;
+          }
+        }
         if (remote.status === "waiting_confirmation") db.run("UPDATE machine_agent_updates SET status='verifying' WHERE id=? AND status='running'", operation.id);
         if (outcome === "commit") {
           const bootID = remote.local_health.boot_id;
@@ -541,9 +553,8 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
           if (JSON.parse(unit.stdout).status !== "rollback_failed") fail(409, "agent_update_recovery_unverified");
           // Reconcile uses the same bounded systemd/cgroup proof as recovery;
           // it must never clean a lifecycle lock while a worker can be live.
-          const workerOutput = (await ssh(machine, credential, workerStopEvidenceCommand(operationID), signal)).stdout;
-          if (!/^workerStopped=true(?: [a-z_]+=[^\n]+)*$/m.test(workerOutput)) fail(409, "recovery_worker_running");
-          const cleanup: { worker_evidence: string; cleaned_at: string } = { worker_evidence: workerOutput.trim(), cleaned_at: at() };
+          const workerOutput = await verifyWorkerStopped(machine, credential, operationID, signal);
+          const cleanup: { worker_evidence: string; cleaned_at: string } = { worker_evidence: workerOutput, cleaned_at: at() };
           try { await ssh(machine, credential, lifecycleLockCleanupCommand(), signal); }
           catch (cleanupError) {
             const failure = cleanupError instanceof SSHError ? cleanupError : undefined;

@@ -205,6 +205,30 @@ test("changing host defaults never replaces an approved SSH login account", asyn
   assert.ok(f.calls.every(c=>c.machine.account_id===h.account&&c.machine.username==="root"&&c.credentialID===h.credential));
 });
 
+test("an interrupted worker opens the original maintenance record after a stopped-process proof", async t => {
+  const f = await fixture(t, 60_000), host = await f.host();
+  f.modes.set(host.id, "hold");
+  f.setRecoveryUnavailable(true);
+  const proposed = await f.plan(host.id);
+  assert.equal(proposed.status, 201, proposed.raw);
+  const id = proposed.data.id;
+  assert.equal((await f.apply(host.id, id)).status, 202);
+  const exit = { schema: 1, result: "signal", exit_code: "killed", exit_status: 9 };
+  Object.assign(f.states.get(id), { status: "preparing", worker_exit: exit });
+  for (let attempt = 0; attempt < 50 && !f.calls.some(call => call.command.includes("cgroup.events")); attempt++)
+    await new Promise(resolve => setTimeout(resolve, 5));
+  assert.ok(f.calls.some(call => call.command.includes("cgroup.events")), "the exact worker must be checked");
+  assert.equal((await f.request(`/machines/${host.id}/agent-updates/${id}`)).data.status, "running");
+  f.setRecoveryUnavailable(false);
+  const settled = await f.settle(host.id, id);
+  assert.equal(settled.status, "unknown");
+  assert.deepEqual(settled.receipt.worker_exit, exit);
+  assert.match(settled.error, /维护进程已退出/);
+  assert.match(settled.recovery_revision, /^[a-f0-9]{64}$/);
+  assert.ok(hasPendingAgentUpdate(f.db, host.agent, host.id), "unknown must retain its maintenance fence");
+  assert.ok(!f.calls.some(call => call.command.includes("update-runner.mjs commit")));
+});
+
 test('Agent upgrade planning reserves the host while an unclaimed platform inspection waits',async t=>{
  const f=await fixture(t),h=await f.host();
  const at=f.deps.now().toISOString(),operation='queued-inspection',job='inspection-job',resource='application';
