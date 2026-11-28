@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { publicAlertValue } from "../domains/alert-read.js";
 import { capabilityDigest, type CapabilityIdempotencyPolicy } from "../capabilities/idempotency.js";
 import type { DB } from "../shared/sqlite.js";
-import type { AlertCapabilities, AlertChange, AlertOperation } from "../domains/alert-capabilities.js";
+import { ALERT_INTERVAL_MAX_SECONDS, ALERT_WINDOW_MAX_SECONDS, type AlertCapabilities, type AlertChange, type AlertOperation } from "../domains/alert-capabilities.js";
 import { clone, encode, parseTime } from "../domains/common.js";
 import { parseJSON } from "../shared/json.js";
 import { AssistantError, bytes, object, text } from "./types.js";
@@ -62,10 +62,13 @@ export const alertRuleProposalSchema = {
   type: "object", properties: {
     name: stringField, kind: { type: "string", enum: ["metric", "sql", "log"] }, sql: stringField,
     value_field: stringField, operator: { type: "string", enum: ["gt", "gte", "lt", "lte", "eq", "ne", "no_data"] },
-    threshold: { anyOf: [{ type: "number" }, stringField] }, interval_seconds: { type: "integer" }, window_seconds: { type: "integer" },
+    threshold: { anyOf: [{ type: "number" }, stringField] },
+    interval_seconds: { type: "integer", minimum: 1, maximum: ALERT_INTERVAL_MAX_SECONDS },
+    window_seconds: { type: "integer", minimum: 1, maximum: ALERT_WINDOW_MAX_SECONDS },
     enabled: { type: "boolean", description: "Defaults to false if omitted." },
-    source_table_ids: { type: "array", items: stringField }, group_ids: { type: "array", items: stringField },
-  }, required: ["name", "kind", "sql", "value_field", "operator", "threshold", "interval_seconds", "window_seconds"], additionalProperties: true,
+    source_table_ids: { type: "array", minItems: 1, items: stringField, description: "Use the verified catalog IDs for every table referenced by the SQL." },
+    group_ids: { type: "array", items: stringField },
+  }, required: ["name", "kind", "sql", "value_field", "operator", "threshold", "interval_seconds", "window_seconds", "source_table_ids"], additionalProperties: true,
 };
 export const alertSilenceProposalSchema = {
   type: "object", properties: {

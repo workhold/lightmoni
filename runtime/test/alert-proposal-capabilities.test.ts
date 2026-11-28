@@ -65,6 +65,35 @@ test("internal propose_alert_change uses dispatcher without changing native appr
  }finally{await f.close();}
 });
 
+test("the shipped alert capability accepts a five-minute window and a numeric threshold", async () => {
+  const f = await fixture();
+  try {
+    const tool = f.dispatcher.assistantTools().find(tool => tool.name === "propose_alert_change")!;
+    const scope = { session_id: "rule-create-session" };
+    const signal = new AbortController().signal;
+    const input = {
+      operation: "rule.create", reason: "Review a disabled test rule", rule: {
+        name: "Five-minute QA rule", kind: "sql", sql: "SELECT count() AS value FROM log_app",
+        value_field: "value", operator: "gt", threshold: 2.5, interval_seconds: 120,
+        window_seconds: 300, source_table_ids: ["log_app"], evidence_profile: {},
+      },
+    };
+    const { proposal } = await tool.execute(input, signal, admin, scope);
+    assert.equal(proposal.status, "awaiting_approval");
+    assert.equal(proposal.before, null);
+    assert.throws(() => f.capabilities.getRule(admin, proposal.target_id), { status: 404 });
+    const approved = await f.proposals.apply(admin, proposal.id, signal);
+    assert.equal(approved.result.enabled, false);
+    assert.equal(approved.result.interval_seconds, 120);
+    assert.equal(approved.result.window_seconds, 300);
+    assert.equal(Number(approved.result.threshold), 2.5);
+    await assert.rejects(tool.execute({ ...input, rule: { ...input.rule, window_seconds: 604_801 } }, signal, admin, scope), /invalid_input/);
+    await assert.rejects(tool.execute({ ...input, rule: { ...input.rule, threshold: Infinity } }, signal, admin, scope), /invalid_input/);
+  } finally {
+    await f.close();
+  }
+});
+
 test("incident acknowledgement proposals preserve native state, safe previews and reviewed execution",async()=>{
  const f=await fixture();try{
   const input={operation:"incident.ack",target_id:"incident-one",reason:"take ownership",idempotency_key:"incident-one"};

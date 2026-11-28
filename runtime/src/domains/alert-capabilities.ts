@@ -7,6 +7,9 @@ import { clone, encode, id, parseTime, stamp, unique } from "./common.js";
 import { clockMinutes, priority, validZone } from "./alert-policy.js";
 import { autoEvidence, validateEvidence } from "./alert-evidence.js";
 
+export const ALERT_INTERVAL_MAX_SECONDS = 86_400;
+export const ALERT_WINDOW_MAX_SECONDS = 604_800;
+
 const numberFields = [
   "interval_seconds",
   "window_seconds",
@@ -66,9 +69,9 @@ export async function validateRule(m: Alerts, v: any): Promise<void> {
   if (
     numberFields.some((k) => !Number.isInteger(v[k])) ||
     v.interval_seconds < 1 ||
-    v.interval_seconds > 86400 ||
+    v.interval_seconds > ALERT_INTERVAL_MAX_SECONDS ||
     v.window_seconds < 1 ||
-    v.window_seconds > 604800 ||
+    v.window_seconds > ALERT_WINDOW_MAX_SECONDS ||
     [
       "for_seconds",
       "recovery_seconds",

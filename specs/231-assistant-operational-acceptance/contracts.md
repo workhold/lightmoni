@@ -4,3 +4,7 @@
 - 新规则提案使用中心分配的固定 ID、空的前置快照和现有 15 分钟有效期。确认时按该 ID 检查冲突并重新校验配置。重复确认返回同一完成回执。
 - `silence.create` 的 `scope`、目标字段、`from`、`until` 与时区必须使用告警域原生字段。服务静默使用 `scope=service` 和 `service`。
 - 部署和 Agent 操作保留现有审批、凭据绑定和原生状态。只把实际执行后的回执和回读当作通过。
+
+## 发布镜像端到端校验
+
+`rule.create` 的 `interval_seconds` 取 1 至 86400，`window_seconds` 取 1 至 604800。阈值接受有限 JSON 数值或告警域支持的数值字符串，`source_table_ids` 使用已核实的目录 ID。`draft_dashboard` 的网格字段可以省略，缺项或越界时由中心补齐默认布局。

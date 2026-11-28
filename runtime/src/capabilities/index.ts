@@ -53,6 +53,8 @@ function validate(value: any, s: any, depth = 0): void {
       || /[\u0000-\u001f\u007f]/u.test(value)) fail(400, "invalid_input");
   } else if (s.type === "integer") {
     if (!Number.isSafeInteger(value) || value < (s.minimum ?? 0) || value > (s.maximum ?? 100)) fail(400, "invalid_input");
+  } else if (s.type === "number") {
+    if (!Number.isFinite(value) || value < (s.minimum ?? -Infinity) || value > (s.maximum ?? Infinity)) fail(400, "invalid_input");
   } else if (s.type === "boolean") { if (typeof value !== "boolean") fail(400, "invalid_input"); }
   else if (s.type === "null") { if (value !== null) fail(400, "invalid_input"); }
   else if (s.type === "array") {
