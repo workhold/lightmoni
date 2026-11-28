@@ -111,6 +111,24 @@ test('provider failures still report summary_failed instead of a degraded checkp
  assert.ok(!frames.some(f=>f.type==='compacted'),JSON.stringify(frames));
 });
 
+test('execution keeps exact archived user evidence when the model summary omitted it',async()=>{
+ const marker='EARLIER-EXACT-VALUE';
+ const {frames,requests}=await worker('openai-chat-completions','summary',[
+  {role:'user',content:`Use ${marker} from my original request. `+'old '.repeat(350)},
+  {role:'assistant',content:'older acknowledgement'},
+  {role:'user',content:'more context '.repeat(115)},
+  {role:'assistant',content:'recent acknowledgement'},
+  {role:'user',content:'Read the original exact value.'},
+ ]);
+ const checkpoint=frames.find(frame=>frame.type==='compacted');
+ assert.ok(checkpoint);
+ assert.doesNotMatch(checkpoint.summary,new RegExp(marker));
+ const execution=JSON.stringify(requests.at(-1).body);
+ assert.match(execution,/Archived user-message excerpts/);
+ assert.match(execution,new RegExp(marker));
+ assert.ok(frames.some(frame=>frame.type==='done'));
+});
+
 for(const p of protocols)test(`${p} a single-step budget is answer-only`,async()=>{
  const {frames,requests}=await worker(p,'tool-budget',undefined,undefined,{maxSteps:1});
  assert.equal(requests.length,1,JSON.stringify(frames));assertRequestLifecycle(frames,1,'succeeded');

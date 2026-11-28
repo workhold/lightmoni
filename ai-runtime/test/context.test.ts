@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { compactionPlan, estimate, estimateToolDefinitions, toModelMessages } from "../src/context.js";
+import { archivedUserEvidence, compactionPlan, estimate, estimateToolDefinitions, toModelMessages } from "../src/context.js";
 import type { Message } from "../src/protocol.js";
 
 test("compaction cuts complete user-led rounds and retains the newest request", () => {
@@ -49,6 +49,25 @@ test("small history is unchanged and UTF-8 estimate is conservative", () => {
   const m: Message[] = [{ role: "user", content: "你好" }];
   assert.equal(compactionPlan(m, 0, "", "s", [], 4096).through, 0);
   assert.ok(estimate(m) >= Buffer.byteLength(JSON.stringify(m)));
+});
+
+test("archived evidence preserves bounded exact user text within the remaining budget", () => {
+  const messages: Message[] = [
+    { role: "user", content: "最早约定 QA-EXACT-01。" + "🌗".repeat(400) + "末尾条件 QA-TAIL-02。", attachments: [{ kind: "pdf", name: "excluded", mime_type: "application/pdf", text: "excluded attachment text" }] },
+    { role: "assistant", content: "excluded reply" },
+    { role: "user", content: "excluded middle archived request" },
+    { role: "user", content: "最近归档的修正", },
+    { role: "user", content: "current request" },
+  ];
+  assert.equal(archivedUserEvidence(messages, 0, 2048), "");
+  assert.equal(archivedUserEvidence(messages, 4, 10), "");
+  const evidence = archivedUserEvidence(messages, 4, 1200);
+  assert.match(evidence, /QA-EXACT-01/);
+  assert.match(evidence, /QA-TAIL-02/);
+  assert.match(evidence, /最近归档的修正/);
+  assert.doesNotMatch(evidence, /excluded|current request|�/);
+  assert.ok(estimate(evidence) - estimate("") <= 1200);
+  assert.doesNotMatch(archivedUserEvidence(messages, 4, 1200, "QA-EXACT-01"), /QA-EXACT-01|QA-TAIL-02/);
 });
 
 test("image and PDF attachments reach the model without treating base64 as text tokens", () => {
