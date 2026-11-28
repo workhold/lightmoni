@@ -9,7 +9,7 @@ import {publishAlertChange} from '../../shared/alert-changes';
 import type {AlertChangeOperation, AlertChangeProposal, ToolTrace} from './types';
 
 const operationNames=(t:Translator=chinese): Record<AlertChangeOperation, string>=>({
-  'rule.update': t("修改告警规则","Update alert rule"), 'rule.silence': t("调整规则临时静默","Adjust temporary rule silence"),
+  'rule.create': t("创建告警规则","Create alert rule"), 'rule.update': t("修改告警规则","Update alert rule"), 'rule.silence': t("调整规则临时静默","Adjust temporary rule silence"),
   'silence.create': t("创建静默窗口","Create silence window"), 'silence.update': t("修改静默窗口","Update silence window"), 'silence.end': t("提前结束静默","End silence early"),
 });
 const fieldNames=(t:Translator=chinese): Record<string, string>=>({
@@ -63,7 +63,7 @@ function ProposalDetails({proposal}: {proposal: AlertChangeProposal}) {
       <div><dt>{t("变更原因","Reason for change")}</dt><dd>{proposal.reason}</dd></div>
     </dl>
     {proposal.impact.length > 0 && <div className="lm-assistant-alert-impact"><strong>{t("影响","Impact")}</strong><ul>{proposal.impact.map((impact, index) => <li key={index}>{impact}</li>)}</ul></div>}
-    {proposal.operation !== 'rule.update' && <p className="lm-assistant-code-task-meta">{t("静默期间继续求值，匹配范围内的通知将被抑制；结束静默后按告警策略恢复通知。","Evaluation continues during silence, while matching notifications are suppressed. Notifications resume under the alert policy when silence ends.")}</p>}
+    {(proposal.operation === 'rule.silence' || proposal.operation.startsWith('silence.')) && <p className="lm-assistant-code-task-meta">{t("静默期间继续求值，匹配范围内的通知将被抑制；结束静默后按告警策略恢复通知。","Evaluation continues during silence, while matching notifications are suppressed. Notifications resume under the alert policy when silence ends.")}</p>}
     <div className="lm-assistant-alert-diff" aria-label={t("告警变更前后对比","Alert change comparison")}>
       <div className="lm-assistant-alert-diff-head"><span>{t("字段","Field")}</span><span>{t("变更前","Before")}{proposal.before === null ? t("（不存在）"," (does not exist)") : ''}</span><span>{t("变更后","After")}{proposal.after === null ? t("（不存在）"," (does not exist)") : ''}</span></div>
       {fields.map(field => {

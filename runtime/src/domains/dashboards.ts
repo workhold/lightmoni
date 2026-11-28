@@ -70,6 +70,11 @@ export function validateQueryOptions(o: any): void {
   )
     throw Error("最大数据点须为 1–10000 的整数");
 }
+export function validDashboardGrid(grid: any): boolean {
+  return !!grid && ["x", "y", "w", "h"].every(key => Number.isInteger(grid[key])) &&
+    grid.x >= 0 && grid.y >= 0 && grid.w >= 2 && grid.x + grid.w <= 12 && grid.h >= 3 && grid.h <= 40;
+}
+
 export function normalizeDashboard(input: any): any {
   const d = clone(input);
   d.title = String(d.title ?? "").trim();
@@ -147,18 +152,7 @@ export function normalizeDashboard(input: any): any {
     if (!panelTypes.has(p.type)) throw Error(`未知图表类型 ${p.type}`);
     if (!p.grid?.w)
       p.grid = { x: (i % 2) * 6, y: Math.floor(i / 2) * 6, w: 6, h: 6 };
-    const g = p.grid;
-    if (
-      !["x", "y", "w", "h"].every((k) => Number.isInteger(g[k])) ||
-      g.x < 0 ||
-      g.y < 0 ||
-      g.w < 2 ||
-      g.w > 12 ||
-      g.x + g.w > 12 ||
-      g.h < 3 ||
-      g.h > 40
-    )
-      throw Error("面板布局范围无效");
+    if (!validDashboardGrid(p.grid)) throw Error("面板布局范围无效");
     p.options ??= {};
     validateQueryOptions(p.options);
     if (!p.queries?.length || p.queries.length > 8)

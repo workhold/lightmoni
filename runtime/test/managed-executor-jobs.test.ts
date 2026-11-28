@@ -73,6 +73,20 @@ function fixture() {
     close() { schedules.close?.();ops.close?.();jobs.close();store.close();tasks.close?.(); db.close(); } };
 }
 
+test("startup registers partial indexes used by active dispatch and expiry queries", () => {
+  const f = fixture();
+  try {
+    const now = f.deps.now().toISOString();
+    const explain = (query: string, ...params: string[]) => f.db.all<{ detail: string }>("EXPLAIN QUERY PLAN " + query, ...params).map(row => row.detail).join("\n");
+    assert.match(explain("SELECT id,state FROM agent_jobs WHERE state='queued' AND expires_at<=?", now), /USING (?:COVERING )?INDEX agent_jobs_queued_expiry/);
+    assert.match(explain("SELECT id,state FROM agent_jobs WHERE state IN ('leased','accepted','preflighting','staging','activating','verifying') AND lease_expires_at<>'' AND lease_expires_at<=?", now), /USING (?:COVERING )?INDEX agent_jobs_lease_expiry/);
+    assert.match(explain("SELECT id,machine_id FROM privileged_jobs WHERE state='queued' ORDER BY created_at,id LIMIT 100"), /USING (?:COVERING )?INDEX privileged_jobs_queued_expiry/);
+    const leases = explain("SELECT * FROM privileged_jobs WHERE (state='queued' AND expires_at<=?) OR (state='running' AND lease_expires_at<=?)", now, now);
+    assert.match(leases, /USING (?:COVERING )?INDEX privileged_jobs_queued_expiry/);
+    assert.match(leases, /USING (?:COVERING )?INDEX privileged_jobs_lease_expiry/);
+  } finally { f.close(); }
+});
+
 function scheduledBackup(f: ReturnType<typeof fixture>) {
   const resource=randomBytes(16).toString('hex'),at=f.deps.now().toISOString();
   f.db.run('INSERT INTO ops_resources VALUES(?,?,?,?,?,?,?,?,?)',resource,'backup','Backup','agent-host',1,

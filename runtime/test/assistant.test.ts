@@ -756,6 +756,13 @@ test("monitoring tools use shared bounded queries, accurate failures and review-
             title: "logs",
             type: "table",
             queries: [{ refId: "A", sql: "SELECT body FROM log_app" }],
+            grid: { w: 6, h: 4 },
+          },
+          {
+            title: "verified layout",
+            type: "stat",
+            queries: [{ refId: "A", sql: "SELECT count() FROM log_app" }],
+            grid: { x: 6, y: 0, w: 4, h: 6 },
           },
         ],
       },
@@ -764,6 +771,8 @@ test("monitoring tools use shared bounded queries, accurate failures and review-
   assert.equal(draft.saved, false);
   assert.equal(draft.requires_review, true);
   assert.ok(draft.draft.panels[0].id);
+  assert.deepEqual(draft.draft.panels[0].grid, { x: 0, y: 0, w: 6, h: 6 });
+  assert.deepEqual(draft.draft.panels[1].grid, { x: 6, y: 0, w: 4, h: 6 });
 });
 
 test("monitoring catalog projection is bounded without losing full single-table descriptions", async (t) => {

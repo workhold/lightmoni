@@ -8,7 +8,7 @@ import { currentAgentHostname } from "../server/agent-hosts.js";
 import type { AlertCapabilities } from "../domains/alert-capabilities.js";
 import { TelemetryService } from "../domains/telemetry.js";
 import { AlertReadService } from "../domains/alert-read.js";
-import type { AlertProposalService } from "../assistant/alert-proposals.js";
+import { alertOperations, alertRuleProposalSchema, alertSilenceProposalSchema, type AlertProposalService } from "../assistant/alert-proposals.js";
 import type { LogReadService } from "../domains/log-read.js";
 import type { TraceReadService } from "../domains/trace-read.js";
 import type { ServiceDeploymentStore } from "../server/service-deployments.js";
@@ -228,9 +228,9 @@ export class CapabilityDispatcher implements CapabilityDispatcherContract {
       {name:"lightmoni_alert_deliveries_list",description:"List notification deliveries with safe state and resource references. Contacts, payloads and provider responses are omitted.",scope:"alerts.notifications.read",allHosts:true,effect:"read",inputSchema:schema({...page,rule_id:string,group_id:string,table_id:string,service:string,enabled:{type:"boolean"},status:string}),execute:async(_p,i,c)=>alertReads!.listDeliveries(i,c.signal)},
       {name:"lightmoni_alert_response_statistics_get",description:"Read native alert response statistics with the existing time, group and priority filters. No records are modified.",scope:"alerts.statistics.read",allHosts:true,effect:"read",inputSchema:schema({from:{...string,maxLength:128},to:{...string,maxLength:128},group_id:string,priority:string}),execute:async(_p,i)=>alertReads!.responseStatistics(i)},
     );
-    if(options.alerts&&options.alertProposals)definitions.push({name:"lightmoni_alerts_plan",description:"Create one reviewable alert rule or silence proposal. Requires alerts.propose and alerts.detail.read. Never approves or applies.",scope:"alerts.propose",allHosts:true,effect:"propose",inputSchema:schema({
-      operation:{...string,enum:["delivery.retry","incident.renew","incident.escalate","incident.transfer","incident.ack","rule.update","rule.silence","silence.create","silence.update","silence.end"]},target_id:string,user_id:string,confirm_possible_duplicate:{type:"boolean"},
-      patch:{type:"object",properties:{},additionalProperties:true},silence:{type:"object",properties:{},additionalProperties:true},until:{type:"string",minLength:0,maxLength:128},
+    if(options.alerts&&options.alertProposals)definitions.push({name:"lightmoni_alerts_plan",description:"Create one reviewable alert rule or silence proposal. For rule.create, provide rule and reason; administrator required. For silence.create, provide silence and reason, using silence.service, silence.from and silence.until for a one-time service silence. Requires alerts.propose and alerts.detail.read. Never approves or applies.",scope:"alerts.propose",allHosts:true,effect:"propose",inputSchema:schema({
+      operation:{...string,enum:alertOperations},target_id:string,user_id:string,confirm_possible_duplicate:{type:"boolean"},
+      rule:alertRuleProposalSchema,patch:{type:"object",properties:{},additionalProperties:true},silence:alertSilenceProposalSchema,until:{type:"string",minLength:0,maxLength:128},
       reason:{type:"string",minLength:1,maxLength:1000},idempotency_key:{type:"string",minLength:1,maxLength:128}},["operation","reason","idempotency_key"]),execute:(p,i,c)=>this.planAlert(p,i,c)});
     if(options.logs) {
       const parameter={type:"object",properties:{type:{...string,maxLength:128},value:{}},additionalProperties:false};

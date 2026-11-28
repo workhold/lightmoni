@@ -20,7 +20,8 @@ export interface WorkbenchInspectorProps {
   selectedArtifact:string|undefined;
   onSelectArtifact:(id:string|undefined)=>void;
   onOpenDashboard:(draft:import('./types').DashboardDraft,range?:TimeRange)=>void;
-  onUseSql:(sql:string)=>void;
+  onUseSql?:(sql:string)=>void;
+  onCopySql:(sql:string)=>void;
   onNavigate:(url:string)=>void;
 }
 
@@ -94,7 +95,7 @@ function buildArtifacts(turns:TurnView[],t:Translator):WorkbenchArtifact[]{
 
 function Chip({label,value}:{label:string;value:string}){return <span className="lm-inspector-chip"><small>{label}</small><strong>{value}</strong></span>;}
 
-export default function WorkbenchInspector({tab,onTabChange,context,session,categoryLabel,running,model,turns,selectedArtifact,onSelectArtifact,onOpenDashboard,onUseSql,onNavigate}:WorkbenchInspectorProps){
+export default function WorkbenchInspector({tab,onTabChange,context,session,categoryLabel,running,model,turns,selectedArtifact,onSelectArtifact,onOpenDashboard,onUseSql,onCopySql,onNavigate}:WorkbenchInspectorProps){
  const {t}=useI18n();
  const artifacts=useMemo(()=>buildArtifacts(turns,t),[turns,t]);
  const active=artifacts.find(item=>item.id===selectedArtifact)||artifacts[0];
@@ -162,7 +163,7 @@ export default function WorkbenchInspector({tab,onTabChange,context,session,cate
     {active.code&&<div className="lm-inspector-card"><strong>{t('代码任务','Code task')}</strong><p>{active.code.summary}</p><p>{active.code.changed_files.length} {t('个变更文件','changed files')}</p></div>}
     {active.reviewUrl&&<Button size="small" type="primary" onClick={()=>onNavigate(active.reviewUrl!)}>{t('打开原始记录','Open original record')}</Button>}
     {active.evidence!==undefined&&!active.sql&&!active.dashboard&&!active.code&&<details><summary>{t('原始证据','Raw evidence')}</summary><pre>{JSON.stringify(active.evidence,null,2)}</pre></details>}
-    {active.sql&&onUseSql&&<Button size="small" onClick={()=>onUseSql(active.sql!)}>{t('使用 SQL','Use SQL')}</Button>}
+    {active.sql&&<Button size="small" onClick={()=>onUseSql ? onUseSql(active.sql!) : onCopySql(active.sql!)}>{onUseSql ? t('使用 SQL','Use SQL') : t('复制 SQL','Copy SQL')}</Button>}
    </div>}
    {tab==='activity'&&<div className="lm-inspector-list">
     {!turns.length&&<div className="lm-inspector-empty">{t('还没有执行活动。','No activity yet.')}</div>}

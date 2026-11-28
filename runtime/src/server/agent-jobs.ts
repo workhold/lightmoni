@@ -222,6 +222,9 @@ export function registerAgentJobs(
       UNIQUE(deployment_id,operation_id)
     );
     CREATE INDEX IF NOT EXISTS agent_jobs_claim ON agent_jobs(agent_id,state,expires_at,created_at);
+    CREATE INDEX IF NOT EXISTS agent_jobs_queued_expiry ON agent_jobs(expires_at,id) WHERE state='queued';
+    CREATE INDEX IF NOT EXISTS agent_jobs_lease_expiry ON agent_jobs(lease_expires_at,id)
+      WHERE state IN ('leased','accepted','preflighting','staging','activating','verifying') AND lease_expires_at<>'';
     CREATE TABLE IF NOT EXISTS agent_job_events(
       job_id TEXT NOT NULL REFERENCES agent_jobs(id) ON DELETE CASCADE,
       sequence INTEGER NOT NULL,

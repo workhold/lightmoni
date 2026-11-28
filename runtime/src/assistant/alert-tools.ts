@@ -1,6 +1,6 @@
 import type { AlertCapabilities } from "../domains/alert-capabilities.js";
 import { AlertReadService } from "../domains/alert-read.js";
-import { AlertProposalService } from "./alert-proposals.js";
+import { alertRuleProposalSchema, alertSilenceProposalSchema, AlertProposalService } from "./alert-proposals.js";
 import { AssistantError, object, type Tool } from "./types.js";
 
 const string = { type: "string" };
@@ -61,8 +61,8 @@ export function alertTools(capabilities: AlertCapabilities, proposals: AlertProp
     },
     {
       name: "propose_alert_change", effect: "draft",
-      description: "Propose ONE reviewed alert change requested by the user. Operations: rule.update (target_id + patch), rule.silence (target_id + RFC3339 until, empty string clears), silence.create (silence object), silence.update (target_id + patch), silence.end (target_id). Include reason. The host checks real permissions and versions. This tool NEVER applies changes: the user must review and click the separate UI confirmation. Never claim the change is active until a completed receipt is verified.",
-      schema: schema({ operation: { type: "string", enum: ["rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"] }, target_id: string, patch: { type: "object", additionalProperties: true }, silence: { type: "object", additionalProperties: true }, until: string, reason: { type: "string", minLength: 1, maxLength: 1000 } }, ["operation", "reason"]),
+      description: "Propose ONE reviewed alert change requested by the user. For rule.create, provide rule and reason; administrator required. For rule.update, provide target_id and patch. For rule.silence, provide target_id and RFC3339 until (empty clears). For silence.create, provide silence with its typed target, from and until. A user must review and confirm separately. Verify the completed receipt before reporting it as applied.",
+      schema: schema({ operation: { type: "string", enum: ["rule.create", "rule.update", "rule.silence", "silence.create", "silence.update", "silence.end"] }, target_id: string, rule: alertRuleProposalSchema, patch: { type: "object", additionalProperties: true }, silence: alertSilenceProposalSchema, until: string, reason: { type: "string", minLength: 1, maxLength: 1000 } }, ["operation", "reason"]),
       execute: async (input, signal, user, scope) => ({ proposal: await proposals.create(actor(user), scope?.session_id ?? "", input, signal) }),
     },
   ];

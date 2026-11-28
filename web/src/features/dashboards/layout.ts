@@ -2,6 +2,11 @@ import type {Grid,Panel} from './model';
 import {panelMinHeight} from './model';
 
 export const columns=12,gap=10,rowHeight=40,rowStep=rowHeight+gap,maxRows=40;
+export function isDashboardGrid(grid?: Record<string, number>): grid is Grid & Record<string, number> {
+ if (!grid) return false;
+ const {x,y,w,h}=grid;
+ return [x,y,w,h].every(Number.isInteger) && x>=0 && y>=0 && w>=2 && x+w<=columns && h>=3 && h<=maxRows;
+}
 export interface LayoutItem extends Grid{id:string;minH:number}
 export interface PixelRect{x:number;y:number;width:number;height:number}
 export function layoutItems(panels:Panel[]):LayoutItem[]{return panels.map(panel=>({...panel.grid,id:panel.id,minH:panelMinHeight(panel.type),h:Math.max(panel.grid.h,panelMinHeight(panel.type))}));}

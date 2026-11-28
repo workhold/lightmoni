@@ -2,10 +2,11 @@ import { createUUID } from '../../shared/uuid';
 import {useI18n} from '../../shared/i18n';
 import type {Translator} from '../../shared/i18n';
 import {chinese} from '../alerts/translation';
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import {useNavigate} from 'react-router-dom';
+import {isDashboardGrid} from '../dashboards/layout';
+import { memo, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {useNavigate, useSearchParams} from 'react-router-dom';
 import {MessageScroller} from '@shadcn/react/message-scroller';
-import { ArrowUpOutlined, CheckOutlined, CloseOutlined, CodeOutlined, CopyOutlined, DeleteOutlined, EditOutlined, FolderOutlined, FilePdfOutlined, HistoryOutlined, LoadingOutlined, MessageOutlined, PaperClipOutlined, PictureOutlined, PlusOutlined, PicRightOutlined, ReloadOutlined, SettingOutlined, SlidersOutlined, ThunderboltOutlined } from '@ant-design/icons';
+import { ArrowDownOutlined, ArrowRightOutlined, BarChartOutlined, BellOutlined, CheckOutlined, CloseOutlined, CodeOutlined, CopyOutlined, DeleteOutlined, EditOutlined, FolderOutlined, FilePdfOutlined, HistoryOutlined, LoadingOutlined, MessageOutlined, PictureOutlined, PlusOutlined, PicRightOutlined, ReloadOutlined, SearchOutlined, SettingOutlined, SlidersOutlined, ThunderboltOutlined } from '@ant-design/icons';
 import XMarkdown, { type ComponentProps } from '@ant-design/x-markdown';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
@@ -23,8 +24,10 @@ import AgentUpdateProgress from './AgentUpdateProgress';
 import WorkbenchInspector,{type WorkbenchTab} from './WorkbenchInspector';
 import {agentUpdateToolValue} from './agent-update-progress';
 import AlertProposalProgress from './AlertProposalProgress';
+import AssistantComposer, { type ComposerCommand, type ComposerInput } from './AssistantComposer';
 import type { AssistantConfig, AssistantContext, AssistantEvent, AssistantSession, Attachment, CodeTaskResult, DashboardDraft, DraftPanel, ToolTrace, TurnView } from './types';
 import './assistant.css';
+import './assistant-workspace.css';
 
 export interface AssistantPanelProps {
   compact?: boolean;
@@ -62,7 +65,7 @@ function errorText(error: unknown,t:Translator=chinese): string {
 
 // Adapted from Doca ai-markdown.tsx (MIT; see NOTICE.md). Raw HTML and
 // auto-loading external media remain disabled when rendering telemetry text.
-function Answer({ text, streaming, onSQL }: { text: string; streaming?: boolean; onSQL?: (sql: string) => void }) {
+const Answer = memo(function Answer({ text, streaming, onSQL }: { text: string; streaming?: boolean; onSQL?: (sql: string) => void }) {
  const {language,t}=useI18n();
 
   const {dark}=useAppearance();
@@ -79,7 +82,7 @@ function Answer({ text, streaming, onSQL }: { text: string; streaming?: boolean;
     input: ({ checked, type }: ComponentProps) => type === 'checkbox' ? <Checkbox checked={!!checked} disabled /> : null,
   };
   return <div className="lm-assistant-answer"><XMarkdown content={text} className={dark?'x-markdown-dark':'x-markdown-light'} config={{ gfm: true }} escapeRawHtml openLinksInNewTab streaming={{ hasNextChunk: !!streaming, enableAnimation: !!streaming && !window.matchMedia('(prefers-reduced-motion: reduce)').matches }} dompurifyConfig={{ USE_PROFILES: { html: true }, FORBID_TAGS: ['style', 'iframe', 'video', 'audio', 'source', 'object', 'embed', 'form', 'button', 'link', 'meta'] }} components={components} />{copyError && <small>{copyError}</small>}</div>;
-}
+});
 
 const codeTaskStatuses=(t:Translator=chinese): Record<CodeTaskResult['status'], { label: string; color: string }>=>({
   running: { label: t("执行中","Running"), color: 'processing' },
@@ -242,6 +245,32 @@ function ToolActivity({turn,onDraft,canUseCodeTasks,canApproveAgentUpdate}:{turn
   return <div className="lm-assistant-activity"><button type="button" className="lm-assistant-activity-trigger" aria-expanded={open} onClick={()=>setManual(!open)}><span className={`lm-assistant-activity-indicator ${failedStep?'failed':turn.status}`} aria-hidden="true"/><span>{label}</span>{elapsed&&<span className="lm-assistant-activity-elapsed">{elapsed}</span>}<span className="lm-assistant-activity-chevron" aria-hidden="true">⌄</span></button>{open&&<div className="lm-assistant-activity-content">{running&&<ol className="lm-assistant-tool-rows" aria-label={t('工具执行进度','Tool progress')}>{turn.tools.map(tool=><li key={tool.callId} className={`lm-assistant-tool-row ${tool.status}`}><span className={`lm-assistant-tool-dot ${tool.status}`} aria-hidden="true"/><span className="lm-assistant-tool-row-name">{toolLabel(tool.name,t)}</span><span className="lm-assistant-tool-row-elapsed">{formatElapsed(tool.startedAt,tool.endedAt,now)}</span></li>)}</ol>}<ToolProgress turn={turn} onDraft={onDraft} canUseCodeTasks={canUseCodeTasks} canApproveAgentUpdate={canApproveAgentUpdate}/></div>}</div>;
 }
 
+function RunStatus({ turn, recovering, stopping, onStop }: { turn?: TurnView; recovering: boolean; stopping: boolean; onStop: () => void }) {
+  const { t } = useI18n();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const tool = turn?.tools.filter(item => item.status === 'running').at(-1);
+  const label = recovering ? t('连接中断，正在恢复…', 'Connection lost, recovering…')
+    : tool ? toolLabel(tool.name, t)
+      : turn?.answer ? t('正在生成回答', 'Writing a response')
+        : turn ? t('正在分析', 'Analyzing') : t('正在提交消息', 'Submitting message');
+  return <div className="lm-assistant-runbar">
+    <div className="lm-assistant-runbar-state" role="status">
+      <span className="lm-assistant-activity-indicator running" aria-hidden="true" />
+      <strong className={recovering ? 'lm-assistant-runbar-recovery' : undefined}>{label}</strong>
+    </div>
+    {!!turn?.tools.length && <span className="lm-assistant-runbar-steps">{t(`${turn.tools.length} 步`, `${turn.tools.length} steps`)}</span>}
+    <span className="lm-assistant-runbar-elapsed" aria-hidden="true">{formatElapsed(turn?.startedAt ?? turn?.timestamp, undefined, now) || '00:00'}</span>
+    <button type="button" className="lm-assistant-runbar-stop" aria-label={t('停止当前响应', 'Stop current response')} disabled={stopping} onClick={onStop}>
+      {stopping ? <LoadingOutlined spin /> : <span className="lm-assistant-stop-square" aria-hidden="true" />}
+      <span>{stopping ? t('正在停止', 'Stopping') : t('停止', 'Stop')}</span>
+    </button>
+  </div>;
+}
+
 type CategoryOption={value:string;label:ReactNode;create?:boolean};
 
 function CategoryField({value,options,className,onCommit,ariaLabel,placeholder,disabled}:{value:string;options:{value:string;label:ReactNode}[];className?:string;onCommit:(value:string)=>void;ariaLabel:string;placeholder:string;disabled?:boolean}) {
@@ -317,6 +346,9 @@ function SessionHeaderEditor({title,category,options,disabled,onTitleCommit,onCa
   </div>;
 }
 
+const HISTORY_DRAWER_MEDIA = '(max-width: 920px)';
+const INSPECTOR_DRAWER_MEDIA = '(max-width: 1260px)';
+
 export function AssistantPanel({ compact = false, initialContext, initialPrompt, onDashboardDraft, onSQL }: AssistantPanelProps) {
  const {language,t}=useI18n();
  const pageTitles:Record<string,string>={
@@ -327,13 +359,15 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
  };
 
   const ideas = [
-  { title: t("创建服务大盘","Create service dashboard"), text: t("根据现有数据创建服务监控大盘，包含请求量、错误率和延迟。先检查可用数据表，并生成可审阅的大盘草稿。","Create a service monitoring dashboard from available data, covering request volume, error rate and latency. Inspect available tables first and generate a dashboard draft for review."), detail: t("请求量、错误率和延迟","Request volume, error rate and latency") },
-  { title: t("分析异常日志","Analyze error logs"), text: t("分析当前时间范围的日志，找出主要错误、发生趋势和可能的原因。区分数据事实与推测，并给出后续排查 SQL。","Analyze logs in the current time range for key errors, trends and possible causes. Distinguish facts from hypotheses and provide SQL for further investigation."), detail: t("定位问题与下一步排查","Find issues and next investigation steps") },
-  { title: t("帮我写 SQL","Help me write SQL"), text: t("检查现有数据表与字段，生成按服务统计请求量、错误率和延迟的 ClickHouse SQL。说明时间过滤和聚合方式。","Inspect available tables and fields, then generate ClickHouse SQL for request volume, error rate and latency by service. Explain time filters and aggregation."), detail: t("根据真实字段生成查询","Generate queries from actual fields") },
-  { title: t("调整告警规则","Adjust alert rules"), text: t("查看当前页面相关的告警规则和静默窗口，说明当前配置。根据我的要求准备变更提案，展示前后差异与影响，等我确认后再应用。","Review alert rules and silence windows relevant to this page. Explain the current configuration, then prepare a change proposal showing differences and impact. Wait for my confirmation before applying it."), detail: t("查看规则、调整阈值与静默","Review rules, adjust thresholds and silences") },
+  { icon: <SearchOutlined />, title: t("分析异常日志","Investigate log anomalies"), text: t("分析当前时间范围的日志，找出主要错误、发生趋势和可能的原因。区分数据事实与推测，并给出后续排查 SQL。","Analyze logs in the current time range for key errors, trends and possible causes. Distinguish facts from hypotheses and provide SQL for further investigation."), detail: t("找出主要错误和趋势","Find the leading errors and trends") },
+  { icon: <BarChartOutlined />, title: t("创建服务大盘","Create a service dashboard"), text: t("根据现有数据创建服务监控大盘，包含请求量、错误率和延迟。先检查可用数据表，并生成可审阅的大盘草稿。","Create a service monitoring dashboard from available data, covering request volume, error rate and latency. Inspect available tables first and generate a dashboard draft for review."), detail: t("请求量、错误率和延迟","Request volume, error rate and latency") },
+  { icon: <CodeOutlined />, title: t("编写查询 SQL","Write a SQL query"), text: t("检查现有数据表与字段，生成按服务统计请求量、错误率和延迟的 ClickHouse SQL。说明时间过滤和聚合方式。","Inspect available tables and fields, then generate ClickHouse SQL for request volume, error rate and latency by service. Explain time filters and aggregation."), detail: t("基于已接入的数据表","Build a query from available tables") },
+  { icon: <BellOutlined />, title: t("检查告警规则","Review alert rules"), text: t("查看当前页面相关的告警规则和静默窗口，说明当前配置。根据我的要求准备变更提案，展示前后差异与影响，等我确认后再应用。","Review alert rules and silence windows relevant to this page. Explain the current configuration, then prepare a change proposal showing differences and impact. Wait for my confirmation before applying it."), detail: t("查看阈值与静默窗口","Review thresholds and silence windows") },
 ];
 
   const navigate=useNavigate();
+  const [searchParams,setSearchParams]=useSearchParams();
+  const requestedSessionId=compact?null:searchParams.get('session') || null;
   const [config, setConfig] = useState<AssistantConfig>();
   const [configLoading, setConfigLoading] = useState(true);
   const [configError, setConfigError] = useState('');
@@ -355,12 +389,15 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const [creating, setCreating] = useState(false);
   const [runningIds, setRunningIds] = useState<string[]>([]);
   const [recoveringIds, setRecoveringIds] = useState<string[]>([]);
+  const [stoppingIds, setStoppingIds] = useState<string[]>([]);
   const [queueVersion, setQueueVersion] = useState(0);
   const [openingSession, setOpeningSession] = useState(false);
-  const loading = configLoading || openingSession;
+  const [sessionReadError, setSessionReadError] = useState<{id:string;detail:string}>();
+  const loading = configLoading || openingSession || !!sessionReadError;
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [historyCollapsed, setHistoryCollapsed] = useState(false);
   const [newCategory, setNewCategory] = useState("");
   const [deletingIds, setDeletingIds] = useState<string[]>([]);
   const [hiddenBaseCategories,setHiddenBaseCategories]=useState<string[]>([]);
@@ -371,8 +408,11 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const [renamingCategory,setRenamingCategory]=useState(false);
   const [inspectorTab,setInspectorTab]=useState<WorkbenchTab>('context');
   const [selectedArtifact,setSelectedArtifact]=useState<string>();
-  const [inspectorOpen,setInspectorOpen]=useState(!compact);
-  const [narrow,setNarrow]=useState(false);
+  const [inspectorOpen,setInspectorOpen]=useState(false);
+  const [historyNarrow,setHistoryNarrow]=useState(() => window.matchMedia(HISTORY_DRAWER_MEDIA).matches);
+  const [inspectorNarrow,setInspectorNarrow]=useState(() => window.matchMedia(INSPECTOR_DRAWER_MEDIA).matches);
+  const historyInDrawer=compact || historyNarrow;
+  const inspectorInDrawer=compact || inspectorNarrow;
   const [draft, setDraft] = useState<DashboardDraft | null>(null);
   const [draftError, setDraftError] = useState('');
   const [draftSaving, setDraftSaving] = useState(false);
@@ -381,18 +421,22 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const [preview, setPreview] = useState<Record<number, QueryResponse>>({});
   const [previewing, setPreviewing] = useState(false);
   const activeTurns = useRef(new Map<string,AbortController>());
+  const cancelRequests = useRef(new Set<string>());
   const creatingRef = useRef(false);
+  const attachmentRead = useRef(false);
   const selectionVersion = useRef(0);
   const selectedSession = useRef<string | null>(null);
+  const sessionRead = useRef<AbortController | undefined>(undefined);
   const eventCache = useRef(new Map<string,AssistantEvent[]>());
   const queuedTurns = useRef(new Map<string,QueuedTurn[]>());
   const drafts = useRef(new Map<string,{text:string;attachments:Attachment[]}>());
-  const fileInput = useRef<HTMLInputElement>(null);
+  const composerInput = useRef<ComposerInput>(null);
   const previewController = useRef<AbortController | null>(null);
   const turns = useMemo(() => assistantTimeline(events, language, sessionStatus === 'failed'), [events, language, sessionStatus]);
   const table = tables.find(item => item.name === context.table);
   const sessionRunning = !!sessionId && (activeTurns.current.has(sessionId) || runningIds.includes(sessionId) || sessionStatus === 'running');
   const busy = creating || sessionRunning;
+  const isWelcome = !sessionId && !requestedSessionId && !creating && !openingSession && !sessionReadError;
   const queue = sessionId ? queuedTurns.current.get(sessionId) ?? [] : [];
   void queueVersion;
 
@@ -438,34 +482,96 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     void poll(true);
     return () => { controller.abort(); window.clearTimeout(timer); };
   }, []);
-  useEffect(()=>{
-    const query=window.matchMedia('(max-width: 1080px)');
-    setNarrow(query.matches);
-    if(query.matches)setInspectorOpen(false);
-    const changed=(event:MediaQueryListEvent)=>{setNarrow(event.matches);if(event.matches)setInspectorOpen(false);};
-    query.addEventListener('change',changed);
-    return()=>query.removeEventListener('change',changed);
-  },[]);
-  useEffect(()=>{if(error)void message.error(error);},[error,message]);
+  useEffect(() => {
+    const history = window.matchMedia(HISTORY_DRAWER_MEDIA);
+    const inspector = window.matchMedia(INSPECTOR_DRAWER_MEDIA);
+    const updateHistory = (event: MediaQueryListEvent) => {
+      setHistoryNarrow(event.matches);
+      setHistoryOpen(false);
+    };
+    const updateInspector = (event: MediaQueryListEvent) => {
+      setInspectorNarrow(event.matches);
+      if (event.matches) setInspectorOpen(false);
+    };
+    history.addEventListener('change', updateHistory);
+    inspector.addEventListener('change', updateInspector);
+    return () => {
+      history.removeEventListener('change', updateHistory);
+      inspector.removeEventListener('change', updateInspector);
+    };
+  }, []);
   useEffect(() => { if (initialPrompt !== undefined) setText(initialPrompt); }, [initialPrompt]);
   useEffect(() => { if (initialContext) { setContext(initialContext); if (initialContext.code_workspace !== undefined) setCodeWorkspace(initialContext.code_workspace); } }, [initialContext]);
+  useEffect(() => () => sessionRead.current?.abort(), []);
+
+  function setSessionLocation(id: string | null, replace = false) {
+    if (compact || id === requestedSessionId) return;
+    setSearchParams(previous => {
+      const next = new URLSearchParams(previous);
+      if (id) next.set('session', id);
+      else next.delete('session');
+      return next;
+    }, { replace, preventScrollReset: true });
+  }
+
+  function selectConversation(id: string) {
+    if (compact || requestedSessionId === id) {
+      if (id !== selectedSession.current || sessionReadError) void loadSession(id);
+      else setHistoryOpen(false);
+    } else {
+      setSessionLocation(id);
+      setHistoryOpen(false);
+    }
+  }
+
+  useEffect(() => {
+    if (compact) return;
+    if (requestedSessionId === selectedSession.current) {
+      if (sessionRead.current || sessionReadError) {
+        sessionRead.current?.abort();
+        setOpeningSession(false);
+        setSessionReadError(undefined);
+      }
+    } else if (requestedSessionId) {
+      void loadSession(requestedSessionId);
+    } else {
+      newConversation({ syncLocation: false, focus: false });
+    }
+  }, [compact, requestedSessionId]);
 
   async function loadSession(id: string) {
-    const version=++selectionVersion.current;
-    drafts.current.set(selectedSession.current ?? 'new', {text,attachments});
-    setError(''); setOpeningSession(true);
+    const version = ++selectionVersion.current;
+    sessionRead.current?.abort();
+    const controller = new AbortController();
+    sessionRead.current = controller;
+    if (selectedSession.current !== id) drafts.current.set(selectedSession.current ?? 'new', { text, attachments });
+    setError('');
+    setSessionReadError(undefined);
+    setOpeningSession(true);
     try {
-      const session = await fetchSession(id, AbortSignal.timeout(10000));
-      if (version !== selectionVersion.current) return;
+      const session = await fetchSession(id, AbortSignal.any([controller.signal, AbortSignal.timeout(10000)]));
+      if (controller.signal.aborted || version !== selectionVersion.current) return;
+      const changed = selectedSession.current !== id;
       selectedSession.current = id;
       setSessionId(id);
       applySessionSnapshot(session);
-      const draft = drafts.current.get(id);
-      setText(draft?.text ?? '');
-      setAttachments(draft?.attachments ?? []);
+      setSessions(previous => previous.some(item => item.id === id) ? previous : [{ ...session, events: null, messages: null }, ...previous]);
+      setSelectedArtifact(undefined);
+      if (changed) {
+        const draft = drafts.current.get(id);
+        setText(draft?.text ?? '');
+        setAttachments(draft?.attachments ?? []);
+        setAttachmentError('');
+      }
       setHistoryOpen(false);
-    } catch (problem) { if (version === selectionVersion.current) setError(errorText(problem,t)); }
-    finally { if (version === selectionVersion.current) setOpeningSession(false); }
+    } catch (problem) {
+      if (!controller.signal.aborted && version === selectionVersion.current) setSessionReadError({ id, detail: errorText(problem, t) });
+    } finally {
+      if (sessionRead.current === controller) {
+        sessionRead.current = undefined;
+        setOpeningSession(false);
+      }
+    }
   }
 
   function applySessionSnapshot(session: AssistantSession) {
@@ -574,7 +680,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
 
   async function send(value = text) {
     const prompt=value.trim()||(attachments.length?t('请分析这些附件','Analyze these attachments'):'');
-    if (!prompt || !config?.enabled || readingAttachment || creatingRef.current) return;
+    if (!prompt || !config?.enabled || loading || attachmentRead.current || creatingRef.current) return;
     const frozenContext = boundedMonitoringContext({ ...context, range: context.range ?? rangeFor(context.query?.lookback_hours ?? lookback) });
     delete frozenContext.code_workspace;
     if (user?.role === 'admin' && config.code_tasks_enabled) frozenContext.code_workspace = codeWorkspace.trim() || '.';
@@ -582,10 +688,23 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     let id=sessionId;
     if(!id){
       creatingRef.current=true;
-      ++selectionVersion.current;
+      const version=++selectionVersion.current;
       setCreating(true);
-      try { const session=await api<AssistantSession>('/assistant/sessions',{method:'POST',body:JSON.stringify({title:item.text.slice(0,60),category:newCategory})}); id=session.id; selectedSession.current=id;setSessionId(id);setSessions(previous=>[session,...previous]);applySessionSnapshot(session); }
-      catch(problem){setError(errorText(problem,t));return;}
+      try {
+        const session=await api<AssistantSession>('/assistant/sessions',{method:'POST',body:JSON.stringify({title:item.text.slice(0,60),category:newCategory})});
+        id=session.id;
+        setSessions(previous=>[session,...previous.filter(item=>item.id!==session.id)]);
+        if (version !== selectionVersion.current) {
+          void runTurn(id, item);
+          return;
+        }
+        selectedSession.current=id;
+        setSessionId(id);
+        setSessionLocation(id,true);
+        drafts.current.delete('new');
+        applySessionSnapshot(session);
+      }
+      catch(problem){if(version===selectionVersion.current)setError(errorText(problem,t));return;}
       finally{creatingRef.current=false;setCreating(false);}
     }
     setText('');setAttachments([]);setAttachmentError('');drafts.current.set(id,{text:'',attachments:[]});setError('');
@@ -594,9 +713,15 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   }
 
   async function cancel(id=sessionId):Promise<boolean> {
-    if (!id) return false;
+    if (!id || cancelRequests.current.has(id)) return false;
+    cancelRequests.current.add(id);
+    setStoppingIds(previous => [...previous, id]);
     try { await api(`/assistant/sessions/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: '{}' }); return true; }
-    catch (problem) { setError(errorText(problem,t)); return false; }
+    catch (problem) { if (selectedSession.current === id) setError(errorText(problem,t)); return false; }
+    finally {
+      cancelRequests.current.delete(id);
+      setStoppingIds(previous => previous.filter(value => value !== id));
+    }
   }
 
   async function prioritize(itemId:string){
@@ -608,13 +733,14 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     else {const next=takeNext(sessionId);if(next)void runTurn(sessionId,next);}
   }
   function removeQueued(itemId:string){if(sessionId)updateQueue(sessionId,(queuedTurns.current.get(sessionId)??[]).filter(item=>item.id!==itemId));}
-  async function addFiles(files:FileList | null){
-    if(!files?.length)return;
+  async function addFiles(files:File[]){
+    if(!files.length || attachmentRead.current)return;
+    attachmentRead.current=true;
     const version=selectionVersion.current;
     setReadingAttachment(true);setAttachmentError('');
-    try { const added:Attachment[]=[];for(const file of Array.from(files)){if(attachments.length+added.length>=4)throw Error(t('最多添加 4 个附件','Add up to 4 attachments'));added.push(await readAttachment(file));}if([...attachments,...added].reduce((total,item)=>total+(item.kind==='image'?(item.data?.length??0)*.75:0),0)>(1<<20))throw Error(t('图片总大小不能超过 1 MiB','Images cannot exceed 1 MiB in total'));if(version===selectionVersion.current)setAttachments(previous=>[...previous,...added]); }
+    try { const added:Attachment[]=[];for(const file of files){if(attachments.length+added.length>=4)throw Error(t('最多添加 4 个附件','Add up to 4 attachments'));added.push(await readAttachment(file));}if([...attachments,...added].reduce((total,item)=>total+(item.kind==='image'?(item.data?.length??0)*.75:0),0)>(1<<20))throw Error(t('图片总大小不能超过 1 MiB','Images cannot exceed 1 MiB in total'));if(version===selectionVersion.current)setAttachments(previous=>[...previous,...added]); }
     catch(problem){if(version===selectionVersion.current)setAttachmentError(errorText(problem,t));}
-    finally{setReadingAttachment(false);if(fileInput.current)fileInput.current.value='';}
+    finally{attachmentRead.current=false;setReadingAttachment(false);}
   }
 
   function openSettings() { navigate('/admin?tab=models'); }
@@ -622,15 +748,15 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const selectedSessionData=sessions.find(session=>session.id===sessionId);
   const recoveringNow=!!sessionId&&recoveringIds.includes(sessionId);
   const runningTurn=sessionRunning?turns.filter(turn=>turn.status==='running').at(-1):undefined;
-  const runningTool=runningTurn?.tools.filter(tool=>tool.status==='running').at(-1);
-  const [nowTick,setNowTick]=useState(0);
-  useEffect(()=>{
-    if(!sessionRunning)return;
-    const timer=window.setInterval(()=>setNowTick(Date.now()),1000);
-    return()=>window.clearInterval(timer);
-  },[sessionRunning]);
   function openDraft(value: DashboardDraft, analysisRange?: TimeRange) {
-    setInspectorTab('artifacts');setInspectorOpen(true); const copy = JSON.parse(JSON.stringify(value)) as DashboardDraft; setDraft({ ...copy, range: copy.range ?? analysisRange ?? context.range ?? rangeFor(context.query?.lookback_hours ?? lookback) }); setDraftError(''); setPreview({});  }
+    setInspectorTab('artifacts');
+    setInspectorOpen(true);
+    const copy = structuredClone(value);
+    for (const panel of copy.panels) if (panel.grid && !isDashboardGrid(panel.grid)) delete panel.grid;
+    setDraft({ ...copy, range: copy.range ?? analysisRange ?? context.range ?? rangeFor(context.query?.lookback_hours ?? lookback) });
+    setDraftError('');
+    setPreview({});
+  }
   function updatePanel(index: number, update: Partial<DraftPanel>) { setDraft(previous => previous ? { ...previous, panels: previous.panels.map((panel, panelIndex) => panelIndex === index ? { ...panel, ...update } : panel) } : previous); setPreview({}); }
   async function previewDraft() {
     if (!draft) return; setPreviewing(true); setDraftError(''); const abort = new AbortController(); previewController.current = abort;
@@ -646,7 +772,52 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
       setDraft(null); void message.success(t(`已保存大盘“${draft.title}”`,`Dashboard “${draft.title}” saved`));
     } catch (problem) { setDraftError(errorText(problem,t)); } finally { setDraftSaving(false); }
   }
-  function newConversation() { ++selectionVersion.current;setOpeningSession(false);drafts.current.set(selectedSession.current??'new',{text,attachments});selectedSession.current=null;setSessionId(null);setSessionStatus(undefined);setEvents([]);const draft=drafts.current.get('new');setText(draft?.text??'');setAttachments(draft?.attachments??[]);setError('');setHistoryOpen(false); }
+  function focusComposer() {
+    requestAnimationFrame(() => composerInput.current?.focus({ preventScroll: true, cursor: 'end' }));
+  }
+  function newConversation({ syncLocation = true, focus = true, draftText = text }: { syncLocation?: boolean; focus?: boolean; draftText?: string } = {}) {
+    ++selectionVersion.current;
+    sessionRead.current?.abort();
+    setOpeningSession(false);
+    setSessionReadError(undefined);
+    drafts.current.set(selectedSession.current ?? 'new', { text: draftText, attachments });
+    selectedSession.current = null;
+    setSessionId(null);
+    setSessionStatus(undefined);
+    setEvents([]);
+    setSelectedArtifact(undefined);
+    const draft = drafts.current.get('new');
+    setText(draft?.text ?? '');
+    setAttachments(draft?.attachments ?? []);
+    setAttachmentError('');
+    setError('');
+    setHistoryOpen(false);
+    if (syncLocation) setSessionLocation(null);
+    if (focus) focusComposer();
+  }
+  function insertPrompt(prompt: string) {
+    const draft = text.trimEnd();
+    const next = draft ? `${draft}\n\n${prompt}` : prompt;
+    if (next.length > 16000) setError(t('当前草稿已接近字数上限，请缩短后再插入。', 'Shorten the current draft before inserting another prompt.'));
+    else setText(next);
+    focusComposer();
+  }
+  async function copyOutput(answer: string, sql = false) {
+    try {
+      await navigator.clipboard.writeText(answer);
+      void message.success(sql ? t('已复制 SQL', 'SQL copied') : t('已复制回答', 'Response copied'));
+    } catch {
+      void message.error(t('无法访问剪贴板，请选择回答文字手动复制。', 'Clipboard access is unavailable. Select and copy the response text.'));
+    }
+  }
+  function handleCommand(command: ComposerCommand) {
+    switch (command) {
+      case 'new': newConversation({ draftText: '' }); break;
+      case 'history': if (historyInDrawer) setHistoryOpen(true); else setHistoryCollapsed(false); break;
+      case 'artifacts': setInspectorTab('artifacts'); setInspectorOpen(true); break;
+      case 'stop': void cancel(); break;
+    }
+  }
   const categoryLabel=(value?:string)=>value?.trim()?value.trim():t("未分类","Uncategorized");
   const baseCategories=useMemo(()=>[
     {key:'monitoring',value:t("监控","Monitoring")},
@@ -750,7 +921,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     finally{setRenamingCategory(false);}
   }
   async function updateSessionCategory(id:string,category:string){
-    try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"PATCH",body:JSON.stringify({category})}); setSessions(previous=>previous.map(session=>session.id===id?{...session,category}:session)); if(selectedSession.current===id)void loadSession(id); }
+    try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"PATCH",body:JSON.stringify({category})}); setSessions(previous=>previous.map(session=>session.id===id?{...session,category}:session)); }
     catch(problem){ setError(errorText(problem,t)); void message.error(errorText(problem,t)); }
   }
   async function updateSessionTitle(id:string,title:string){
@@ -761,29 +932,27 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   }
   async function deleteSession(id:string){
     setDeletingIds(previous=>[...new Set([...previous,id])]);
-    try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"DELETE"}); setSessions(previous=>previous.filter(session=>session.id!==id)); eventCache.current.delete(id);drafts.current.delete(id); if(sessionId===id)newConversation(); void message.success(t("对话已删除","Conversation deleted")); }
+    try { await api(`/assistant/sessions/${encodeURIComponent(id)}`,{method:"DELETE"}); setSessions(previous=>previous.filter(session=>session.id!==id)); eventCache.current.delete(id); queuedTurns.current.delete(id); if(selectedSession.current===id)newConversation(); drafts.current.delete(id); void message.success(t("对话已删除","Conversation deleted")); }
     catch(problem){ setError(errorText(problem,t)); void message.error(errorText(problem,t)); }
     finally { setDeletingIds(previous=>previous.filter(value=>value!==id)); }
   }
   function historyContent() {
-    const visible=sessions.filter(session=>session.title.toLowerCase().includes(search.toLowerCase())||categoryLabel(session.category).toLowerCase().includes(search.toLowerCase()));
+    const needle = search.trim().toLowerCase();
+    const visible=sessions.filter(session=>session.title.toLowerCase().includes(needle)||categoryLabel(session.category).toLowerCase().includes(needle));
     const groups=[...new Set(visible.map(session=>session.category?.trim()||""))].sort((a,b)=>Number(!a)-Number(!b)||a.localeCompare(b));
     return <div className="lm-assistant-history">
-      <Button block icon={<PlusOutlined />} disabled={creating} onClick={newConversation}>{t("新对话","New conversation")}</Button>
-      <Input allowClear size="small" placeholder={t("搜索对话","Search conversations")} value={search} onChange={event=>setSearch(event.target.value)} className="lm-assistant-history-search" />
-      <label className="lm-assistant-category-picker">
-        <span><FolderOutlined aria-hidden="true"/>{t("新对话分类","New conversation category")}</span>
-        <CategoryField
-          className="lm-assistant-category-input"
-          value={newCategory}
-          options={categoryOptions}
-          disabled={creating}
-          onCommit={setNewCategory}
-          ariaLabel={t("新对话分类","New conversation category")}
-          placeholder={t("输入新分类，回车确认","Type a category, then press Enter")}
-        />
-      </label>
-      <CategoryManager categories={managedCategories} onRequestDelete={requestDeleteCategory} onRequestRename={requestRenameCategory}/>
+      <div className="lm-assistant-history-actions">
+        <Button icon={<PlusOutlined />} aria-label={t('新对话', 'New conversation')} disabled={creating} onClick={() => newConversation()}>{t('新对话', 'New conversation')}</Button>
+        <Popover trigger="click" placement="bottomRight" content={<label className="lm-assistant-category-picker">
+          <span>{t('新对话分类', 'New conversation category')}</span>
+          <CategoryField className="lm-assistant-category-input" value={newCategory} options={categoryOptions} disabled={creating} onCommit={setNewCategory}
+            ariaLabel={t('新对话分类', 'New conversation category')} placeholder={t('选择或输入分类', 'Select or enter a category')} />
+        </label>}>
+          <Button type="text" icon={<FolderOutlined />} aria-label={t('设置新对话分类', 'Set new conversation category')} title={newCategory || t('设置新对话分类', 'Set new conversation category')} />
+        </Popover>
+      </div>
+      <Input allowClear prefix={<SearchOutlined aria-hidden="true" />} aria-label={t('搜索对话', 'Search conversations')} placeholder={t('搜索对话', 'Search conversations')} value={search} onChange={event=>setSearch(event.target.value)} className="lm-assistant-history-search" />
+      <div className="lm-assistant-history-list">
       {groups.map(category=>{
         const items=visible.filter(session=>(session.category?.trim()||"")===category);
         return <section className="lm-assistant-history-group" key={category||"uncategorized"}>
@@ -792,92 +961,178 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
             const status=runningIds.includes(session.id)?'running':session.status;
             const deleting=deletingIds.includes(session.id), running=status==='running';
             return <div className={`lm-assistant-session-row ${sessionId===session.id?'active':''}`} key={session.id}>
-              <button className={`lm-assistant-session ${sessionId===session.id?'active':''}`} disabled={creating||deleting} onClick={()=>void loadSession(session.id)}>
+              <button type="button" className={`lm-assistant-session ${sessionId===session.id?'active':''}`} aria-current={sessionId===session.id?'page':undefined} disabled={creating||deleting} onClick={()=>selectConversation(session.id)}>
                 <MessageOutlined aria-hidden="true"/>
                 <span className="lm-assistant-session-name">
                   <span className="lm-assistant-session-title" title={session.title}>{session.title}</span>
-                  <small>{new Date(session.updated_at).toLocaleString(language)}</small>
+                  {session.updated_at && <small>{new Date(session.updated_at).toLocaleDateString(language, { month: 'short', day: 'numeric' })}</small>}
                 </span>
                 {status&&status!=='idle'&&<span className={`lm-assistant-session-status ${status}`} aria-label={status==='running'?t('响应中','Responding'):status==='failed'?t('失败','Failed'):t('待确认','Needs review')}>{status==='running'?<LoadingOutlined spin/>:status==='failed'?t('失败','Failed'):t('待确认','Review')}</span>}
               </button>
-              <Button className="lm-assistant-session-delete" type="text" size="small" danger icon={<DeleteOutlined/>} loading={deleting} disabled={deleting||running} aria-label={t("删除对话","Delete conversation")} onClick={()=>void deleteSession(session.id)}/>
+              <Popconfirm title={t('删除该对话？', 'Delete this conversation?')} description={t('消息和附件会一起删除。', 'Its messages and attachments will be deleted.')} onConfirm={()=>deleteSession(session.id)} okText={t('删除','Delete')} cancelText={t('取消','Cancel')} okButtonProps={{danger:true}}>
+                <Button className="lm-assistant-session-delete" type="text" danger icon={<DeleteOutlined/>} loading={deleting} disabled={deleting||running} aria-label={t("删除对话","Delete conversation")}/>
+              </Popconfirm>
             </div>;
           })}
         </section>;
       })}
-      {!visible.length && <div className="lm-assistant-history-empty">{t("对话会保存在这里","Conversations are saved here")}</div>}
+      {!visible.length && <div className="lm-assistant-history-empty">{needle ? t('没有匹配的对话', 'No matching conversations') : t('还没有对话', 'No conversations yet')}</div>}
+      </div>
+      <footer className="lm-assistant-history-footer"><CategoryManager categories={managedCategories} onRequestDelete={requestDeleteCategory} onRequestRename={requestRenameCategory}/></footer>
     </div>;
   }
 
   const scopeControls=<div className="lm-assistant-scope"><div className="lm-assistant-scope-heading"><strong>{t('分析范围与设置','Analysis scope and settings')}</strong>{config?.enabled&&<span>{config.model}</span>}</div>{catalogUnavailable && <Alert type="warning" showIcon title={t('暂时无法读取数据表','Data tables are temporarily unavailable')} action={<Button size="small" onClick={() => setCatalogRefresh(value => value + 1)}>{t('重试','Retry')}</Button>} />}<label>{t('数据表','Data table')}<Select showSearch allowClear placeholder={t('全部数据表','All data tables')} value={context.table} onChange={value => setContext(previous => ({ ...previous, table: value, service: undefined }))} options={tables.map(item => ({ value: item.name, label: item.name }))} /></label><label>{t('服务','Service')}<Select showSearch allowClear placeholder={t('全部服务','All services')} value={context.service} onChange={value => setContext(previous => ({ ...previous, service: value }))} options={(table?.services ?? [...new Set(tables.flatMap(item => item.services))]).map(service => ({ value: service, label: service }))} /></label>{context.range ? <div className="lm-assistant-scope-fixed">{t('当前页面时间范围','Current page time range')}</div> : <label>{t('时间范围','Time range')}<Select value={lookback} options={[{ value: .25, label: t('最近 15 分钟','Last 15 minutes') }, { value: 1, label: t('最近 1 小时','Last hour') }, { value: 6, label: t('最近 6 小时','Last 6 hours') }, { value: 24, label: t('最近 24 小时','Last 24 hours') }]} onChange={setLookback} /></label>}{user?.role === 'admin' && config?.code_tasks_enabled && <label>{t('代码工作区','Code workspace')}<Input aria-label={t('代码工作区','Code workspace')} value={codeWorkspace} onChange={event => setCodeWorkspace(event.target.value)} placeholder="." maxLength={512} /><small>{t('代码任务在隔离副本中运行，审批后应用修改。','Code tasks run in an isolated copy and apply changes after approval.')}</small></label>}{user?.role === 'admin' && <Button type="text" icon={<SettingOutlined/>} onClick={openSettings}>{t('模型连接设置','Model connection settings')}</Button>}</div>;
 
+  const scopeLabel = context.service || context.table || (context.range ? t('页面时间范围', 'Page time range')
+    : t(lookback < 1 ? '最近 15 分钟' : `最近 ${lookback} 小时`, lookback < 1 ? 'Last 15 minutes' : `Last ${lookback}h`));
+  const historyVisible = historyInDrawer ? historyOpen : !historyCollapsed;
+  const workspaceTitle = selectedSessionData?.title || t('新对话', 'New conversation');
+  const inspector = inspectorOpen && <WorkbenchInspector
+    tab={inspectorTab} onTabChange={setInspectorTab} context={context} session={selectedSessionData}
+    categoryLabel={categoryLabel(selectedSessionData?.category)} running={sessionRunning} model={config?.model}
+    turns={turns} selectedArtifact={selectedArtifact}
+    onSelectArtifact={id => { setSelectedArtifact(id); setInspectorTab('artifacts'); }}
+    onOpenDashboard={(value, range) => { openDraft(value, range); if (inspectorInDrawer) setInspectorOpen(false); }}
+    onUseSql={onSQL ? sql => {
+      onSQL(sql);
+      void message.success(t('SQL 已填入查询编辑器', 'SQL moved to the query editor'));
+      if (inspectorInDrawer) setInspectorOpen(false);
+    } : undefined}
+    onCopySql={sql => void copyOutput(sql, true)}
+    onNavigate={url => { navigate(url); if (inspectorInDrawer) setInspectorOpen(false); }}
+  />;
+
   return <div className={`lm-assistant ${compact ? 'is-compact' : ''}`}>
-    {!compact && <aside className="lm-assistant-sidebar"><div className="lm-assistant-sidebar-title"><HistoryOutlined /><span>{t("对话历史","Conversation history")}</span></div>{historyContent()}</aside>}
-    <main className="lm-assistant-main">
+    {!historyInDrawer && historyVisible && <aside className="lm-assistant-sidebar" aria-label={t('对话历史', 'Conversation history')}>
+      <div className="lm-assistant-sidebar-title">{t('对话历史', 'Conversation history')}</div>
+      {historyContent()}
+    </aside>}
+    <section className={`lm-assistant-main ${isWelcome ? 'is-welcome' : ''}`} aria-label={t('会话工作台', 'Conversation workspace')}>
       <header className="lm-workbench-head">
         <div className="lm-workbench-title">
-          <span className="lm-workbench-mark"><ThunderboltOutlined/></span>
-          {sessionId&&selectedSessionData?<SessionHeaderEditor
-            title={selectedSessionData.title}
-            category={selectedSessionData.category||''}
-            options={categoryOptionsFor(selectedSessionData.category)}
-            disabled={sessionRunning}
-            onTitleCommit={title=>void updateSessionTitle(selectedSessionData.id,title)}
-            onCategoryCommit={category=>void updateSessionCategory(selectedSessionData.id,category)}
-          />:<div>
-            <strong>{t('新任务','New task')}</strong>
-            <small>{config?.model||t('模型未配置','Model not configured')} · {sessionRunning?t('运行中','Running'):t('空闲','Idle')}</small>
-          </div>}
+          <Tooltip title={historyVisible ? t('收起对话历史', 'Hide conversations') : t('打开对话历史', 'Show conversations')}>
+            <Button className="lm-workbench-history-toggle" type="text" icon={<HistoryOutlined />} aria-label={t('对话历史', 'Conversation history')}
+              aria-expanded={historyVisible} onClick={() => historyInDrawer ? setHistoryOpen(!historyOpen) : setHistoryCollapsed(!historyCollapsed)} />
+          </Tooltip>
+          <h2 title={workspaceTitle}>{workspaceTitle}</h2>
+          {selectedSessionData?.category && <span className="lm-workbench-category" title={selectedSessionData.category}>{selectedSessionData.category}</span>}
+          {selectedSessionData && <Popover key={selectedSessionData.id} title={t('编辑对话', 'Edit conversation')} trigger="click" placement="bottomLeft" content={<SessionHeaderEditor
+            title={selectedSessionData.title} category={selectedSessionData.category || ''}
+            options={categoryOptionsFor(selectedSessionData.category)} disabled={sessionRunning}
+            onTitleCommit={title => void updateSessionTitle(selectedSessionData.id, title)}
+            onCategoryCommit={category => void updateSessionCategory(selectedSessionData.id, category)}
+          />}>
+            <Button className="lm-workbench-edit" type="text" icon={<EditOutlined />} aria-label={t('编辑对话', 'Edit conversation')} disabled={sessionRunning} />
+          </Popover>}
         </div>
-        <Button className="lm-workbench-inspector-toggle" type={inspectorOpen?'primary':'default'} size="small" icon={<PicRightOutlined/>} aria-pressed={inspectorOpen} onClick={()=>setInspectorOpen(value=>!value)}>{t('检查器','Inspector')}</Button>
+        <div className="lm-workbench-actions">
+          {!!config?.enabled && <span className="lm-workbench-model" title={config.model}>{config.model}</span>}
+          <Tooltip title={t('上下文与产物', 'Context and artifacts')}>
+            <Button className="lm-workbench-inspector-toggle" type="text" icon={<PicRightOutlined />} aria-label={t('上下文与产物', 'Context and artifacts')}
+              aria-expanded={inspectorOpen} onClick={() => setInspectorOpen(value => !value)} />
+          </Tooltip>
+        </div>
       </header>
-      {context.page&&<div className="lm-assistant-page-context"><span>{t("当前页面","Current page")}</span><strong>{context.dashboard_title??pageTitles[context.page.title]??context.page.title}</strong>{context.panels&&<Tag>{context.panels.length} {t("个面板"," panels")}</Tag>}{context.log_query?.keyword&&<Tag>{t("关键词：","Keyword: ")}{context.log_query.keyword}</Tag>}{!!context.selected_logs?.length&&<Tag>{t("已选日志","Selected log")}</Tag>}{context.query&&<Tag>{t("当前 SQL","Current SQL")}</Tag>}{context.context_truncated&&<Tag>{t("上下文已精简","Context trimmed")}</Tag>}</div>}
-      {configError && <Alert type="error" showIcon title={t('模型配置读取失败','Could not load model settings')} description={configError} action={<Button onClick={() => setConfigRefresh(value => value + 1)}>{t('重试','Retry')}</Button>} />}
-      {!loading && config && !config.enabled && <Alert type="info" showIcon title={t("连接 AI 模型后开始使用","Connect an AI model to get started")} description={user?.role === 'admin' ? t("填写模型服务地址和 API Key，自动获取模型并选择调用协议。密钥由后端保管。","Enter a model service URL and API key, fetch available models and choose the API protocol. Keys are stored by the backend.") : t("请联系管理员配置并启用 AI 模型。","Ask an administrator to configure and enable an AI model.")} action={user?.role === 'admin' ? <Button onClick={openSettings}>{t("配置模型","Configure model")}</Button> : undefined} />}
-      {sessionRunning&&<div className="lm-assistant-runbar" role="status">
-        <span className="lm-assistant-activity-indicator running" aria-hidden="true"/>
-        {recoveringNow&&<span className="lm-assistant-runbar-recovery">{t('连接中断，正在恢复…','Connection lost, recovering…')}</span>}
-        <strong>{runningTool?toolLabel(runningTool.name,t):t('正在分析','Analyzing')}</strong>
-        <span className="lm-assistant-runbar-elapsed">{formatElapsed(runningTurn?.startedAt??runningTurn?.timestamp,undefined,nowTick)||'00:00'}</span>
-        {!!runningTurn?.tools.length&&<span className="lm-assistant-runbar-steps">{t(`已执行 ${runningTurn.tools.length} 步`,`${runningTurn.tools.length} steps`)}</span>}
-        <button type="button" className="lm-assistant-runbar-stop" aria-label={t('停止当前响应','Stop current response')} onClick={()=>void cancel()}><span className="lm-assistant-stop-square"/></button>
+      {context.page && <div className="lm-assistant-page-context"><span>{t('来自', 'From')}</span>
+        <strong>{context.dashboard_title ?? pageTitles[context.page.title] ?? context.page.title}</strong>
+        {context.panels && <Tag>{context.panels.length} {t('个面板', 'panels')}</Tag>}
+        {context.log_query?.keyword && <Tag>{t('关键词', 'Keyword')} {context.log_query.keyword}</Tag>}
+        {!!context.selected_logs?.length && <Tag>{t('已选日志', 'Selected log')}</Tag>}
+        {context.query && <Tag>{t('当前 SQL', 'Current SQL')}</Tag>}
+        {context.context_truncated && <Tag>{t('上下文已精简', 'Context trimmed')}</Tag>}
       </div>}
-      <MessageScroller.Provider key={sessionId??'new'} autoScroll defaultScrollPosition="end" scrollPreviousItemPeek={56}>
+      {configError && <Alert className="lm-assistant-banner" type="error" showIcon title={t('模型配置读取失败', 'Could not load model settings')} description={configError}
+        action={<Button onClick={() => setConfigRefresh(value => value + 1)}>{t('重试', 'Retry')}</Button>} />}
+      {!configLoading && config && !config.enabled && <Alert className="lm-assistant-banner" type="info" showIcon title={t('连接 AI 模型后开始使用', 'Connect an AI model to get started')}
+        description={user?.role === 'admin' ? t('从模型管理配置服务、密钥和模型。', 'Open model management to configure the service, credential, and model.') : t('请联系管理员配置并启用 AI 模型。', 'Ask an administrator to configure and enable an AI model.')}
+        action={user?.role === 'admin' ? <Button onClick={openSettings}>{t('配置模型', 'Configure model')}</Button> : undefined} />}
+      <MessageScroller.Provider key={sessionId ?? 'new'} autoScroll defaultScrollPosition="end" scrollPreviousItemPeek={56}>
         <MessageScroller.Root className="lm-assistant-scroll-root">
-          <MessageScroller.Viewport className="lm-assistant-feed" aria-label={t('对话消息','Conversation messages')}>
-            <MessageScroller.Content className="lm-assistant-thread" aria-busy={busy}>
-          {loading ? <div className="lm-assistant-loading"><Spin /></div> : !turns.length ? <div className="lm-assistant-welcome"><div className="lm-assistant-orb"><ThunderboltOutlined /></div><h3>{t("从一个问题开始","Start with a question")}</h3><p>{t("我会先读取数据结构，再帮助你查询与分析。","I will inspect the data schema before helping you query and analyze it.")}</p><div className="lm-assistant-ideas">{ideas.map(idea => <button key={idea.title} onClick={() => setText(idea.text)}><strong>{idea.title}<span aria-hidden="true">↗</span></strong><small>{idea.detail}</small></button>)}</div></div> : turns.map(turn =>
-            <MessageScroller.Item key={turn.id} messageId={turn.id} scrollAnchor><section className="lm-assistant-turn">
-              <div className="lm-assistant-user"><div className="lm-assistant-user-content"><p>{turn.text}</p>{turn.attachments.length>0&&<div className="lm-assistant-sent-attachments">{turn.attachments.map((attachment,index)=><span className="lm-assistant-attachment" key={`${index}-${attachment.name}`}>{attachment.kind==='pdf'?<FilePdfOutlined aria-hidden="true"/>:<PictureOutlined aria-hidden="true"/>}<span>{attachment.name}</span>{attachment.pages&&<small>{attachment.pages} {t('页','pages')}</small>}</span>)}</div>}</div></div>
-              <div className="lm-assistant-reply"><span className="lm-assistant-role assistant" aria-hidden="true"><ThunderboltOutlined/></span><div className="lm-assistant-reply-body">
-                {turn.compacting && turn.status === 'running' && <div className="lm-assistant-run-meta" role="status">{t("正在整理较早的对话…","Summarizing earlier conversation…")}</div>}
-                {turn.compacted && <div className="lm-assistant-run-meta">{turn.degraded ? t("历史整理已降级，原始记录仍保留","History summary degraded; original records are retained") : t("较早的对话已整理，原始记录仍保留","Earlier conversation summarized; original records are retained")}</div>}
-                <ToolActivity turn={turn} onDraft={openDraft} canUseCodeTasks={user?.role === 'admin'} canApproveAgentUpdate={user?.role === 'admin'} />
-                {turn.answer && <Answer text={turn.answer} streaming={turn.status === 'running' && busy} onSQL={onSQL} />}
-                {turn.status === 'running' && busy && <div className="lm-assistant-thinking" role="status"><span /><span /><span />{t("正在分析","Analyzing")}</div>}
-                {(turn.usage || turn.compactionUsage) && <div className="lm-assistant-run-meta">{turn.usage && <span>{t("模型报告用量：","Reported model usage: ")}{formatUsage(turn.usage,t)}</span>}{turn.compactionUsage && <span>{turn.usage ? ' · ' : ''}{t("历史整理：","History summary: ")}{formatUsage(turn.compactionUsage,t)}</span>}</div>}
-                {turn.error && <Alert type={turn.status === 'cancelled' ? 'info' : 'error'} title={turn.error} showIcon />}
-              </div></div>
-            </section></MessageScroller.Item>)}
+          <MessageScroller.Viewport className="lm-assistant-feed" aria-label={t('对话消息', 'Conversation messages')}>
+            <MessageScroller.Content className="lm-assistant-thread">
+              {sessionReadError ? <Alert type="error" showIcon title={t('无法打开此对话', 'Could not open this conversation')} description={sessionReadError.detail}
+                action={<Button onClick={() => void loadSession(sessionReadError.id)}>{t('重试', 'Retry')}</Button>} />
+              : openingSession || (requestedSessionId && !sessionId) || creating ? <div className="lm-assistant-loading" role="status"><Spin />{t('正在打开对话', 'Opening conversation')}</div>
+              : isWelcome ? <div className="lm-assistant-welcome">
+                <span className="lm-assistant-welcome-mark" aria-hidden="true"><ThunderboltOutlined /></span>
+                <h3>{t('想排查什么？', 'What would you like to investigate?')}</h3>
+              </div>
+              : !turns.length && !busy ? <div className="lm-assistant-welcome"><h3>{t('这段对话还没有消息', 'This conversation has no messages yet')}</h3></div>
+              : turns.map(turn => <MessageScroller.Item key={turn.id} messageId={turn.id} scrollAnchor>
+                <section className="lm-assistant-turn">
+                  <div className="lm-assistant-user">
+                    <div className="lm-assistant-user-content">
+                      <p>{turn.text}</p>
+                      {!!turn.attachments.length && <div className="lm-assistant-sent-attachments">{turn.attachments.map((attachment, index) =>
+                        <span className="lm-assistant-attachment" key={`${index}-${attachment.name}`}>
+                          {attachment.kind === 'pdf' ? <FilePdfOutlined aria-hidden="true" /> : <PictureOutlined aria-hidden="true" />}
+                          <span>{attachment.name}</span>{attachment.pages && <small>{attachment.pages} {t('页', 'pages')}</small>}
+                        </span>
+                      )}</div>}
+                    </div>
+                    <Tooltip title={t('复用提问', 'Reuse prompt')}><Button className="lm-assistant-reuse-prompt" type="text" icon={<EditOutlined />}
+                      aria-label={t('复用提问', 'Reuse prompt')} disabled={!config?.enabled || openingSession} onClick={() => insertPrompt(turn.text)} /></Tooltip>
+                  </div>
+                  <div className="lm-assistant-reply">
+                    <span className="lm-assistant-role assistant" aria-hidden="true"><ThunderboltOutlined /></span>
+                    <div className="lm-assistant-reply-body">
+                      {turn.compacting && turn.status === 'running' && <div className="lm-assistant-run-meta" role="status">{t('正在整理较早的对话…', 'Summarizing earlier conversation…')}</div>}
+                      {turn.compacted && <div className="lm-assistant-run-meta">{turn.degraded ? t('历史整理已降级，原始记录仍保留', 'History summary degraded; original records are retained') : t('较早的对话已整理，原始记录仍保留', 'Earlier conversation summarized; original records are retained')}</div>}
+                      <ToolActivity turn={turn} onDraft={openDraft} canUseCodeTasks={user?.role === 'admin'} canApproveAgentUpdate={user?.role === 'admin'} />
+                      {turn.answer && <Answer text={turn.answer} streaming={turn.status === 'running' && busy} onSQL={onSQL} />}
+                      {turn.error && <Alert type={turn.status === 'cancelled' ? 'info' : 'error'} title={turn.error} showIcon />}
+                      {turn.status !== 'running' && (turn.answer || turn.usage || turn.compactionUsage) && <div className="lm-assistant-reply-actions">
+                        {turn.answer && <Tooltip title={t('复制回答', 'Copy response')}>
+                          <Button type="text" icon={<CopyOutlined />} aria-label={t('复制回答', 'Copy response')} onClick={() => void copyOutput(turn.answer)} />
+                        </Tooltip>}
+                        {(turn.usage || turn.compactionUsage) && <details className="lm-assistant-usage">
+                          <summary>{t('模型用量', 'Model usage')}</summary>
+                          {turn.usage && <p>{formatUsage(turn.usage, t)}</p>}
+                          {turn.compactionUsage && <p>{t('历史整理', 'History summary')} · {formatUsage(turn.compactionUsage, t)}</p>}
+                        </details>}
+                      </div>}
+                    </div>
+                  </div>
+                </section>
+              </MessageScroller.Item>)}
             </MessageScroller.Content>
           </MessageScroller.Viewport>
-          <MessageScroller.Button className="lm-assistant-jump-latest" aria-label={t('跳转到最新消息','Jump to latest message')}>{t('最新消息','Latest')}</MessageScroller.Button>
+          {!isWelcome && <MessageScroller.Button className="lm-assistant-jump-latest" aria-label={t('跳转到最新消息', 'Jump to latest message')}>
+            <ArrowDownOutlined aria-hidden="true" /> {t('回到最新', 'Jump to latest')}
+          </MessageScroller.Button>}
         </MessageScroller.Root>
       </MessageScroller.Provider>
       <div className="lm-assistant-composer-wrap">
-        {queue.length>0&&<div className="lm-assistant-queue" aria-label={t('待发送消息','Queued messages')}><div className="lm-assistant-queue-heading">{t(`待发送 · ${queue.length}`,`Queued · ${queue.length}`)}</div>{queue.map(item=><div className="lm-assistant-queue-item" key={item.id}><span>{item.text}{item.attachments.length>0&&<small> · {item.attachments.length} {t('个附件','attachments')}</small>}</span><Button size="small" onClick={()=>void prioritize(item.id)}>{t('立即发送','Send now')}</Button><Button size="small" type="text" icon={<CloseOutlined/>} aria-label={t('移除待发消息','Remove queued message')} onClick={()=>removeQueued(item.id)}/></div>)}</div>}
-        <div className="lm-assistant-composer">
-          <input ref={fileInput} type="file" className="lm-assistant-file-input" accept="image/jpeg,image/png,image/webp,application/pdf,.pdf" multiple aria-label={t('选择图片或 PDF','Choose images or PDFs')} onChange={event=>void addFiles(event.target.files)}/>
-          {attachments.length>0&&<div className="lm-assistant-attachments">{attachments.map((attachment,index)=><span className="lm-assistant-attachment" key={`${index}-${attachment.name}`}>{attachment.kind==='pdf'?<FilePdfOutlined aria-hidden="true"/>:<PictureOutlined aria-hidden="true"/>}<span>{attachment.name}</span><button type="button" aria-label={t(`移除 ${attachment.name}`,`Remove ${attachment.name}`)} onClick={()=>setAttachments(previous=>previous.filter((_,i)=>i!==index))}><CloseOutlined/></button></span>)}</div>}
-          <Input.TextArea aria-label={t("给 AI 助手的问题","Question for the AI assistant")} placeholder={t("询问日志中的异常，或描述你想创建的大盘…","Ask about log anomalies, or describe a dashboard to create…")} value={text} onChange={event => setText(event.target.value)} autoSize={{ minRows: 2, maxRows: 7 }} maxLength={16000} disabled={!config?.enabled || loading} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
-          {attachmentError&&<div className="lm-assistant-attachment-error" role="alert">{attachmentError}</div>}
-          <div className="lm-assistant-composer-actions"><div className="lm-assistant-composer-left"><Button type="text" icon={readingAttachment?<LoadingOutlined spin/>:<PaperClipOutlined/>} aria-label={t('添加图片或 PDF','Attach image or PDF')} disabled={!config?.enabled||readingAttachment||attachments.length>=4} onClick={()=>fileInput.current?.click()}/><Popover content={scopeControls} trigger="click" placement="top"><Button type="text" icon={<SlidersOutlined/>} aria-label={t('分析范围与设置','Analysis scope and settings')}/></Popover><Button type="text" className={compact?undefined:'lm-assistant-mobile-history'} icon={<HistoryOutlined/>} aria-label={t('对话历史','Conversation history')} onClick={()=>setHistoryOpen(true)}/><small>{t("图片与文本 PDF · Enter 发送 · Shift + Enter 换行","Images and text PDFs · Enter to send · Shift + Enter for a new line")}</small></div><div className="lm-assistant-composer-send">{busy&&(text.trim()||attachments.length>0)&&<Button size="small" aria-label={t('加入队列','Queue turn')} disabled={creating||readingAttachment} onClick={()=>void send()}>{t('加入队列','Queue turn')}</Button>}{sessionRunning?<button type="button" className="lm-assistant-send-button" aria-label={t('停止当前响应','Stop current response')} onClick={()=>void cancel()}><span className="lm-assistant-stop-square"/></button>:<button type="button" className="lm-assistant-send-button" aria-label={t('发送','Send')} disabled={(!text.trim()&&!attachments.length)||!config?.enabled||loading||creating||readingAttachment} onClick={()=>void send()}><ArrowUpOutlined/></button>}</div></div>
-        </div>
+        {sessionRunning && <RunStatus turn={runningTurn} recovering={recoveringNow} stopping={stoppingIds.includes(sessionId ?? '')} onStop={() => void cancel()} />}
+        {queue.length > 0 && <div className="lm-assistant-queue" aria-label={t('待发送消息', 'Queued messages')}>
+          <div className="lm-assistant-queue-heading">{t(`待发送 · ${queue.length}`, `Queued · ${queue.length}`)}</div>
+          {queue.map(item => <div className="lm-assistant-queue-item" key={item.id}>
+            <span title={item.text}>{item.text}{item.attachments.length > 0 && <small> · {item.attachments.length} {t('个附件', 'attachments')}</small>}</span>
+            <Button size="small" onClick={() => void prioritize(item.id)}>{sessionRunning ? t('打断并发送', 'Interrupt and send') : item.retry ? t('重试发送', 'Retry send') : t('立即发送', 'Send now')}</Button>
+            <Button size="small" type="text" icon={<CloseOutlined />} aria-label={t('移除待发消息', 'Remove queued message')} onClick={() => removeQueued(item.id)} />
+          </div>)}
+        </div>}
+        {error && <Alert className="lm-assistant-composer-error" type="error" showIcon closable onClose={() => setError('')} title={error} />}
+        <AssistantComposer input={composerInput} text={text} onTextChange={setText} attachments={attachments} attachmentError={attachmentError}
+          readingAttachment={readingAttachment} onAddFiles={files => void addFiles(files)}
+          onRemoveAttachment={index => setAttachments(previous => previous.filter((_, i) => i !== index))}
+          disabled={!config?.enabled || loading} running={sessionRunning} starting={creating}
+          onSend={() => void send()} onCommand={handleCommand} scope={scopeControls} scopeLabel={scopeLabel} scopeInDrawer={historyNarrow} />
       </div>
-    </main>
-    {!compact&&!narrow&&inspectorOpen&&<WorkbenchInspector tab={inspectorTab} onTabChange={setInspectorTab} context={context} session={selectedSessionData} categoryLabel={categoryLabel(selectedSessionData?.category)} running={sessionRunning} model={config?.model} turns={turns} selectedArtifact={selectedArtifact} onSelectArtifact={id=>{setSelectedArtifact(id);setInspectorTab('artifacts');}} onOpenDashboard={openDraft} onUseSql={sql=>{onSQL?.(sql);void message.success(t('SQL 已填入查询编辑器','SQL moved to the query editor'));}} onNavigate={url=>navigate(url)}/>}
-    <Drawer title={t('助手检查器','Assistant inspector')} className="lm-inspector-drawer" open={inspectorOpen&&(compact||narrow)} onClose={()=>setInspectorOpen(false)} size="default" destroyOnHidden>{(compact||narrow)&&<WorkbenchInspector tab={inspectorTab} onTabChange={setInspectorTab} context={context} session={selectedSessionData} categoryLabel={categoryLabel(selectedSessionData?.category)} running={sessionRunning} model={config?.model} turns={turns} selectedArtifact={selectedArtifact} onSelectArtifact={id=>{setSelectedArtifact(id);setInspectorTab('artifacts');}} onOpenDashboard={value=>{openDraft(value);setInspectorOpen(false);}} onUseSql={sql=>{onSQL?.(sql);setInspectorOpen(false);}} onNavigate={url=>{navigate(url);setInspectorOpen(false);}}/>}</Drawer>
-    <Drawer title={t("对话历史","Conversation history")} open={historyOpen} onClose={() => setHistoryOpen(false)} size="default" destroyOnHidden>{historyContent()}</Drawer>
+      {isWelcome && config?.enabled && <div className="lm-assistant-ideas" aria-label={t('常用问题', 'Suggested prompts')}>
+        {ideas.map(idea => <button type="button" key={idea.title} onClick={() => insertPrompt(idea.text)}>
+          <span className="lm-assistant-idea-icon" aria-hidden="true">{idea.icon}</span>
+          <span className="lm-assistant-idea-copy"><strong>{idea.title}</strong><small>{idea.detail}</small></span>
+          <ArrowRightOutlined className="lm-assistant-idea-arrow" aria-hidden="true" />
+        </button>)}
+      </div>}
+    </section>
+    {!inspectorInDrawer && inspector}
+    {inspectorInDrawer && <Drawer title={t('上下文与产物', 'Context and artifacts')} className="lm-inspector-drawer" open={inspectorOpen} onClose={() => setInspectorOpen(false)}
+      size="min(378px, 100vw)" destroyOnHidden>{inspector}</Drawer>}
+    {historyInDrawer && <Drawer title={t('对话历史', 'Conversation history')} className="lm-assistant-history-drawer" open={historyOpen} onClose={() => setHistoryOpen(false)}
+      size="min(378px, 100vw)" destroyOnHidden>{historyContent()}</Drawer>}
     <Modal
       open={!!categoryRename}
       title={t("重命名分类","Rename category")}
