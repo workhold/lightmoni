@@ -220,7 +220,9 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       && Number.isSafeInteger(identity.uid) && identity.uid > 0 && Number.isSafeInteger(identity.gid) && identity.gid > 0
       ? helper : null;
   };
-  const plan = async (machineID: string, input: AgentUpdateInput, actorID: string, signal: AbortSignal, automaticTarget = false, allowForce = false): Promise<AgentUpdate> => {
+  const plan = async (machineID: string, input: AgentUpdateInput, actorID: string, signal: AbortSignal, mode: "review" | "assistant" | "automatic" = "review", allowForce = false): Promise<AgentUpdate> => {
+    const automaticTarget = mode === "automatic";
+    const waitForActiveWork = mode !== "review";
     fields(input, ["credential_id", "target_sha256", "action", "force_unknown", "force_reason"]);
     if (!["upgrade", "rollback"].includes(input.action)) fail(400, "action must be upgrade or rollback");
     if(input.force_unknown!==undefined&&typeof input.force_unknown!=='boolean')fail(400,'invalid force_unknown');
@@ -235,10 +237,10 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     assertFree(machineID);
     const { machine, credential } = access.credential(machineID, input.credential_id);
     const override=input.force_unknown?captureMaintenanceOverride(deps,machine.agent_id,machine.id,input.force_reason!):undefined;
-    const preparation=prepareMachineMaintenance(deps,machine.id,machine.agent_id,automaticTarget,override);
+    const preparation=prepareMachineMaintenance(deps,machine.id,machine.agent_id,waitForActiveWork,override);
     let laneHeld=false;
     try {
-      if (automaticTarget) {
+      if (waitForActiveWork) {
         const deadline=Date.now()+(options.drainTimeoutMs??90_000);
         for (;;) {
           signal.throwIfAborted();
@@ -701,10 +703,10 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
   router.get("/api/v1/agent-releases", access.safe(ctx => ctx.json({ releases: catalog.list() })));
   router.get(prefix, access.safe(ctx => { access.get(ctx.params.id); ctx.json(list(ctx.params.id)); }));
   router.get(prefix + "/:updateId", access.safe(ctx => { access.get(ctx.params.id); ctx.json(view(row(ctx.params.id, ctx.params.updateId))); }));
-  router.post(prefix + "/plan", access.safe(async ctx => { deps.auth.requireAdmin(ctx); const input=await ctx.body() as AgentUpdateInput;if(input?.force_unknown)human(ctx);ctx.json(await plan(ctx.params.id,input,ctx.user.id,ctx.signal,false,true), 201); }));
+  router.post(prefix + "/plan", access.safe(async ctx => { deps.auth.requireAdmin(ctx); const input=await ctx.body() as AgentUpdateInput;if(input?.force_unknown)human(ctx);ctx.json(await plan(ctx.params.id,input,ctx.user.id,ctx.signal,"review",true), 201); }));
   router.post(prefix + "/start", access.safe(async ctx => {
     deps.auth.requireAdmin(ctx); fields(await ctx.body(), []);
-    const proposed=await plan(ctx.params.id,{action:"upgrade"},ctx.user.id,ctx.signal,true);
+    const proposed=await plan(ctx.params.id,{action:"upgrade"},ctx.user.id,ctx.signal,"automatic");
     try { ctx.json(await apply(ctx.params.id,proposed.id,ctx.user.id,operationSignal()),202); }
     catch(error) { if(row(ctx.params.id,proposed.id).status==="awaiting_approval")cancel(ctx.params.id,proposed.id); throw error; }
   }));
@@ -755,7 +757,7 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
     const rolloutID = id();
     try {
       for (const mid of input.machine_ids) {
-        planned.push(await plan(mid, { action: "upgrade", target_sha256: target || undefined, credential_id: input.credential_ids?.[mid] }, ctx.user.id, ctx.signal, automatic));
+        planned.push(await plan(mid, { action: "upgrade", target_sha256: target || undefined, credential_id: input.credential_ids?.[mid] }, ctx.user.id, ctx.signal, automatic ? "automatic" : "review"));
       }
       ctx.signal.throwIfAborted();
       db.transaction(() => {
@@ -814,6 +816,6 @@ export function registerMachineAgentUpdates(deps: Dependencies, access: AgentUpd
       : target.sha256 === agent_release.artifact_sha256 ? "current" : "update_available";
     return { agent_release, agent_update: { state, target_sha256: target?.sha256 ?? "", target_version: target?.version ?? "", last_status: last?.status ?? "", last_operation_id: last?.id ?? "" } };
   };
-  return { listReleases: () => catalog.list(), assistantPlan: plan, assistantGet: (machineID, operationID) => view(row(machineID, operationID)), list, pending, assertFree, machineState,
+  return { listReleases: () => catalog.list(), assistantPlan: (machineID, input, actorID, signal) => plan(machineID, input, actorID, signal, "assistant"), assistantGet: (machineID, operationID) => view(row(machineID, operationID)), list, pending, assertFree, machineState,
     async close() { controller.abort(); await Promise.allSettled([...running.values(), ...rolloutWorkers.values()]); } };
 }

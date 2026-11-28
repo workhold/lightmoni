@@ -241,6 +241,41 @@ test('one-click upgrade reserves the host and waits for an active inspection to 
  assert.equal((await f.settle(h.id,started.data.id)).status,'succeeded');
 });
 
+test("assistant updates wait for a busy SSH lane and preserve the selected immutable release", async t => {
+  const f = await fixture(t), h = await f.host();
+  const lease = f.machines.acquireTerminal(h.id, undefined, () => {});
+  const request = { action: "upgrade" as const, target_sha256: f.release.sha256 };
+  const pending = f.machines.agentUpdates!.assistantPlan(h.id, request, "admin", new AbortController().signal);
+  assert.equal(hasPendingAgentUpdate(f.db, h.agent, h.id), true);
+  assert.equal(f.db.get<any>("SELECT count(*) AS n FROM machine_agent_updates")!.n, 0);
+  assert.equal(f.calls.length, 0);
+  lease.release();
+
+  const plan = await pending;
+  assert.equal(plan.status, "awaiting_approval");
+  assert.equal(plan.plan.machine.id, h.id);
+  assert.equal(plan.plan.target.sha256, request.target_sha256);
+  assert.equal(f.calls.length, 1, "only the fixed preflight may run before approval");
+  assert.equal(f.db.get<any>("SELECT count(*) AS n FROM machine_maintenance_preparations")!.n, 0);
+});
+
+test("cancelling an assistant update wait releases the preparation without invoking SSH", async t => {
+  const f = await fixture(t), h = await f.host();
+  const lease = f.machines.acquireTerminal(h.id, undefined, () => {});
+  const controller = new AbortController();
+  try {
+    const pending = f.machines.agentUpdates!.assistantPlan(h.id, { action: "upgrade", target_sha256: f.release.sha256 }, "admin", controller.signal);
+    assert.equal(hasPendingAgentUpdate(f.db, h.agent, h.id), true);
+    controller.abort();
+    await assert.rejects(pending, { name: "AbortError" });
+    assert.equal(hasPendingAgentUpdate(f.db, h.agent, h.id), false);
+    assert.equal(f.db.get<any>("SELECT count(*) AS n FROM machine_agent_updates")!.n, 0);
+    assert.equal(f.calls.length, 0);
+  } finally {
+    lease.release();
+  }
+});
+
 test('unknown and timed-out active work release the upgrade preparation without starting maintenance',async t=>{
  const f=await fixture(t,300,undefined,20),h=await f.host(),at=f.deps.now().toISOString();
  f.db.run("INSERT INTO agent_jobs(id,agent_id,execution_principal,deployment_id,operation_id,state,lease_id,actions_json,target_json,issued_at,expires_at,created_at,updated_at) VALUES(?,?,'privileged_executor','platform-app','inspection','unknown','leased',?,?,?,?,?,?)",
