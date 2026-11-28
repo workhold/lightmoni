@@ -1,6 +1,6 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:v0.1.40-20261128-165440-amd64
+    image: docker.heyphp.com/lightmoni/lightmoni:v0.1.41-20261128-165952-amd64
     platform: linux/amd64
     pull_policy: missing
     ports:

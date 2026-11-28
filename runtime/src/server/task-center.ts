@@ -7,6 +7,7 @@ import { nextTaskDates, normalizeTaskSchedule, normalizeTaskPolicy, SCHEDULE_GRA
 import type { AgentCredentialStore } from "./agent-credentials.js";
 import { assertAgentActive, isAgentRemoved } from "./agent-lifecycle.js";
 import { assertNoPendingAgentUpdate, hasPendingAgentUpdate } from "./machine-agent-updates-guard.js";
+import { TASK_RUNS_PENDING_MAINTENANCE } from "./machine-maintenance.js";
 import { assertNoPendingMachineInstallation, hasInstallationTable, pendingMachineInstallation, unresolvedInstallationSQL } from "./machine-installations-guard.js";
 import { assertNoPendingMachineUninstallation, hasUninstallationTable, pendingMachineUninstallation } from "./machine-uninstallations-guard.js";
 import { assertNoPrivilegedExecution, hasPrivilegedExecution } from "./privileged-execution-guard.js";
@@ -63,6 +64,7 @@ export class TaskRunStore {
       UNIQUE(task_id,host_id,request_id));
       CREATE INDEX IF NOT EXISTS task_runs_agent_state ON task_runs(agent_id,state,created_at);
       CREATE INDEX IF NOT EXISTS task_runs_host_state ON task_runs(host_id,state);
+      CREATE INDEX IF NOT EXISTS task_runs_pending_maintenance ON task_runs(state,agent_id,host_id) WHERE ${TASK_RUNS_PENDING_MAINTENANCE};
       CREATE TABLE IF NOT EXISTS task_schedules(task_id TEXT PRIMARY KEY,fingerprint TEXT NOT NULL,next_due TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS task_schedule_consumptions(task_id TEXT NOT NULL,run_at TEXT NOT NULL,consumed_at TEXT NOT NULL,outcome TEXT NOT NULL,PRIMARY KEY(task_id,run_at));`);
     deps.db.exec("CREATE INDEX IF NOT EXISTS task_runs_retry_scan ON task_runs(state,auto_retry_closed,finished_at)");

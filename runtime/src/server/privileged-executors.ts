@@ -15,6 +15,7 @@ import { assertNoPendingMachineInstallation } from "./machine-installations-guar
 import { assertNoPendingMachineUninstallation } from "./machine-uninstallations-guard.js";
 import { assertNoPendingAgentRuntime } from './machine-agent-runtime-guard.js';
 import { assertNoPendingAgentUpdate } from "./machine-agent-updates-guard.js";
+import { PRIVILEGED_JOBS_PENDING_MAINTENANCE } from "./machine-maintenance.js";
 import { assertNoDockerInstallation } from "./machine-docker-guard.js";
 import { hasPendingExecutorLifecycle } from "./privileged-execution-guard.js";
 import type { TaskRunStore } from "./task-center.js";
@@ -114,6 +115,7 @@ export class PrivilegedExecutorStore {
       CREATE INDEX IF NOT EXISTS privileged_jobs_host ON privileged_jobs(machine_id,state);
       CREATE INDEX IF NOT EXISTS privileged_jobs_queued_expiry ON privileged_jobs(expires_at,id) WHERE state='queued';
       CREATE INDEX IF NOT EXISTS privileged_jobs_lease_expiry ON privileged_jobs(lease_expires_at,id) WHERE state='running';
+      CREATE INDEX IF NOT EXISTS privileged_jobs_pending_maintenance ON privileged_jobs(state,agent_id,machine_id) WHERE ${PRIVILEGED_JOBS_PENDING_MAINTENANCE};
       CREATE TABLE IF NOT EXISTS privileged_start_permits(job_id TEXT NOT NULL,step_id TEXT NOT NULL,executor_nonce TEXT NOT NULL,permit_id TEXT NOT NULL UNIQUE,permit_jws TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(job_id,step_id),UNIQUE(job_id,executor_nonce));
       CREATE TABLE IF NOT EXISTS privileged_request_nonces(executor_id TEXT NOT NULL,request_id TEXT NOT NULL,request_sha256 TEXT NOT NULL,response_enc TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(executor_id,request_id));
       CREATE TABLE IF NOT EXISTS privileged_audit(id TEXT PRIMARY KEY,machine_id TEXT NOT NULL,job_id TEXT NOT NULL DEFAULT '',actor_id TEXT NOT NULL,event TEXT NOT NULL,created_at TEXT NOT NULL,detail_json TEXT NOT NULL DEFAULT '{}');

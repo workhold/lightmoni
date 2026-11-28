@@ -5,6 +5,12 @@ import { blockingAgentJobSQL } from './agent-job-fence.js';
 
 const has = (db: Dependencies['db'], table: string) => !!db.get("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", table);
 
+export const TASK_RUNS_PENDING_MAINTENANCE = "state IN ('queued','running','unknown') AND (state<>'unknown' OR (resolved_at='' AND superseded_by=''))";
+export const PRIVILEGED_JOBS_PENDING_MAINTENANCE = "state IN ('queued','running','unknown') AND (state<>'unknown' OR resolved_at='')";
+
+export const TASK_RUNS_MAINTENANCE_QUERY = `SELECT * FROM task_runs WHERE (agent_id=? OR (?<>'' AND host_id=?)) AND ${TASK_RUNS_PENDING_MAINTENANCE}`;
+export const PRIVILEGED_JOBS_MAINTENANCE_QUERY = `SELECT * FROM privileged_jobs WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND ${PRIVILEGED_JOBS_PENDING_MAINTENANCE}`;
+
 /** Queued work has no side effects yet and its claim path is fenced by maintenance. */
 const unclaimed = (row:any) => row.state==='queued' && !row.started_at && !row.lease_id && !row.lease_hash
   && !row.lease_expires_at && (!('attempts' in row) || row.attempts===0);
@@ -21,9 +27,9 @@ export function maintenanceWorkBusy(deps: Pick<Dependencies,'db'|'decrypt'>, age
   const {db}=deps;
   if(!agent&&machine)agent=db.get<any>('SELECT agent_id FROM managed_machines WHERE id=?',machine)?.agent_id??'';
   if(has(db,'machine_executor_bootstraps')&&db.all<any>("SELECT * FROM machine_executor_bootstraps WHERE (agent_id=? OR (?<>'' AND machine_id=?))",agent,machine,machine).some(unresolvedExecutorBootstrap))return true;
-  if(has(db,'task_runs')&&db.all<any>("SELECT * FROM task_runs WHERE (agent_id=? OR (?<>'' AND host_id=?)) AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='' AND superseded_by=''))",agent,machine,machine).some(t=>!unclaimed(t)&&!ignored(override,'task_run',t)))return true;
+  if(has(db,'task_runs')&&db.all<any>(TASK_RUNS_MAINTENANCE_QUERY,agent,machine,machine).some(t=>!unclaimed(t)&&!ignored(override,'task_run',t)))return true;
   if(has(db,'agent_jobs')&&db.all<any>(`SELECT * FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(db)}`,agent).some(j=>!unclaimed(j)&&!ignored(override,'agent_job',j)))return true;
-  return has(db,'privileged_jobs')&&db.all<any>("SELECT * FROM privileged_jobs WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND (state IN ('queued','running') OR (state='unknown' AND resolved_at=''))",agent,machine,machine).some(j=>!unclaimed(j)&&!ignored(override,'privileged_job',j));
+  return has(db,'privileged_jobs')&&db.all<any>(PRIVILEGED_JOBS_MAINTENANCE_QUERY,agent,machine,machine).some(j=>!unclaimed(j)&&!ignored(override,'privileged_job',j));
 }
 
 /** Read-only detail for actionable 409s. Never used as a gate. */
@@ -33,9 +39,9 @@ export function maintenanceBlockers(deps: Pick<Dependencies,'db'|'decrypt'>, age
   const out: MaintenanceBlocker[]=[];
   const push=(kind:MaintenanceBlocker['kind'],rows:any[],state:(row:any)=>string)=>{for(const row of rows){if(out.length>=limit)return;out.push({kind,id:String(row.id),state:state(row)});}};
   if(has(db,'machine_executor_bootstraps'))push('executor_bootstrap',db.all<any>("SELECT * FROM machine_executor_bootstraps WHERE (agent_id=? OR (?<>'' AND machine_id=?))",agent,machine,machine).filter(unresolvedExecutorBootstrap),row=>String(row.status));
-  if(has(db,'task_runs'))push('task_run',db.all<any>("SELECT * FROM task_runs WHERE (agent_id=? OR (?<>'' AND host_id=?)) AND (state IN ('queued','running') OR (state='unknown' AND resolved_at='' AND superseded_by=''))",agent,machine,machine).filter(t=>!unclaimed(t)),row=>String(row.state));
+  if(has(db,'task_runs'))push('task_run',db.all<any>(TASK_RUNS_MAINTENANCE_QUERY,agent,machine,machine).filter(t=>!unclaimed(t)),row=>String(row.state));
   if(has(db,'agent_jobs'))push('agent_job',db.all<any>(`SELECT * FROM agent_jobs WHERE agent_id=? AND ${blockingAgentJobSQL(db)}`,agent).filter(j=>!unclaimed(j)),row=>String(row.state));
-  if(has(db,'privileged_jobs'))push('privileged_job',db.all<any>("SELECT * FROM privileged_jobs WHERE (agent_id=? OR (?<>'' AND machine_id=?)) AND (state IN ('queued','running') OR (state='unknown' AND resolved_at=''))",agent,machine,machine),row=>String(row.state));
+  if(has(db,'privileged_jobs'))push('privileged_job',db.all<any>(PRIVILEGED_JOBS_MAINTENANCE_QUERY,agent,machine,machine),row=>String(row.state));
   return out;
 }
 
