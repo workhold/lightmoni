@@ -182,7 +182,7 @@ export function monitoringTools(
                   y: { type: "integer", minimum: 0 },
                   w: { type: "integer", minimum: 2, maximum: 12, description: "The sum of x and w must be at most 12." },
                   h: { type: "integer", minimum: 3, maximum: 40 },
-                }, ["x", "y", "w", "h"]),
+                }),
               },
               ["title", "type", "queries"],
             ),

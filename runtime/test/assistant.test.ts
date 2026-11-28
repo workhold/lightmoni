@@ -746,9 +746,9 @@ test("monitoring tools use shared bounded queries, accurate failures and review-
     ),
     /fixture query error/,
   );
-  const draft = await tools
-    .find((t) => t.name === "draft_dashboard")!
-    .execute(
+  const dashboardTool = tools.find((t) => t.name === "draft_dashboard")!;
+  assert.deepEqual(dashboardTool.schema.properties.panels.items.properties.grid.required, []);
+  const draft = await dashboardTool.execute(
       {
         title: "test",
         panels: [
