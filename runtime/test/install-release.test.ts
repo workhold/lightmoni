@@ -20,7 +20,8 @@ import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { rewriteMaintenancePaths, writeMaintenanceStatShim,inlineFixtureCommands } from "./helpers/maintenance-shell.js";
 const repo = resolve(import.meta.dirname, "../.."),
-  artifact = "lightmoni-agent_0.1.0_linux_amd64.tar.gz";
+  version = JSON.parse(readFileSync(join(repo, "package.json"), "utf8")).version,
+  artifact = `lightmoni-agent_${version}_linux_amd64.tar.gz`;
 /** Execute the real shell installer with every writable absolute destination
  * rewritten into one temporary root. Root/Linux/systemd/install/checksum/mv are
  * command shims. The service-user check examines POSIX mode bits rather than

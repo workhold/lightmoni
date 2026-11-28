@@ -1,3 +1,4 @@
+import { createUUID } from '../../shared/uuid';
 import {monitoringText,type MonitoringLanguage} from '../monitoring-translations.ts';
 import type {Parameter, SQLQuery, TimeRange, QueryFrame, QueryResult} from '../../shared/types';
 import {dateMath,rangeUtil} from '@grafana/data';
@@ -162,7 +163,7 @@ export function bindQueries(queries:DashboardQuery[],variables:Variable[],values
 }
 export function newPanel(template?:Template,index=0,language:MonitoringLanguage='zh-CN'):Panel {
  const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
-return {id:crypto.randomUUID(),title:template?.title??l("新面板"),type:template?.type??'line',queries:[{refId:'A',sql:template?.sql??'',params:{}}],options:{x:'time',y:'value',show_points:false,query_interval:defaultQueryInterval,...template?.options},grid:{x:(index%2)*6,y:Math.floor(index/2)*6,w:6,h:6}};}
+return {id:createUUID(),title:template?.title??l("新面板"),type:template?.type??'line',queries:[{refId:'A',sql:template?.sql??'',params:{}}],options:{x:'time',y:'value',show_points:false,query_interval:defaultQueryInterval,...template?.options},grid:{x:(index%2)*6,y:Math.floor(index/2)*6,w:6,h:6}};}
 export function numeric(value:unknown,approximate=false,language:MonitoringLanguage='zh-CN'):number|null{
  const l=(text:string,...values:unknown[])=>monitoringText(text,language,...values);
 

@@ -1,3 +1,4 @@
+import { createUUID } from '../../shared/uuid';
 import {useMonitoringI18n} from '../monitoring-i18n';
 import {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {DownOutlined,DragOutlined,EditOutlined,MoreOutlined} from '@ant-design/icons';
@@ -32,7 +33,7 @@ export default function PanelCard({panel,variables,values,choices,range,tick,edi
  const inputs=JSON.stringify({queries:binding.queries,bindingError:binding.error,range,tick,retry,interval:interval.value,intervalError:interval.error,measured:queryWidth!==undefined});
  useEffect(()=>{const controller=new AbortController(),generation=++sequence.current;setLoading(true);let query:QueryRequest;
   if(queryWidth===undefined)return;
-  try {if(interval.error)throw new Error(interval.error);if(binding.error)throw new Error(binding.error);query={request_id:crypto.randomUUID(),range,interval_ms:interval.value,queries:binding.queries,source:'dashboard'};setRequest(query);if(!query.queries.length){setDisplayed(undefined);setLoading(false);return;}}
+  try {if(interval.error)throw new Error(interval.error);if(binding.error)throw new Error(binding.error);query={request_id:createUUID(),range,interval_ms:interval.value,queries:binding.queries,source:'dashboard'};setRequest(query);if(!query.queries.length){setDisplayed(undefined);setLoading(false);return;}}
   catch(err){setError((err as Error).message);setLoading(false);return;}
   void post<QueryResponse>('/query',query,controller.signal).then(result=>{if(generation!==sequence.current)return;const aligned=result.results.flatMap(r=>r.frames).map(f=>f.meta?.metric_window_alignment as {range:TimeRange;interval_ms:number}|undefined).find(Boolean);setDisplayed({response:result,range:aligned?.range??query.range,intervalMS:aligned?.interval_ms??query.interval_ms??0,bucketedRefs:query.queries.filter(item=>hasTimeBuckets(item.sql)).map(item=>item.refId)});setError('');resultCallback.current?.(result,query);setUpdated(new Date().toLocaleTimeString());}).catch(err=>{if(!controller.signal.aborted&&generation===sequence.current)setError((err as Error).message);}).finally(()=>{if(generation===sequence.current)setLoading(false);});
   return()=>{controller.abort();};

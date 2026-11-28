@@ -1,3 +1,4 @@
+import { createUUID } from '../../shared/uuid';
 import {useI18n} from '../../shared/i18n';
 import type {Translator} from '../../shared/i18n';
 import {chinese} from '../alerts/translation';
@@ -33,7 +34,7 @@ export interface AssistantPanelProps {
   onSQL?: (sql: string) => void;
 }
 
-interface QueuedTurn { id: string; text: string; attachments: Attachment[]; context: AssistantContext }
+interface QueuedTurn { id: string; text: string; attachments: Attachment[]; context: AssistantContext; retry?: boolean }
 // A dropped stream does not mean a dead turn: the server keeps running and
 // persisting events, so the UI polls the session until a terminal event lands.
 const RECOVERY_POLL_MS = 2000, RECOVERY_FAILURES = 3, RECOVERY_LIMIT_MS = 30 * 60_000;
@@ -334,11 +335,17 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
 
   const navigate=useNavigate();
   const [config, setConfig] = useState<AssistantConfig>();
+  const [configLoading, setConfigLoading] = useState(true);
+  const [configError, setConfigError] = useState('');
+  const [configRefresh, setConfigRefresh] = useState(0);
   const [user, setUser] = useState<User>();
   const [tables, setTables] = useState<CatalogTable[]>([]);
+  const [catalogUnavailable, setCatalogUnavailable] = useState(false);
+  const [catalogRefresh, setCatalogRefresh] = useState(0);
   const [sessions, setSessions] = useState<AssistantSession[]>([]);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [events, setEvents] = useState<AssistantEvent[]>([]);
+  const [sessionStatus, setSessionStatus] = useState<AssistantSession['status']>();
   const [text, setText] = useState(initialPrompt ?? '');
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [attachmentError, setAttachmentError] = useState('');
@@ -349,7 +356,8 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const [runningIds, setRunningIds] = useState<string[]>([]);
   const [recoveringIds, setRecoveringIds] = useState<string[]>([]);
   const [queueVersion, setQueueVersion] = useState(0);
-  const [loading, setLoading] = useState(true);
+  const [openingSession, setOpeningSession] = useState(false);
+  const loading = configLoading || openingSession;
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -381,26 +389,54 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   const drafts = useRef(new Map<string,{text:string;attachments:Attachment[]}>());
   const fileInput = useRef<HTMLInputElement>(null);
   const previewController = useRef<AbortController | null>(null);
-  const timeline = useMemo(() => assistantTimeline(events,language), [events,language]);
-  const turns = useMemo(() => timeline, [timeline]);
+  const turns = useMemo(() => assistantTimeline(events, language, sessionStatus === 'failed'), [events, language, sessionStatus]);
   const table = tables.find(item => item.name === context.table);
-  const busy = creating || (!!sessionId && (activeTurns.current.has(sessionId) || runningIds.includes(sessionId)));
+  const sessionRunning = !!sessionId && (activeTurns.current.has(sessionId) || runningIds.includes(sessionId) || sessionStatus === 'running');
+  const busy = creating || sessionRunning;
   const queue = sessionId ? queuedTurns.current.get(sessionId) ?? [] : [];
   void queueVersion;
 
-  async function refreshSessions() { const data = await api<{ items: AssistantSession[] }>('/assistant/sessions'); setSessions(data.items); setRunningIds(previous => { const ids = data.items.filter(item => item.status === 'running').map(item => item.id); return previous.length === ids.length && ids.every(id => previous.includes(id)) ? previous : ids; }); return data; }
+  async function refreshSessions(signal?: AbortSignal) {
+    const data = await api<{ items: AssistantSession[] }>('/assistant/sessions', { signal });
+    if (signal?.aborted) return;
+    setSessions(data.items);
+    setRunningIds(data.items.filter(item => item.status === 'running').map(item => item.id));
+  }
   useEffect(() => {
-    let alive = true;
-    Promise.all([api<AssistantConfig>('/assistant/config'), api<{ items: AssistantSession[] }>('/assistant/sessions'), api<User>('/auth/me'), api<CatalogTable[]>('/catalog/tables')]).then(async ([model, history, actor, catalog]) => {
-      if (!alive) return;
-      setConfig(model); setSessions(history.items); setUser(actor); setTables(Array.isArray(catalog) ? catalog : []); setCodeWorkspace(initialContext?.code_workspace ?? model.code_workspace ?? '.');
-      setRunningIds(previous => { const ids = history.items.filter(item => item.status === 'running').map(item => item.id); return previous.length === ids.length && ids.every(id => previous.includes(id)) ? previous : ids; });
-    }).catch(problem => { if (alive) setError(errorText(problem,t)); }).finally(() => { if (alive) setLoading(false); });
-    const timer = window.setInterval(() => {
-      if (!alive) return;
-      void refreshSessions().catch(() => {});
-    }, 3000);
-    return () => { alive = false; window.clearInterval(timer); };
+    const controller = new AbortController();
+    const { signal } = controller;
+    setConfigError('');
+    setConfigLoading(true);
+    void api<AssistantConfig>('/assistant/config', { signal }).then(model => {
+      if (signal.aborted) return;
+      setConfig(model);
+      setCodeWorkspace(initialContext?.code_workspace ?? model.code_workspace ?? '.');
+    }).catch(problem => { if (!signal.aborted) setConfigError(errorText(problem,t)); })
+      .finally(() => { if (!signal.aborted) setConfigLoading(false); });
+    return () => controller.abort();
+  }, [configRefresh]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    void api<CatalogTable[]>('/catalog/tables', { signal }).then(catalog => {
+      if (signal.aborted) return;
+      setTables(Array.isArray(catalog) ? catalog : []);
+      setCatalogUnavailable(false);
+    }).catch(() => { if (!signal.aborted) setCatalogUnavailable(true); });
+    return () => controller.abort();
+  }, [catalogRefresh]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const { signal } = controller;
+    void api<User>('/auth/me', { signal }).then(actor => { if (!signal.aborted) setUser(actor); }).catch(() => {});
+    let timer: number | undefined;
+    const poll = async (initial = false) => {
+      try { await refreshSessions(AbortSignal.any([signal, AbortSignal.timeout(10000)])); }
+      catch (problem) { if (initial && !signal.aborted) setError(errorText(problem,t)); }
+      finally { if (!signal.aborted) timer = window.setTimeout(poll, 3000); }
+    };
+    void poll(true);
+    return () => { controller.abort(); window.clearTimeout(timer); };
   }, []);
   useEffect(()=>{
     const query=window.matchMedia('(max-width: 1080px)');
@@ -417,62 +453,92 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   async function loadSession(id: string) {
     const version=++selectionVersion.current;
     drafts.current.set(selectedSession.current ?? 'new', {text,attachments});
-    setError(''); setLoading(true);
-    try { const session = await api<AssistantSession>(`/assistant/sessions/${encodeURIComponent(id)}`); if(version!==selectionVersion.current)return; selectedSession.current=id; setSessionId(id); const merged=mergeEvents(session.events ?? [],eventCache.current.get(id)??[]); eventCache.current.set(id,merged); setEvents(merged); const draft=drafts.current.get(id); setText(draft?.text??'');setAttachments(draft?.attachments??[]);setHistoryOpen(false); }
-    catch (problem) { if(version===selectionVersion.current)setError(errorText(problem,t)); } finally { if(version===selectionVersion.current)setLoading(false); }
+    setError(''); setOpeningSession(true);
+    try {
+      const session = await fetchSession(id, AbortSignal.timeout(10000));
+      if (version !== selectionVersion.current) return;
+      selectedSession.current = id;
+      setSessionId(id);
+      applySessionSnapshot(session);
+      const draft = drafts.current.get(id);
+      setText(draft?.text ?? '');
+      setAttachments(draft?.attachments ?? []);
+      setHistoryOpen(false);
+    } catch (problem) { if (version === selectionVersion.current) setError(errorText(problem,t)); }
+    finally { if (version === selectionVersion.current) setOpeningSession(false); }
+  }
+
+  function applySessionSnapshot(session: AssistantSession) {
+    const stored = session.events ?? [];
+    const lastStored = stored.at(-1)?.sequence ?? -1;
+    const events = [...stored, ...(eventCache.current.get(session.id) ?? []).filter(event => event.sequence > lastStored)];
+    eventCache.current.set(session.id, events);
+    if (selectedSession.current === session.id) {
+      setEvents(events);
+      setSessionStatus(session.status);
+    }
   }
 
   function updateQueue(id:string, items:QueuedTurn[]) { queuedTurns.current.set(id,items); setQueueVersion(value=>value+1); }
-  function takeNext(id:string) { const items=queuedTurns.current.get(id)??[]; const [next,...remaining]=items; if(next)updateQueue(id,remaining); return next; }
-  /** Follow a turn whose stream dropped: poll until a terminal event lands. */
-  async function recoverTurn(id:string, signal:AbortSignal): Promise<boolean> {
+  function takeNext(id: string) {
+    const [next, ...remaining] = queuedTurns.current.get(id) ?? [];
+    if (!next || next.retry) return;
+    updateQueue(id, remaining);
+    return next;
+  }
+
+  async function recoverTurn(id: string, requestID: string, turnID: string | undefined, signal: AbortSignal) {
     setRecoveringIds(previous=>previous.includes(id)?previous:[...previous,id]);
     const started=Date.now();
-    let failures=0;
+    let failures = 0, missing = 0;
     try {
       while(Date.now()-started<RECOVERY_LIMIT_MS) {
-        if(signal.aborted)return false;
         await new Promise(resolve=>setTimeout(resolve,RECOVERY_POLL_MS));
+        if (signal.aborted) break;
         try {
-          const session=await fetchSession(id,signal);
-          failures=0;
-          const merged=mergeEvents(eventCache.current.get(id)??[],session.events??[]);
-          eventCache.current.set(id,merged);
-          if(selectedSession.current===id)setEvents(merged);
-          const last=merged.at(-1);
-          if(last&&TERMINAL_EVENT_TYPES.includes(last.type))return true;
-          // A restart or crash leaves no terminal event; the derived session
-          // status leaving "running" means nothing is left to wait for.
-          if(session.status&&session.status!=='running')return true;
-        } catch (problem) {
-          if(signal.aborted)return false;
-          if(++failures>=RECOVERY_FAILURES)return false;
+          const session = await fetchSession(id, AbortSignal.any([signal, AbortSignal.timeout(10000)]));
+          failures = 0;
+          applySessionSnapshot(session);
+          const stored = session.events ?? [];
+          turnID ??= stored.find(event => event.type === 'user.message' && event.data.request_id === requestID)?.turn_id;
+          if (turnID) {
+            const finished = stored.some(event => event.turn_id === turnID && TERMINAL_EVENT_TYPES.includes(event.type));
+            if (finished || session.status && session.status !== 'running') return { accepted: true, settled: true };
+          } else if (++missing >= 2) {
+            break;
+          }
+        } catch {
+          if (signal.aborted || ++failures >= RECOVERY_FAILURES) break;
         }
       }
-      return false;
+      return { accepted: !!turnID, settled: false };
     } finally { setRecoveringIds(previous=>previous.filter(value=>value!==id)); }
   }
   async function runTurn(id:string, item:QueuedTurn) {
     if (activeTurns.current.has(id)) return;
     const abort = new AbortController(); activeTurns.current.set(id,abort); setRunningIds(previous=>[...new Set([...previous,id])]);
-    let accepted=false, settled=false;
+    let turnID: string | undefined;
+    let settled = false;
     try {
       await streamTurn(id,item.text,item.context,event=>{
-        if(event.type==='user.message')accepted=true;
+        turnID ??= event.turn_id;
         const merged=mergeEvents(eventCache.current.get(id)??[],[event]); eventCache.current.set(id,merged);
-        if(selectedSession.current===id)setEvents(merged);
-      },abort.signal,language,item.attachments);
-      settled=true;
+        if (selectedSession.current === id) { setSessionStatus('running'); setEvents(merged); }
+      },abort.signal,language,item.attachments,item.id);
+      settled = true;
     } catch (problem) {
-      const dropped=problem instanceof TurnStreamError&&problem.code==='disconnected';
-      if(dropped&&!abort.signal.aborted&&await recoverTurn(id,abort.signal))settled=true;
-      else {
-        if (!abort.signal.aborted) setError(errorText(problem,t));
-        if (!accepted && !abort.signal.aborted) updateQueue(id,[item,...(queuedTurns.current.get(id)??[])]);
+      let accepted = !!turnID;
+      if (problem instanceof TurnStreamError && problem.code !== 'http' && !abort.signal.aborted) {
+        const recovered = await recoverTurn(id, item.id, turnID, abort.signal);
+        accepted = recovered.accepted || problem.code === 'accepted';
+        settled = recovered.settled;
+      }
+      if (!settled && !abort.signal.aborted) {
+        if (!accepted) updateQueue(id, [{ ...item, retry: true }, ...(queuedTurns.current.get(id) ?? [])]);
+        if (selectedSession.current === id) setError(accepted ? errorText(problem,t) : t('提交未确认，消息保留在待发送队列。','Submission was not confirmed. The message is still in the queue.') + ' ' + errorText(problem,t));
       }
     } finally {
-      try { const session = await api<AssistantSession>(`/assistant/sessions/${encodeURIComponent(id)}`); const merged=mergeEvents(session.events??[],eventCache.current.get(id)??[]); eventCache.current.set(id,merged); if(selectedSession.current===id)setEvents(merged); } catch { /* Keep received progress. */ }
-      void refreshSessions().catch(problem => setError(errorText(problem,t)));
+      try { applySessionSnapshot(await fetchSession(id, AbortSignal.timeout(10000))); } catch { /* Keep received progress. */ }
       const next=settled?takeNext(id):undefined;
       activeTurns.current.delete(id);
       if(next)void runTurn(id,next);
@@ -480,24 +546,50 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     }
   }
 
+  const followingSession = !!sessionId && !activeTurns.current.has(sessionId) &&
+    (sessionRunning || turns.at(-1)?.status === 'running');
+  useEffect(() => {
+    if (!sessionId || !followingSession) return;
+    const id = sessionId;
+    const controller = new AbortController();
+    const { signal } = controller;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const session = await fetchSession(id, AbortSignal.any([signal, AbortSignal.timeout(10000)]));
+        if (signal.aborted || selectedSession.current !== id || activeTurns.current.has(id)) return;
+        applySessionSnapshot(session);
+        if (session.status && session.status !== 'running') {
+          setRunningIds(previous => previous.filter(value => value !== id));
+          const next = takeNext(id);
+          if (next) void runTurn(id, next);
+          return;
+        }
+      } catch { /* Retain the last observation and try again. */ }
+      if (!signal.aborted) timer = window.setTimeout(poll, RECOVERY_POLL_MS);
+    };
+    void poll();
+    return () => { controller.abort(); window.clearTimeout(timer); };
+  }, [sessionId, followingSession]);
+
   async function send(value = text) {
     const prompt=value.trim()||(attachments.length?t('请分析这些附件','Analyze these attachments'):'');
     if (!prompt || !config?.enabled || readingAttachment || creatingRef.current) return;
     const frozenContext = boundedMonitoringContext({ ...context, range: context.range ?? rangeFor(context.query?.lookback_hours ?? lookback) });
     delete frozenContext.code_workspace;
     if (user?.role === 'admin' && config.code_tasks_enabled) frozenContext.code_workspace = codeWorkspace.trim() || '.';
-    const item:QueuedTurn={id:crypto.randomUUID(),text:prompt,attachments:[...attachments],context:frozenContext};
+    const item:QueuedTurn={id:createUUID(),text:prompt,attachments:[...attachments],context:frozenContext};
     let id=sessionId;
     if(!id){
       creatingRef.current=true;
       ++selectionVersion.current;
       setCreating(true);
-      try { const session=await api<AssistantSession>('/assistant/sessions',{method:'POST',body:JSON.stringify({title:item.text.slice(0,60),category:newCategory})}); id=session.id; selectedSession.current=id;setSessionId(id);setSessions(previous=>[session,...previous]);setEvents([]);eventCache.current.set(id,[]); }
+      try { const session=await api<AssistantSession>('/assistant/sessions',{method:'POST',body:JSON.stringify({title:item.text.slice(0,60),category:newCategory})}); id=session.id; selectedSession.current=id;setSessionId(id);setSessions(previous=>[session,...previous]);applySessionSnapshot(session); }
       catch(problem){setError(errorText(problem,t));return;}
       finally{creatingRef.current=false;setCreating(false);}
     }
     setText('');setAttachments([]);setAttachmentError('');drafts.current.set(id,{text:'',attachments:[]});setError('');
-    if(activeTurns.current.has(id)){updateQueue(id,[...(queuedTurns.current.get(id)??[]),item]);return;}
+    if(activeTurns.current.has(id)||sessionRunning){updateQueue(id,[...(queuedTurns.current.get(id)??[]),item]);return;}
     void runTurn(id,item);
   }
 
@@ -511,8 +603,8 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     if(!sessionId)return;
     const items=queuedTurns.current.get(sessionId)??[],index=items.findIndex(item=>item.id===itemId);
     if(index<0)return;
-    updateQueue(sessionId,[items[index],...items.filter(item=>item.id!==itemId)]);
-    if(activeTurns.current.has(sessionId))await cancel(sessionId);
+    updateQueue(sessionId,[{ ...items[index], retry: false },...items.filter(item=>item.id!==itemId)]);
+    if(sessionRunning)await cancel(sessionId);
     else {const next=takeNext(sessionId);if(next)void runTurn(sessionId,next);}
   }
   function removeQueued(itemId:string){if(sessionId)updateQueue(sessionId,(queuedTurns.current.get(sessionId)??[]).filter(item=>item.id!==itemId));}
@@ -528,7 +620,6 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   function openSettings() { navigate('/admin?tab=models'); }
 
   const selectedSessionData=sessions.find(session=>session.id===sessionId);
-  const sessionRunning=!!sessionId&&(activeTurns.current.has(sessionId)||runningIds.includes(sessionId));
   const recoveringNow=!!sessionId&&recoveringIds.includes(sessionId);
   const runningTurn=sessionRunning?turns.filter(turn=>turn.status==='running').at(-1):undefined;
   const runningTool=runningTurn?.tools.filter(tool=>tool.status==='running').at(-1);
@@ -543,7 +634,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
   function updatePanel(index: number, update: Partial<DraftPanel>) { setDraft(previous => previous ? { ...previous, panels: previous.panels.map((panel, panelIndex) => panelIndex === index ? { ...panel, ...update } : panel) } : previous); setPreview({}); }
   async function previewDraft() {
     if (!draft) return; setPreviewing(true); setDraftError(''); const abort = new AbortController(); previewController.current = abort;
-    try { const result: Record<number, QueryResponse> = {}; for (let index = 0; index < draft.panels.length; index++) { result[index] = await api<QueryResponse>('/query', { method: 'POST', signal: abort.signal, body: JSON.stringify({ request_id: crypto.randomUUID(), range: draft.range ?? context.range ?? rangeFor(lookback), interval_ms: 60000, source: 'assistant-preview', queries: draft.panels[index].queries }) }); } setPreview(result); }
+    try { const result: Record<number, QueryResponse> = {}; for (let index = 0; index < draft.panels.length; index++) { result[index] = await api<QueryResponse>('/query', { method: 'POST', signal: abort.signal, body: JSON.stringify({ request_id: createUUID(), range: draft.range ?? context.range ?? rangeFor(lookback), interval_ms: 60000, source: 'assistant-preview', queries: draft.panels[index].queries }) }); } setPreview(result); }
     catch (problem) { if (!abort.signal.aborted) setDraftError(errorText(problem,t)); } finally { setPreviewing(false); previewController.current = null; }
   }
   async function saveDraft() {
@@ -555,7 +646,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
       setDraft(null); void message.success(t(`已保存大盘“${draft.title}”`,`Dashboard “${draft.title}” saved`));
     } catch (problem) { setDraftError(errorText(problem,t)); } finally { setDraftSaving(false); }
   }
-  function newConversation() { ++selectionVersion.current;setLoading(false);drafts.current.set(selectedSession.current??'new',{text,attachments});selectedSession.current=null;setSessionId(null);setEvents([]);const draft=drafts.current.get('new');setText(draft?.text??'');setAttachments(draft?.attachments??[]);setError('');setHistoryOpen(false); }
+  function newConversation() { ++selectionVersion.current;setOpeningSession(false);drafts.current.set(selectedSession.current??'new',{text,attachments});selectedSession.current=null;setSessionId(null);setSessionStatus(undefined);setEvents([]);const draft=drafts.current.get('new');setText(draft?.text??'');setAttachments(draft?.attachments??[]);setError('');setHistoryOpen(false); }
   const categoryLabel=(value?:string)=>value?.trim()?value.trim():t("未分类","Uncategorized");
   const baseCategories=useMemo(()=>[
     {key:'monitoring',value:t("监控","Monitoring")},
@@ -718,7 +809,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
     </div>;
   }
 
-  const scopeControls=<div className="lm-assistant-scope"><div className="lm-assistant-scope-heading"><strong>{t('分析范围与设置','Analysis scope and settings')}</strong>{config?.enabled&&<span>{config.model}</span>}</div><label>{t('数据表','Data table')}<Select showSearch allowClear placeholder={t('全部数据表','All data tables')} value={context.table} onChange={value => setContext(previous => ({ ...previous, table: value, service: undefined }))} options={tables.map(item => ({ value: item.name, label: item.name }))} /></label><label>{t('服务','Service')}<Select showSearch allowClear placeholder={t('全部服务','All services')} value={context.service} onChange={value => setContext(previous => ({ ...previous, service: value }))} options={(table?.services ?? [...new Set(tables.flatMap(item => item.services))]).map(service => ({ value: service, label: service }))} /></label>{context.range ? <div className="lm-assistant-scope-fixed">{t('当前页面时间范围','Current page time range')}</div> : <label>{t('时间范围','Time range')}<Select value={lookback} options={[{ value: .25, label: t('最近 15 分钟','Last 15 minutes') }, { value: 1, label: t('最近 1 小时','Last hour') }, { value: 6, label: t('最近 6 小时','Last 6 hours') }, { value: 24, label: t('最近 24 小时','Last 24 hours') }]} onChange={setLookback} /></label>}{user?.role === 'admin' && config?.code_tasks_enabled && <label>{t('代码工作区','Code workspace')}<Input aria-label={t('代码工作区','Code workspace')} value={codeWorkspace} onChange={event => setCodeWorkspace(event.target.value)} placeholder="." maxLength={512} /><small>{t('代码任务在隔离副本中运行，审批后应用修改。','Code tasks run in an isolated copy and apply changes after approval.')}</small></label>}{user?.role === 'admin' && <Button type="text" icon={<SettingOutlined/>} onClick={openSettings}>{t('模型连接设置','Model connection settings')}</Button>}</div>;
+  const scopeControls=<div className="lm-assistant-scope"><div className="lm-assistant-scope-heading"><strong>{t('分析范围与设置','Analysis scope and settings')}</strong>{config?.enabled&&<span>{config.model}</span>}</div>{catalogUnavailable && <Alert type="warning" showIcon title={t('暂时无法读取数据表','Data tables are temporarily unavailable')} action={<Button size="small" onClick={() => setCatalogRefresh(value => value + 1)}>{t('重试','Retry')}</Button>} />}<label>{t('数据表','Data table')}<Select showSearch allowClear placeholder={t('全部数据表','All data tables')} value={context.table} onChange={value => setContext(previous => ({ ...previous, table: value, service: undefined }))} options={tables.map(item => ({ value: item.name, label: item.name }))} /></label><label>{t('服务','Service')}<Select showSearch allowClear placeholder={t('全部服务','All services')} value={context.service} onChange={value => setContext(previous => ({ ...previous, service: value }))} options={(table?.services ?? [...new Set(tables.flatMap(item => item.services))]).map(service => ({ value: service, label: service }))} /></label>{context.range ? <div className="lm-assistant-scope-fixed">{t('当前页面时间范围','Current page time range')}</div> : <label>{t('时间范围','Time range')}<Select value={lookback} options={[{ value: .25, label: t('最近 15 分钟','Last 15 minutes') }, { value: 1, label: t('最近 1 小时','Last hour') }, { value: 6, label: t('最近 6 小时','Last 6 hours') }, { value: 24, label: t('最近 24 小时','Last 24 hours') }]} onChange={setLookback} /></label>}{user?.role === 'admin' && config?.code_tasks_enabled && <label>{t('代码工作区','Code workspace')}<Input aria-label={t('代码工作区','Code workspace')} value={codeWorkspace} onChange={event => setCodeWorkspace(event.target.value)} placeholder="." maxLength={512} /><small>{t('代码任务在隔离副本中运行，审批后应用修改。','Code tasks run in an isolated copy and apply changes after approval.')}</small></label>}{user?.role === 'admin' && <Button type="text" icon={<SettingOutlined/>} onClick={openSettings}>{t('模型连接设置','Model connection settings')}</Button>}</div>;
 
   return <div className={`lm-assistant ${compact ? 'is-compact' : ''}`}>
     {!compact && <aside className="lm-assistant-sidebar"><div className="lm-assistant-sidebar-title"><HistoryOutlined /><span>{t("对话历史","Conversation history")}</span></div>{historyContent()}</aside>}
@@ -741,7 +832,8 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
         <Button className="lm-workbench-inspector-toggle" type={inspectorOpen?'primary':'default'} size="small" icon={<PicRightOutlined/>} aria-pressed={inspectorOpen} onClick={()=>setInspectorOpen(value=>!value)}>{t('检查器','Inspector')}</Button>
       </header>
       {context.page&&<div className="lm-assistant-page-context"><span>{t("当前页面","Current page")}</span><strong>{context.dashboard_title??pageTitles[context.page.title]??context.page.title}</strong>{context.panels&&<Tag>{context.panels.length} {t("个面板"," panels")}</Tag>}{context.log_query?.keyword&&<Tag>{t("关键词：","Keyword: ")}{context.log_query.keyword}</Tag>}{!!context.selected_logs?.length&&<Tag>{t("已选日志","Selected log")}</Tag>}{context.query&&<Tag>{t("当前 SQL","Current SQL")}</Tag>}{context.context_truncated&&<Tag>{t("上下文已精简","Context trimmed")}</Tag>}</div>}
-      {!loading && !config?.enabled && <Alert type="info" showIcon title={t("连接 AI 模型后开始使用","Connect an AI model to get started")} description={user?.role === 'admin' ? t("填写模型服务地址和 API Key，自动获取模型并选择调用协议。密钥由后端保管。","Enter a model service URL and API key, fetch available models and choose the API protocol. Keys are stored by the backend.") : t("请联系管理员配置并启用 AI 模型。","Ask an administrator to configure and enable an AI model.")} action={user?.role === 'admin' ? <Button onClick={openSettings}>{t("配置模型","Configure model")}</Button> : undefined} />}
+      {configError && <Alert type="error" showIcon title={t('模型配置读取失败','Could not load model settings')} description={configError} action={<Button onClick={() => setConfigRefresh(value => value + 1)}>{t('重试','Retry')}</Button>} />}
+      {!loading && config && !config.enabled && <Alert type="info" showIcon title={t("连接 AI 模型后开始使用","Connect an AI model to get started")} description={user?.role === 'admin' ? t("填写模型服务地址和 API Key，自动获取模型并选择调用协议。密钥由后端保管。","Enter a model service URL and API key, fetch available models and choose the API protocol. Keys are stored by the backend.") : t("请联系管理员配置并启用 AI 模型。","Ask an administrator to configure and enable an AI model.")} action={user?.role === 'admin' ? <Button onClick={openSettings}>{t("配置模型","Configure model")}</Button> : undefined} />}
       {sessionRunning&&<div className="lm-assistant-runbar" role="status">
         <span className="lm-assistant-activity-indicator running" aria-hidden="true"/>
         {recoveringNow&&<span className="lm-assistant-runbar-recovery">{t('连接中断，正在恢复…','Connection lost, recovering…')}</span>}
@@ -779,7 +871,7 @@ export function AssistantPanel({ compact = false, initialContext, initialPrompt,
           {attachments.length>0&&<div className="lm-assistant-attachments">{attachments.map((attachment,index)=><span className="lm-assistant-attachment" key={`${index}-${attachment.name}`}>{attachment.kind==='pdf'?<FilePdfOutlined aria-hidden="true"/>:<PictureOutlined aria-hidden="true"/>}<span>{attachment.name}</span><button type="button" aria-label={t(`移除 ${attachment.name}`,`Remove ${attachment.name}`)} onClick={()=>setAttachments(previous=>previous.filter((_,i)=>i!==index))}><CloseOutlined/></button></span>)}</div>}
           <Input.TextArea aria-label={t("给 AI 助手的问题","Question for the AI assistant")} placeholder={t("询问日志中的异常，或描述你想创建的大盘…","Ask about log anomalies, or describe a dashboard to create…")} value={text} onChange={event => setText(event.target.value)} autoSize={{ minRows: 2, maxRows: 7 }} maxLength={16000} disabled={!config?.enabled || loading} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); void send(); } }} />
           {attachmentError&&<div className="lm-assistant-attachment-error" role="alert">{attachmentError}</div>}
-          <div className="lm-assistant-composer-actions"><div className="lm-assistant-composer-left"><Button type="text" icon={readingAttachment?<LoadingOutlined spin/>:<PaperClipOutlined/>} aria-label={t('添加图片或 PDF','Attach image or PDF')} disabled={!config?.enabled||readingAttachment||attachments.length>=4} onClick={()=>fileInput.current?.click()}/><Popover content={scopeControls} trigger="click" placement="top"><Button type="text" icon={<SlidersOutlined/>} aria-label={t('分析范围与设置','Analysis scope and settings')}/></Popover><Button type="text" className={compact?undefined:'lm-assistant-mobile-history'} icon={<HistoryOutlined/>} aria-label={t('对话历史','Conversation history')} onClick={()=>setHistoryOpen(true)}/><small>{t("图片与文本 PDF · Enter 发送 · Shift + Enter 换行","Images and text PDFs · Enter to send · Shift + Enter for a new line")}</small></div><div className="lm-assistant-composer-send">{busy&&(text.trim()||attachments.length>0)&&<Button size="small" aria-label={t('加入队列','Queue turn')} disabled={creating||readingAttachment} onClick={()=>void send()}>{t('加入队列','Queue turn')}</Button>}{sessionId&&runningIds.includes(sessionId)?<button type="button" className="lm-assistant-send-button" aria-label={t('停止当前响应','Stop current response')} onClick={()=>void cancel()}><span className="lm-assistant-stop-square"/></button>:<button type="button" className="lm-assistant-send-button" aria-label={t('发送','Send')} disabled={(!text.trim()&&!attachments.length)||!config?.enabled||loading||creating||readingAttachment} onClick={()=>void send()}><ArrowUpOutlined/></button>}</div></div>
+          <div className="lm-assistant-composer-actions"><div className="lm-assistant-composer-left"><Button type="text" icon={readingAttachment?<LoadingOutlined spin/>:<PaperClipOutlined/>} aria-label={t('添加图片或 PDF','Attach image or PDF')} disabled={!config?.enabled||readingAttachment||attachments.length>=4} onClick={()=>fileInput.current?.click()}/><Popover content={scopeControls} trigger="click" placement="top"><Button type="text" icon={<SlidersOutlined/>} aria-label={t('分析范围与设置','Analysis scope and settings')}/></Popover><Button type="text" className={compact?undefined:'lm-assistant-mobile-history'} icon={<HistoryOutlined/>} aria-label={t('对话历史','Conversation history')} onClick={()=>setHistoryOpen(true)}/><small>{t("图片与文本 PDF · Enter 发送 · Shift + Enter 换行","Images and text PDFs · Enter to send · Shift + Enter for a new line")}</small></div><div className="lm-assistant-composer-send">{busy&&(text.trim()||attachments.length>0)&&<Button size="small" aria-label={t('加入队列','Queue turn')} disabled={creating||readingAttachment} onClick={()=>void send()}>{t('加入队列','Queue turn')}</Button>}{sessionRunning?<button type="button" className="lm-assistant-send-button" aria-label={t('停止当前响应','Stop current response')} onClick={()=>void cancel()}><span className="lm-assistant-stop-square"/></button>:<button type="button" className="lm-assistant-send-button" aria-label={t('发送','Send')} disabled={(!text.trim()&&!attachments.length)||!config?.enabled||loading||creating||readingAttachment} onClick={()=>void send()}><ArrowUpOutlined/></button>}</div></div>
         </div>
       </div>
     </main>

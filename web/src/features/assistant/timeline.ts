@@ -17,7 +17,7 @@ export function queryRangeFromTurn(turn: TurnView, draftCallId?: string): TimeRa
 }
 
 /** Pair by durable turn IDs, never by prompt text or response order. */
-export function assistantTimeline(events: AssistantEvent[],language:Language='zh-CN'): TurnView[] {
+export function assistantTimeline(events: AssistantEvent[],language:Language='zh-CN', interrupted = false): TurnView[] {
   const t=translator(language);
   const ordered = [...new Map(events.map(event => [event.sequence, event])).values()].sort((a, b) => a.sequence - b.sequence);
   const turns = new Map<string, TurnView>();
@@ -71,5 +71,18 @@ export function assistantTimeline(events: AssistantEvent[],language:Language='zh
       }
     }
   }
-  return [...turns.values()];
+  const result = [...turns.values()];
+  for (const [index, turn] of result.entries()) {
+    if (turn.status !== 'running' || index === result.length - 1 && !interrupted) continue;
+    turn.status = 'failed';
+    turn.compacting = false;
+    turn.error = t('响应中断，未收到最终结果。', 'The response was interrupted before a final result was recorded.');
+    for (const tool of turn.tools) {
+      if (tool.status === 'running') {
+        tool.status = 'error';
+        tool.result = { error: turn.error };
+      }
+    }
+  }
+  return result;
 }

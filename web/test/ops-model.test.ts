@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {filterApplicationsByState, resourceState, type Resource} from '../src/app/ops/model.js';
+import {filterApplicationsByState, resourceState, type Resource, type Run} from '../src/app/ops/model.js';
 import {installationState} from '../src/app/ops/install-state.js';
 
 const instance = (overrides: Record<string, unknown> = {}) => ({
@@ -130,4 +130,15 @@ test('installation summary follows observed state and retains historical unknown
   const historical = application({status: {...app.status, deployments: {...app.status.deployments, old: {enabled: false, desired_revision: 1}}, instances: [...app.status.instances, instance({id: 'old', cluster_id: 'old', state: 'unknown', desired_state: 'removed'})]}});
   assert.equal(resourceState(historical), 'running');
   assert.equal(installationState(historical), 'unknown');
+});
+
+test('installation history describes the current application revision only', () => {
+  const app = application({ status: {} });
+  const run = (state: string, resource_revision: number): Run => ({
+    id: state, resource_id: app.id, resource_revision, action: 'deploy', state,
+    agent_id: 'agent', created_at: '', updated_at: '', result: {},
+  });
+  assert.equal(installationState(app, [run('failed', app.revision - 1)]), 'configured');
+  assert.equal(installationState(app, [run('queued', app.revision)]), 'pending');
+  assert.equal(installationState(app, [run('cancelled', app.revision)]), 'cancelled');
 });

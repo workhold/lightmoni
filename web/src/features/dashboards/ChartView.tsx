@@ -1,3 +1,4 @@
+import { createUUID } from '../../shared/uuid';
 import {useMonitoringI18n} from '../monitoring-i18n';
 import {memo,useEffect,useMemo,useRef,useState} from 'react';
 import {Chart} from '@antv/g2';
@@ -69,7 +70,7 @@ function ChartView({panel,results,onBrush,intervalMS=0,bucketedRefs=[],range,onC
   const chart=chartRef.current??new Chart({container:node,autoFit:false,width:Math.max(1,node.clientWidth),height:Math.max(1,node.clientHeight)});
   chartRef.current=chart;chartNode.current=node;
   if(newInstance){
-   node.dataset.chartInstance=crypto.randomUUID();
+   node.dataset.chartInstance=createUUID();
    const buffer=new ChartFrameBuffer(node);frameBuffer.current=buffer;
    renderQueue.current=new ChartRefreshQueue({
     before:()=>buffer.capture(),

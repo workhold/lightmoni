@@ -1,25 +1,28 @@
 import type {Language} from '../../shared/i18n';
+import { api } from '../../shared/api.ts';
 import {translator} from '../alerts/translation.ts';
 import type { AssistantContext, AssistantEvent, AssistantSession, Attachment } from './types';
 
 /** Recognizable turn-stream failures so the UI can recover instead of erroring. */
 export class TurnStreamError extends Error {
-  readonly code: 'http' | 'protocol' | 'disconnected';
-  constructor(code: 'http' | 'protocol' | 'disconnected', message: string) {
+  readonly code: 'http' | 'protocol' | 'disconnected' | 'accepted';
+  constructor(code: TurnStreamError['code'], message: string) {
     super(message);
     this.code = code;
   }
 }
 
-export async function streamTurn(sessionId: string, text: string, context: AssistantContext | undefined, onEvent: (event: AssistantEvent) => void, signal: AbortSignal, language:Language='zh-CN', attachments: Attachment[]=[]): Promise<void> {
+export async function streamTurn(sessionId: string, text: string, context: AssistantContext | undefined, onEvent: (event: AssistantEvent) => void, signal: AbortSignal, language:Language='zh-CN', attachments: Attachment[]=[], requestID?: string): Promise<void> {
  const t=translator(language);
   const response = await fetch(`/api/v1/assistant/sessions/${encodeURIComponent(sessionId)}/turns`, {
     method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-    body: JSON.stringify({ text, context, ...(attachments.length ? {attachments} : {}) }), signal,
+    body: JSON.stringify({ text, context, request_id: requestID, ...(attachments.length ? {attachments} : {}) }), signal,
   }).catch(problem => { if (signal.aborted) throw problem; throw new TurnStreamError('disconnected', t('连接助手服务失败','Could not reach the assistant service')); });
   if (!response.ok) {
-    const body = await response.json().catch(() => ({})) as { error?: string };
-    throw new TurnStreamError('http', body.error ?? t(`AI 请求失败 (${response.status})`,`AI request failed (${response.status})`));
+    const body = await response.json().catch(() => ({})) as { error?: string; code?: string };
+    const code = body.code === 'turn_already_accepted' && response.status === 409 ? 'accepted'
+      : [502, 504].includes(response.status) ? 'disconnected' : 'http';
+    throw new TurnStreamError(code, body.error ?? t(`AI 请求失败 (${response.status})`,`AI request failed (${response.status})`));
   }
   if (!response.body || !response.headers.get('Content-Type')?.includes('text/event-stream')) throw new TurnStreamError('protocol', t("服务未返回有效的流式回复","The service did not return a valid streaming response"));
   const reader = response.body.getReader();
@@ -55,8 +58,6 @@ export async function streamTurn(sessionId: string, text: string, context: Assis
   } finally { reader.releaseLock(); }
 }
 
-export async function fetchSession(sessionId: string, signal?: AbortSignal): Promise<AssistantSession> {
-  const response = await fetch(`/api/v1/assistant/sessions/${encodeURIComponent(sessionId)}`, { credentials: 'include', signal });
-  if (!response.ok) throw new TurnStreamError('http', `session reload failed (${response.status})`);
-  return await response.json() as AssistantSession;
+export function fetchSession(sessionId: string, signal?: AbortSignal): Promise<AssistantSession> {
+  return api(`/assistant/sessions/${encodeURIComponent(sessionId)}`, { signal });
 }

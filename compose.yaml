@@ -1,16 +1,8 @@
 services:
   lightmoni:
-    image: docker.heyphp.com/lightmoni/lightmoni:v0.1.36-20261124-155030-amd64
+    image: docker.heyphp.com/lightmoni/lightmoni:v0.1.37-20261128-152850-amd64
+    platform: linux/amd64
     pull_policy: missing
-    build:
-      context: .
-      dockerfile: deploy/server/Dockerfile
-      args:
-        NPM_REGISTRY: ${LIGHTMONI_NPM_REGISTRY:-https://registry.npmjs.org}
-        NODE_DIST_URL: ${LIGHTMONI_NODE_DIST_URL:-https://nodejs.org/dist}
-        DEBIAN_MIRROR: ${LIGHTMONI_DEBIAN_MIRROR:-http://deb.debian.org/debian}
-        DEBIAN_SECURITY_MIRROR: ${LIGHTMONI_DEBIAN_SECURITY_MIRROR:-http://deb.debian.org/debian-security}
-        BUILD_REVISION: ${LIGHTMONI_BUILD_REVISION:-unknown}
     ports:
       - "${LIGHTMONI_BIND_ADDRESS:-0.0.0.0}:${LIGHTMONI_PORT:-8080}:8080"
     environment:

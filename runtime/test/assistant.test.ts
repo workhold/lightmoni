@@ -144,6 +144,29 @@ async function configure(f: any, cfg: any = config) {
   assert.equal(result.status, 200, result.raw);
   return result.data;
 }
+
+test("session review status follows native deployment and operation records", async t => {
+  let deploymentStatus = "awaiting_approval", operationState = "awaiting_approval";
+  const runtime: Runtime = async (_input, _signal, _tool, emit) => {
+    for (const [tool, id] of [["propose_service_deployment", "deployment"], ["propose_operations_action", "operation"]]) {
+      await emit({ type: "event", name: "tool.result", data: { tool, status: "success", value: { proposal: { id, status: "awaiting_approval" } } } });
+    }
+  };
+  const f = await fixture(t, {
+    runtime,
+    deployments: { assistantDeployment: () => ({ status: deploymentStatus }) } as AssistantOptions["deployments"],
+    operations: { getRun: () => ({ state: operationState, expires_at: new Date(at.getTime() + 60000).toISOString() }) } as AssistantOptions["operations"],
+  });
+  await configure(f);
+  const id = await session(f), path = `/sessions/${id}`;
+  assert.equal((await f.request(path + "/turns", "POST", { text: "prepare two plans" })).status, 200);
+  assert.equal((await f.request(path)).data.status, "needs_action");
+  deploymentStatus = "succeeded";
+  assert.equal((await f.request("/sessions")).data.items[0].status, "needs_action");
+  operationState = "queued";
+  assert.equal((await f.request(path)).data.status, "idle");
+  assert.equal((await f.request("/sessions")).data.items[0].status, "idle");
+});
 async function session(f: any) {
   const result = await f.request("/sessions", "POST", { title: "fixture" });
   assert.equal(result.status, 201, result.raw);
@@ -552,9 +575,17 @@ test("concurrent turn rejects, cancellation releases slot and accounts unknown c
   };
   const f = await fixture(t, { runtime });
   await configure(f);
-  const sid = await session(f),
-    turn = f.request("/sessions/" + sid + "/turns", "POST", { text: "wait" });
+  const sid = await session(f);
+  const path = `/sessions/${sid}`;
+  const input = { text: "wait", request_id: crypto.randomUUID() };
+  const turn = f.request(path + "/turns", "POST", input);
   await started;
+  const running = (await f.request(path)).data;
+  assert.equal(running.status, "running");
+  assert.equal(running.events[0].data.request_id, input.request_id);
+  const duplicate = await f.request(path + "/turns", "POST", input);
+  assert.equal(duplicate.status, 409);
+  assert.equal(duplicate.data.code, "turn_already_accepted");
   assert.equal(
     (await f.request("/sessions/" + sid + "/turns", "POST", { text: "second" }))
       .status,
@@ -566,6 +597,10 @@ test("concurrent turn rejects, cancellation releases slot and accounts unknown c
     true,
   );
   assert.match((await turn).raw, /turn.cancelled/);
+  const settled = (await f.request(path)).data;
+  assert.equal(settled.status, "idle");
+  assert.equal(settled.events.filter((event: { type: string }) => event.type === "user.message").length, 1);
+  assert.equal((await f.request(path + "/turns", "POST", input)).data.code, "turn_already_accepted");
   assert.equal(
     (await f.request("/sessions/" + sid + "/cancel", "POST", {})).data
       .cancelled,

@@ -18,7 +18,7 @@ func (s *state) collectSelfLocked(now time.Time) {
 	}
 	s.selfLast = now
 	values := map[string]float64{"heartbeat": 1, "pending_batches": float64(s.stats.PendingBatches), "pending_bytes": float64(s.stats.PendingBytes), "retried_batches": float64(s.stats.RetriedBatches), "dropped_records": float64(s.stats.DroppedRecords), "rejected_records": float64(s.stats.RejectedRecords), "invalid_records": float64(s.stats.InvalidRecords), "overflow_records": float64(s.stats.OverflowRecords)}
-	attributes := []*commonpb.KeyValue{kv("lightmoni.component", "sdk"), kv("sdk.language", "go"), kv("sdk.version", "0.1.36")}
+	attributes := []*commonpb.KeyValue{kv("lightmoni.component", "sdk"), kv("sdk.language", "go"), kv("sdk.version", "0.1.37")}
 	var ms []*metricpb.Metric
 	for name, value := range values {
 		ms = append(ms, &metricpb.Metric{Name: "lightmoni.sdk." + name, Data: &metricpb.Metric_Gauge{Gauge: &metricpb.Gauge{DataPoints: []*metricpb.NumberDataPoint{{TimeUnixNano: uint64(now.UnixNano()), Attributes: attributes, Value: &metricpb.NumberDataPoint_AsDouble{AsDouble: value}}}}}})

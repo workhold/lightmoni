@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DB } from "../src/shared/sqlite.js";
@@ -21,9 +21,10 @@ test("current SDK downloads expose the four record SDKs and reject stale legacy 
   const deps = { db, router, auth, externalURL: "https://monitor.example/base" } as Dependencies;
   registerSettings(deps);
   registerInstall(deps, directory);
+  const version = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version;
   for (const language of ["python", "ruby", "php", "go", "rust"])
-    writeFileSync(join(directory, `lightmoni-${language}-sdk_0.1.0.tar.gz`), language);
-  writeFileSync(join(directory, "lightmoni-sdk-0.1.0.tgz"), "typescript");
+    writeFileSync(join(directory, `lightmoni-${language}-sdk_${version}.tar.gz`), language);
+  writeFileSync(join(directory, `lightmoni-sdk-${version}.tgz`), "typescript");
   const server = createServer(async (req, res) => {
     if (!(await router.handle(req, res))) { res.writeHead(404); res.end(); }
   });
@@ -52,7 +53,7 @@ test("current SDK downloads expose the four record SDKs and reject stale legacy 
       assert.equal(await download.text(), pkg.id);
     }
     for (const language of ["php", "ruby"]) {
-      const stale = await fetch(endpoint + `/downloads/sdk/lightmoni-${language}-sdk_0.1.0.tar.gz`);
+      const stale = await fetch(endpoint + `/downloads/sdk/lightmoni-${language}-sdk_${version}.tar.gz`);
       assert.equal(stale.status, 404, language);
       await stale.text();
     }

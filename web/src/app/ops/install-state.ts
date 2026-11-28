@@ -1,4 +1,4 @@
-import {resourceState,type Resource,type Spec} from './model';
+import {resourceState,type Resource,type Run,type Spec} from './model';
 export const INSTALL_PHASES:Record<string,[string,string]>={queued:['等待执行','Queued'],leased:['已分配给 Agent','Leased to Agent'],accepted:['Agent 已接收','Agent accepted'],staging:['准备安装','Preparing'],activating:['安装执行中','Installing'],checking_docker:['检查 Docker','Checking Docker'],checking_ports:['检查端口','Checking ports'],preparing_images:['按来源准备镜像','Preparing images'],validating_config:['校验应用配置','Validating configuration'],starting_containers:['拉取镜像并启动容器','Pulling images and starting containers'],checking_health:['检查服务健康','Checking service health'],validating_gateway:['校验 OpenResty 配置','Validating OpenResty configuration'],starting_gateway:['启动 / 重载 OpenResty','Starting / reloading OpenResty'],restoring_previous:['恢复旧部署 / 清理失败安装','Restoring / cleaning up'],verifying:['验证执行结果','Verifying result'],succeeded:['执行成功','Succeeded'],failed:['执行失败','Failed'],unknown:['结果未知','Unknown result'],cancelled:['已取消','Cancelled'],running:['执行中','Running'],pending:['等待处理','Pending'],warning:['注意','Attention']};
 const DIAGNOSTICS:Record<string,[string,string,string,string]>={
  privileged_execution_pending:['主机有待完成或核对的任务','Host has a pending or unresolved execution','在操作日志检查该主机的执行记录；未知结果需先核对现场，再记录人工核对。','Check this host’s execution history. Verify the host before reconciling an unknown result.'],
@@ -52,11 +52,17 @@ export function installDiagnostic(value:unknown):[string,string,string,string]{
  const code=String(value??'').toLowerCase();
  return DIAGNOSTICS[code]??['未记录更详细的原因','No detailed cause was recorded','请根据错误码检查目标机器和应用配置；旧记录无法还原原始日志。','Inspect the target and configuration using the error code; older logs cannot be reconstructed.'];
 }
-export function installationState(resource:Resource):string{
+export function installationState(resource: Resource, runs: readonly Run[] = []): string {
  const nonRetired:Spec[]=(resource.status.instances??[]).filter((i:Spec)=>!i.retired);
  if(nonRetired.some((i:Spec)=>i.unresolved_run_id||i.state==='unknown'))return 'unknown';
  const observed=resourceState(resource);
  if(observed==='running')return 'succeeded';
- if(observed==='unverified'||observed==='unknown'||observed==='failed'||observed==='stopped'||observed==='pending')return observed;
+ if (observed === 'pending' || observed === 'configured') {
+  const install = runs.find(run => run.resource_revision === resource.revision && ['apply','deploy'].includes(run.action));
+  if (install?.state === 'failed' || install?.state === 'cancelled') return install.state;
+  if (install && ['queued', 'leased', 'running'].includes(install.state)) return 'pending';
+  return observed;
+ }
+ if (['unverified','unknown','failed','stopped','removed'].includes(observed)) return observed;
  return 'pending';
 }

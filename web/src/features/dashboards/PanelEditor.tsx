@@ -1,3 +1,4 @@
+import { createUUID } from '../../shared/uuid';
 import {useMonitoringI18n} from '../monitoring-i18n';
 import {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {ArrowLeftOutlined,PlayCircleOutlined,ReloadOutlined,SettingOutlined} from '@ant-design/icons';
@@ -35,7 +36,7 @@ export default function PanelEditor({initialTab="visualization",creating=false,i
  const previewResult=useCallback((response:QueryResponse,request:QueryRequest)=>{setPreviewResponse(response);setPreviewInterval(request.interval_ms);if(creating&&!mappedNewPanel.current&&frameFields(response.results).length){mappedNewPanel.current=true;setPanel(current=>adaptPanelType(current,current.type,response.results));}},[creating,language]);
  const run=()=>{if(!validateParams())return;try{validateQueryOptions(latestPanel.current.options,language);}catch(err){setError((err as Error).message);return;}const enabled=latestPanel.current.queries.filter(query=>query.enabled!==false);if(!enabled.length){setError(l("至少启用一条 SQL 查询"));return;}const empty=enabled.find(query=>!query.sql.trim());if(empty){setError(l("请填写查询 {0} 的 SQL",empty.refId));return;}setError('');setExecutedQueries(structuredClone(latestPanel.current.queries));setExecutedOptions(queryOptions(latestPanel.current.options));setTick(value=>value+1);};
  const close=()=>changed||alertsDirty?setDiscardOpen(true):onClose();
- const nextRef=(p:Panel)=>'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').find(ref=>!p.queries.some(q=>q.refId===ref))??crypto.randomUUID();
+ const nextRef=(p:Panel)=>'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').find(ref=>!p.queries.some(q=>q.refId===ref))??createUUID();
  const option=(key:string,value:unknown)=>setPanel(p=>({...p,options:{...p.options,[key]:value}}));
  const thresholds=(Array.isArray(panel.options.thresholds)?panel.options.thresholds:[]) as Threshold[],mappings=(Array.isArray(panel.options.value_mappings)?panel.options.value_mappings:[]) as ValueMapping[],colors=(panel.options.series_colors??{}) as Record<string,string>;
  const actualSeries=useMemo(()=>[...new Set(resultFrames(previewResponse?.results??[]).flatMap(({refId,frame})=>frame.rows.map(row=>{const key=String(panel.type==='pie'?panel.options.x:panel.options.series??''),index=frame.columns.findIndex(column=>column.name===key);return (panel.type!=='pie'&&panel.queries.length>1?`${refId} · `:'')+(index>=0?printable(row[index]):String(panel.options.y??'value'));})))].sort(),[previewResponse,panel.options.x,panel.options.series,panel.options.y,panel.type,panel.queries.length,language]);

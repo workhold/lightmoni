@@ -1,3 +1,4 @@
+import { createUUID } from '../shared/uuid';
 import {lazy,Suspense,useEffect,useRef,useState} from 'react';
 import {Alert,Button,Dropdown,Input,Modal,Select,Space,Spin,Table,Tag,Typography} from '../shared/ui';
 import {ReloadOutlined,SearchOutlined} from '@ant-design/icons';
@@ -27,7 +28,7 @@ export default function HostContainersDialog({machine,onClose}:{machine:{id:stri
   try{
    const current=await load(abort.signal);
    if(collect&&current.online&&current.docker_capabilities.includes('docker.inventory')){
-    let job=await api<Job>(`/ops/machines/${encodeURIComponent(machine.id)}/docker-jobs`,{method:'POST',signal:abort.signal,body:JSON.stringify({operation:'inventory',request_id:crypto.randomUUID()})});
+    let job=await api<Job>(`/ops/machines/${encodeURIComponent(machine.id)}/docker-jobs`,{method:'POST',signal:abort.signal,body:JSON.stringify({operation:'inventory',request_id:createUUID()})});
     const deadline=Date.now()+125000;
     while(!['succeeded','failed','cancelled','unknown'].includes(job.state)&&Date.now()<deadline){
      await new Promise<void>(resolve=>{const finish=()=>{clearTimeout(timer);abort.signal.removeEventListener('abort',finish);resolve()},timer=setTimeout(finish,1500);abort.signal.addEventListener('abort',finish,{once:true});if(abort.signal.aborted)finish()});
