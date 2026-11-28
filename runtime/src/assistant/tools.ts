@@ -340,6 +340,33 @@ export function monitoringTools(
         },
       },
       {
+        name: "propose_service_target_repair",
+        description: "Prepare an administrator review for a wrong registered Systemd Unit or release directory confirmed by a fresh failed host preflight. Use the observed preflight ID and an exact value supplied by the administrator or recorded in a verified successful deployment for this same target. It does not apply the change or run a host command. One approval saves the target configuration and queues its native signed read-only verification.",
+        effect: "draft",
+        schema: obj({ service_id: string, target_id: string, preflight_id: string, unit: { ...string, maxLength: 128 }, release_directory: { ...string, maxLength: 1024 } }, ["service_id", "target_id", "preflight_id"]),
+        execute: async (input, _signal, user) => {
+          if (user?.role !== "admin") throw Error("administrator required");
+          object(input, ["service_id", "target_id", "preflight_id", "unit", "release_directory"], ["service_id", "target_id", "preflight_id"]);
+          if (input.unit === undefined && input.release_directory === undefined) throw Error("missing corrected target configuration");
+          return deployments.assistantProposeTargetRepair({
+            service_id: text(input.service_id), target_id: text(input.target_id), preflight_id: text(input.preflight_id),
+            ...(input.unit === undefined ? {} : { unit: text(input.unit) }),
+            ...(input.release_directory === undefined ? {} : { release_directory: text(input.release_directory) }),
+          }, user.id);
+        },
+      },
+      {
+        name: "get_service_target_repair",
+        description: "Read the saved target repair and exact follow-up host preflight by repair ID. A saved configuration, queued preflight, or old result does not establish current readiness. Requires a completed current verification with ready=true before preparing deployment.",
+        effect: "read",
+        schema: obj({ repair_id: string }, ["repair_id"]),
+        execute: async (input, _signal, user) => {
+          if (user?.role !== "admin") throw Error("administrator required");
+          object(input, ["repair_id"], ["repair_id"]);
+          return deployments.assistantTargetRepair(text(input.repair_id), user.id);
+        },
+      },
+      {
         name: "propose_service_deployment",
         description: "Create an approval-ready deployment plan for an existing service target and ready release. It does not install an Agent, run SSH, execute shell, or start a service.",
         effect: "draft",

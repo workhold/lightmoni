@@ -42,16 +42,19 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
     const data = await response.json();
     return { status: response.status, data };
   };
-  const completePreflight = async (serviceIDValue: string, targetIDValue: string, currentVersion: string) => {
-    const queued = await request(`/api/v1/services/${serviceIDValue}/targets/${targetIDValue}/preflight`, "POST", { confirm: true });
-    assert.equal(queued.status, 202);
+  const completeQueuedPreflight = (currentVersion: string, override: { ready: false; unit_exists: false; entrypoint_matches: false } | undefined) => {
     const job = jobs.claim("agent-1", ["systemd.probe"]);
     assert.ok(job);
     jobs.event("agent-1", job!.id, { lease_id: job!.lease_id, sequence: 1, phase: "accepted", summary: "accepted" });
     jobs.event("agent-1", job!.id, { lease_id: job!.lease_id, sequence: 2, phase: "preflighting", summary: "preflight" });
     const action = job!.actions[0];
-    jobs.result("agent-1", job!.id, { lease_id: job!.lease_id, state: "succeeded", summary: "preflight complete", snapshot: { health: { healthy: true }, preflight: { provider: "systemd", ready: true, systemd_available: true, unit_exists: true, active_state: "active", enabled: true, unit_file_state: "enabled", filesystem_check_supported: true, release_directory_exists: true, release_directory_writable: true, entrypoint_matches: true, current_pointer_valid: true, current_version: currentVersion, observed_at: clock.toISOString(), preflight_id: action.preflightID, target_revision: action.targetRevision } } });
+    jobs.result("agent-1", job!.id, { lease_id: job!.lease_id, state: "succeeded", summary: "preflight complete", snapshot: { health: { healthy: true }, preflight: { provider: "systemd", ready: true, systemd_available: true, unit_exists: true, active_state: "active", enabled: true, unit_file_state: "enabled", filesystem_check_supported: true, release_directory_exists: true, release_directory_writable: true, entrypoint_matches: true, current_pointer_valid: true, current_version: currentVersion, observed_at: clock.toISOString(), preflight_id: action.preflightID, target_revision: action.targetRevision, ...override } } });
     return job!;
+  };
+  const completePreflight = async (serviceIDValue: string, targetIDValue: string, currentVersion: string, override?: Parameters<typeof completeQueuedPreflight>[1]) => {
+    const queued = await request(`/api/v1/services/${serviceIDValue}/targets/${targetIDValue}/preflight`, "POST", { confirm: true });
+    assert.equal(queued.status, 202);
+    return completeQueuedPreflight(currentVersion, override);
   };
   t.after(() => { server.close(); db.close(); });
   const created = await request("/api/v1/services", "POST", { name: "checkout", description: "Checkout API" });
@@ -100,6 +103,56 @@ test("service inventory creates an approval-ready deployment plan", async (t) =>
   assert.deepEqual(assistantResult, { ...scope, review_url: `/services?service=${serviceID}`, preflight: preflightView.data });
   assert.deepEqual(await checkTarget.execute(scope, signal, user), assistantResult);
   assert.equal(db.get<{ count: number }>("SELECT count(*) AS count FROM service_target_preflights WHERE target_id=?", target.data.id)?.count, 1);
+
+  await t.test("confirming an assistant repair saves only the reviewed config and queues a single native verification", async () => {
+    const service = await request("/api/v1/services", "POST", { name: "repair-demo" });
+    const directory = "/opt/lightmoni/services/repair";
+    const target = await request(`/api/v1/services/${service.data.id}/targets`, "POST", {
+      machine_id: machineID, config: { unit: "missing.service", release_directory: directory },
+    });
+    const targetList = `/api/v1/services/${service.data.id}/targets`;
+    const targetScope = { service_id: service.data.id, target_id: target.data.id };
+    const missingUnit = { ready: false, unit_exists: false, entrypoint_matches: false } as const;
+    const broken = await completePreflight(service.data.id, target.data.id, "", missingUnit);
+    const propose = monitoringTools(deps, { deployments: store }).find(tool => tool.name === "propose_service_target_repair")!;
+    const draftInput = { ...targetScope, preflight_id: broken.actions[0].preflightID, unit: "correct.service" };
+    await assert.rejects(propose.execute(draftInput, signal, { ...user, role: "member" }), /administrator required/);
+    await assert.rejects(propose.execute({ ...draftInput, unit: "correct.service; id" }, signal, user), /invalid systemd unit/);
+    await assert.rejects(propose.execute({ ...scope, preflight_id: preflightView.data.id, unit: "new.service" }, signal, user), /not_current/);
+    const draft = await propose.execute(draftInput, signal, user);
+    assert.equal(draft.status, "awaiting_approval");
+    assert.deepEqual(draft.after, { unit: "correct.service", release_directory: directory });
+    assert.equal((await propose.execute(draftInput, signal, user)).id, draft.id);
+    assert.throws(() => store.assistantTargetRepair(draft.id, "another-admin"), /not_found/);
+    const repairPath = `/api/v1/service-target-repairs/${draft.id}`;
+    assert.equal((await request(repairPath + "/apply", "POST", { confirm: false })).status, 400);
+    assert.equal((await request(repairPath + "/apply", "POST", { confirm: true, expected_revision: "other" })).status, 409);
+
+    const replacement = await completePreflight(service.data.id, target.data.id, "", missingUnit);
+    assert.equal((await request(repairPath)).data.status, "stale");
+    assert.equal((await request(repairPath + "/apply", "POST", { confirm: true, expected_revision: draft.target_revision })).status, 409);
+    const current = await propose.execute({ ...draftInput, preflight_id: replacement.actions[0].preflightID }, signal, user);
+    const apply = () => request(`/api/v1/service-target-repairs/${current.id}/apply`, "POST", { confirm: true, expected_revision: current.target_revision });
+    db.run("UPDATE agents SET last_seen=? WHERE id=?", "2026-10-20T00:00:00Z", "agent-1");
+    assert.equal((await apply()).data.error, "agent_not_ready");
+    assert.equal((await request(targetList)).data[0].config.unit, "missing.service");
+    db.run("UPDATE agents SET last_seen=? WHERE id=?", "2026-10-20T23:59:00Z", "agent-1");
+    const [first, retry] = await Promise.all([apply(), apply()]);
+    assert.equal(first.status, 200);
+    assert.deepEqual(first.data, retry.data);
+    assert.equal(first.data.status, "applied");
+    assert.equal(first.data.verification.status, "queued");
+    assert.equal(first.data.verification.ready, false);
+    assert.deepEqual((await request(targetList)).data[0].config, current.after);
+    const verified = completeQueuedPreflight("v1", undefined);
+    assert.equal(verified.actions[0].unit, "correct.service");
+    assert.equal(verified.actions[0].preflightID, first.data.verification.id);
+    const receipt = store.assistantTargetRepair(current.id, user.id);
+    assert.equal(receipt.verification?.ready, true);
+    assert.equal(receipt.verification?.current, true);
+    assert.equal(db.get<{ count: number }>("SELECT count(*) AS count FROM service_target_preflights WHERE target_id=?", target.data.id)?.count, 3);
+  });
+
   const previousRelease = await request(`/api/v1/services/${serviceID}/releases`, "POST", { version: "v1", source_type: "artifact", source_ref: "git:0123456789abcdef" });
   assert.equal(previousRelease.status, 201);
   db.run("UPDATE releases SET status='ready',artifact_digest=?,artifact_size=1,artifact_format='lightmoni-release-v1.tar.gz',manifest_json=? WHERE id=?", "b".repeat(64), JSON.stringify({ schema_version: 1, service_id: serviceID, version: "v1", architecture: "any", entrypoint: "run" }), previousRelease.data.id);

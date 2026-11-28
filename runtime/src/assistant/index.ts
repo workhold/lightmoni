@@ -605,6 +605,8 @@ export function registerAssistant(
           return options.machines.agentUpdates.assistantGet(value.machine_id, value.id).status === "awaiting_approval";
         if (event.data.tool === "propose_service_deployment" && options.deployments && typeof proposalID === "string")
           return options.deployments.assistantDeployment(proposalID).status === "awaiting_approval";
+        if (event.data.tool === "propose_service_target_repair" && options.deployments && typeof proposalID === "string")
+          return options.deployments.assistantTargetRepair(proposalID, ctx.user.id).status === "awaiting_approval";
         if (event.data.tool === "propose_operations_action" && options.operations && typeof proposalID === "string") {
           const run = options.operations.getRun(proposalID);
           return run.state === "awaiting_approval" && Date.parse(run.expires_at) > deps.now().getTime();
