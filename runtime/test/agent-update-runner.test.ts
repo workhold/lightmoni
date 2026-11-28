@@ -127,9 +127,9 @@ function fixture(t: any, options: { legacy?: boolean; failTarget?: boolean; fail
       }
       if (args[0] === "status") {
         const current = fs.realpathSync(p("opt/lightmoni-agent/current"));
-        const meta = maintenance.metadata(current);
+        const { arch, ...release } = maintenance.metadata(current);
         const config=JSON.parse(fs.readFileSync(p('etc/lightmoni-agent/config.json'),'utf8'));
-        return JSON.stringify({ agent_id: "fixture-agent", runtime:{uid:19999,gid:19998,mode:config.runtime_mode||'user',permission_generation:config.permission_generation||1}, ...(options.legacy && current === old ? {} : { boot_id: boot, release: meta }) });
+        return JSON.stringify({ agent_id: "fixture-agent", arch, runtime:{uid:19999,gid:19998,mode:config.runtime_mode||'user',permission_generation:config.permission_generation||1}, ...(options.legacy && current === old ? {} : { boot_id: boot, release }) });
       }
       if(args[0]==='managed-status'||args[0]==='helper-status')return JSON.stringify({executor_id:'signed-identity',install_generation:3,permission_generation:JSON.parse(fs.readFileSync(p('etc/lightmoni-agent/config.json'),'utf8')).permission_generation??1,fenced:null,pending_results:0,ordinary_task_identity:{account:'lightmoni-agent',uid:19999,gid:19998},ordinary_task_runner:{active:false,state:'idle'}});
       return "configuration valid";
@@ -800,6 +800,16 @@ test('explicit recovery archives an interrupted preparing worker, retaining evid
   assert.deepEqual(fs.readFileSync(join(directory,'status-before-recovery.json')),original);assert.deepEqual(fs.readFileSync(join(directory,'bundle.tar.gz')),bundle);assert.equal(fs.readFileSync(join(directory,'worker-claim.json'),'utf8'),'partial original claim');
   assert.equal(f.maintenance.ownsLock(request.operation_id),false);assert.equal(f.calls.some(([file,args])=>file==='systemctl'&&['stop','restart'].includes(args[0])),false);
   const receipt=fs.readFileSync(join(directory,'status.json'));assert.deepEqual(await f.maintenance.recover(input),result);assert.deepEqual(fs.readFileSync(join(directory,'status.json')),receipt);f.preserve();
+});
+
+test('preparing recovery checks the running architecture against the installed release',async t=>{
+  const f=fixture(t,{runtimeMode:'root'}),request=f.request();
+  await f.maintenance.start(request);f.maintenance.save(request.operation_id,{status:'preparing'});stoppedWorker(f);
+  const status=f.maintenance.localStatus.bind(f.maintenance);
+  f.maintenance.localStatus=()=>({...status(),arch:'amd64'});
+  await assert.rejects(f.maintenance.recover(recoveryRequest(f,request)),/recovery_original_unhealthy/);
+  assert.equal(f.maintenance.state(request.operation_id).status,'preparing');
+  assert.equal(f.maintenance.ownsLock(request.operation_id),true);
 });
 
 for(const [name,overrides] of [['active unit',{ActiveState:'active',MainPID:'42'}],['control PID',{ControlPID:'42'}],['queued job',{Job:'12 /org/freedesktop/systemd1/job/12'}]] as const)test('recovery refuses '+name+' without modifying the operation',async t=>{

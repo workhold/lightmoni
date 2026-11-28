@@ -932,7 +932,9 @@ export class AgentMaintenance {
     const local=this.localStatus(),meta=this.metadata(request.previous_path);
     if(local.agent_id!==request.expected_agent_id||!Number.isSafeInteger(local.runtime?.uid)||local.runtime.uid<=0||!Number.isSafeInteger(local.runtime?.gid)||local.runtime.gid<=0
       ||local.runtime.mode!==this.runtimeMode()||local.runtime.permission_generation!==this.runtimeGeneration()
-      ||['version','source_revision','build_id','state_schema','artifact_sha256','arch'].some(key=>local.release?.[key]!==meta[key]))fail('recovery_original_unhealthy');
+      // The running Agent reports arch at the top level of /status.
+      ||local.arch!==meta.arch||meta.arch!==this.arch
+      ||['version','source_revision','build_id','state_schema','artifact_sha256'].some(key=>local.release?.[key]!==meta[key]))fail('recovery_original_unhealthy');
     return {local,helperActive};
   }
   validateRecoverySnapshots(id,request) {
